@@ -1,0 +1,10 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+
+# vault content — 개인 데이터, 별도 동기화(Obsidian/git private 등)
+corpus/
+digest/
+index/
