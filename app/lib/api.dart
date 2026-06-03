@@ -85,6 +85,26 @@ class OracleApi {
         .cast<Map<String, dynamic>>();
   }
 
+  /// 자연어 질의 — backend query 모듈. 답변 + 참조 record_id.
+  Future<QueryResult> query(String question, {int limit = 30}) async {
+    final uri = Uri.parse('$baseUrl/query');
+    final resp = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'question': question, 'limit': limit}),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception('query 실패: ${resp.statusCode} ${resp.body}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    return QueryResult(
+      answer: (data['answer'] as String?) ?? '',
+      referenced:
+          ((data['referenced'] as List?) ?? const []).cast<String>(),
+      alias: data['alias'] as String?,
+    );
+  }
+
   /// 펜딩 thread (X일 무언급) 후보 목록.
   Future<List<Map<String, dynamic>>> getSilentThreads({
     int minDays = 3,

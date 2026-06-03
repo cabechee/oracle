@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -14,6 +16,7 @@ import 'digest_screen.dart';
 import 'index_screen.dart';
 import 'llm_picker.dart';
 import 'models.dart';
+import 'query_screen.dart';
 
 const _kModelKey = 'selected_model';
 
@@ -65,7 +68,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String? _cameraError;
 
   // ── 입력 ───────────────────────────────────────────────────
-  File? _photo;   // 방금 찍은 사진 (null 이면 카메라 프리뷰)
+  File? _photo; // 방금 찍은(또는 갤러리·공유로 받은) 사진
   final _commentCtrl = TextEditingController();
 
   // ── LLM 선택 ───────────────────────────────────────────────
@@ -75,7 +78,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _speechAvailable = false;
   bool _listening = false;
-  String _voiceBase = ''; // 인식 시작 시점의 commentCtrl 텍스트(추가용)
+  String _voiceBase = '';
+
+  // ── 갤러리·외부 공유 인텐트 ────────────────────────────────
+  final ImagePicker _picker = ImagePicker();
+  StreamSubscription<List<SharedMediaFile>>? _shareSub;
+
+  // ── 다이제스트 미리보기 카드 (홈 상단) ─────────────────────
+  DigestEntry? _latestDigest;
 
   @override
   void initState() {
@@ -83,8 +93,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _initCamera();
     _initSpeech();
+    _initShareListener();
     _loadSelectedModel();
     _load(initial: true);
+    _loadLatestDigest();
     _scroll.addListener(_onScroll);
   }
 
@@ -94,12 +106,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _camera?.dispose();
     _scroll.dispose();
     _commentCtrl.dispose();
+    _shareSub?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Android는 백그라운드 진입 시 카메라 자원 회수 — resume 시 재초기화.
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       _camera?.dispose();
@@ -107,10 +119,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (mounted) setState(() => _cameraReady = false);
     } else if (state == AppLifecycleState.resumed) {
       if (!_cameraReady) _initCamera();
+      _loadLatestDigest(); // resume 시 자정 새 다이제스트 확인
     }
   }
 
-  // ── 카메라 초기화 ─────────────────────────────────────────
+  // ── 카메라 ───────────────────────────────────────────────
   Future<void> _initCamera() async {
     try {
       var status = await Permission.camera.status;
@@ -123,7 +136,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         }
         return;
       }
-
       final cams = await availableCameras();
       if (cams.isEmpty) {
         if (mounted) setState(() => _cameraError = '카메라를 찾을 수 없음');
@@ -133,11 +145,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         (c) => c.lensDirection == CameraLensDirection.back,
         orElse: () => cams.first,
       );
-      final ctrl = CameraController(
-        back,
-        ResolutionPreset.high,
-        enableAudio: false,
-      );
+      final ctrl = CameraController(back, ResolutionPreset.high,
+          enableAudio: false);
       await ctrl.initialize();
       if (!mounted) {
         await ctrl.dispose();
@@ -166,6 +175,79 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _clearPhoto() => setState(() => _photo = null);
 
+  // ── 갤러리에서 사진 선택 ──────────────────────────────────
+  Future<void> _pickFromGallery() async {
+    try {
+      final x = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 2048,
+      );
+      if (x != null && mounted) setState(() => _photo = File(x.path));
+    } catch (e) {
+      _toast('갤러리 실패: $e');
+    }
+  }
+
+  // ── 공유 인텐트 — 외부 앱에서 Oracle로 던지기 ─────────────
+  Future<void> _initShareListener() async {
+    try {
+      _shareSub = ReceiveSharingIntent.instance.getMediaStream().listen(
+        _handleSharedMedia,
+        onError: (_) {},
+      );
+      final initial =
+          await ReceiveSharingIntent.instance.getInitialMedia();
+      if (initial.isNotEmpty) {
+        _handleSharedMedia(initial);
+        ReceiveSharingIntent.instance.reset();
+      }
+    } catch (_) {
+      // 공유 인텐트 실패는 silent
+    }
+  }
+
+  void _handleSharedMedia(List<SharedMediaFile> files) {
+    if (!mounted || files.isEmpty) return;
+    File? firstImage;
+    final textParts = <String>[];
+    for (final f in files) {
+      switch (f.type) {
+        case SharedMediaType.image:
+          firstImage ??= File(f.path);
+          break;
+        case SharedMediaType.text:
+        case SharedMediaType.url:
+          textParts.add(f.path);
+          break;
+        case SharedMediaType.video:
+        case SharedMediaType.file:
+          break;
+      }
+    }
+    setState(() {
+      if (firstImage != null) _photo = firstImage;
+      if (textParts.isNotEmpty) {
+        final joined = textParts.join('\n');
+        _commentCtrl.text = _commentCtrl.text.isEmpty
+            ? joined
+            : '${_commentCtrl.text}\n$joined';
+      }
+    });
+    _toast('공유 받음 — 검토 후 전송');
+  }
+
+  // ── 다이제스트 미리보기 fetch ─────────────────────────────
+  Future<void> _loadLatestDigest() async {
+    try {
+      final list = await _api.listDigests();
+      if (!mounted) return;
+      setState(() => _latestDigest = list.isNotEmpty ? list.first : null);
+    } catch (_) {
+      // 미리보기 fetch 실패는 silent
+    }
+  }
+
   // ── 음성 인식 ─────────────────────────────────────────────
   Future<void> _initSpeech() async {
     try {
@@ -174,9 +256,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         status = await Permission.microphone.request();
       }
       if (!status.isGranted) return;
-
       _speechAvailable = await _speech.initialize(
-        onError: (e) {
+        onError: (_) {
           if (mounted) setState(() => _listening = false);
         },
         onStatus: (s) {
@@ -186,9 +267,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         },
       );
       if (mounted) setState(() {});
-    } catch (_) {
-      // 초기화 실패는 조용히 — 마이크 버튼이 비활성 상태로 남음
-    }
+    } catch (_) {}
   }
 
   Future<void> _toggleVoice() async {
@@ -201,7 +280,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (mounted) setState(() => _listening = false);
       return;
     }
-    // 기존 텍스트에 이어붙이기 위해 시작점 저장
     _voiceBase = _commentCtrl.text;
     if (_voiceBase.isNotEmpty && !_voiceBase.endsWith(' ')) {
       _voiceBase += ' ';
@@ -217,7 +295,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         pauseFor: const Duration(seconds: 3),
       ),
       onResult: (r) {
-        if (!mounted || !_listening) return;   // 종료 후 호출되는 콜백 무시
+        if (!mounted || !_listening) return;
         final merged = _voiceBase + r.recognizedWords;
         setState(() {
           _commentCtrl.text = merged;
@@ -231,8 +309,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   // ── 전송 / pending ─────────────────────────────────────────
   Future<void> _submit() async {
-    // STT가 listening 중이면 먼저 정지 + base reset — 안 그러면
-    // clear() 직후 onResult가 한 번 더 호출되며 텍스트가 재set됨.
     if (_listening) {
       await _speech.cancel();
       if (mounted) setState(() => _listening = false);
@@ -385,14 +461,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           ),
           IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: '검색·질의 (자연어)',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => QueryScreen(api: _api)),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.travel_explore_outlined),
             tooltip: '상위 인덱스 + 펜딩 환기',
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => IndexScreen(api: _api),
-                ),
+                MaterialPageRoute(builder: (_) => IndexScreen(api: _api)),
               );
             },
           ),
@@ -402,9 +486,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => DigestScreen(api: _api),
-                ),
+                MaterialPageRoute(builder: (_) => DigestScreen(api: _api)),
               );
             },
           ),
@@ -417,14 +499,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 _hasMore = true;
               });
               await _load(initial: true);
+              await _loadLatestDigest();
             },
           ),
         ],
       ),
       body: SafeArea(
-        top: false, // AppBar가 top inset 처리
+        top: false,
         child: LayoutBuilder(builder: (ctx, constraints) {
-          // 폴드 펼친 화면 등 가로 큰 화면이면 좌우 분할.
           final isWide = constraints.maxWidth >= 800;
           if (isWide) {
             return Row(
@@ -432,21 +514,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 Expanded(flex: 6, child: _buildCameraSection(constraints)),
                 const VerticalDivider(width: 1),
                 Expanded(
-                    flex: 5,
-                    child: Column(
-                      children: [
-                        _buildInputBar(),
-                        Expanded(child: _buildChatList()),
-                      ],
-                    )),
+                  flex: 5,
+                  child: Column(
+                    children: [
+                      _buildInputBar(),
+                      Expanded(child: _buildChatList()),
+                    ],
+                  ),
+                ),
               ],
             );
           }
           return Column(
             children: [
               SizedBox(
-                  height: constraints.maxHeight * 5 / 9,
-                  child: _buildCameraSection(constraints)),
+                height: constraints.maxHeight * 5 / 9,
+                child: _buildCameraSection(constraints),
+              ),
               _buildInputBar(),
               Expanded(child: _buildChatList()),
             ],
@@ -504,12 +588,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           IconButton(
             icon: Icon(
               _listening ? Icons.mic : Icons.mic_none_outlined,
-              color: _listening
-                  ? Theme.of(context).colorScheme.error
-                  : null,
+              color: _listening ? Theme.of(context).colorScheme.error : null,
             ),
             tooltip: _listening ? '인식 중 — 탭해서 정지' : '음성 코멘트',
             onPressed: _speechAvailable ? _toggleVoice : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.photo_library_outlined),
+            tooltip: '갤러리에서 사진',
+            onPressed: _pickFromGallery,
           ),
           Expanded(
             child: TextField(
@@ -538,20 +625,37 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildChatList() {
+    final showDigestCard = _latestDigest != null;
+    final total =
+        _records.length + _pendings.length + (showDigestCard ? 1 : 0);
     return ListView.builder(
       controller: _scroll,
       reverse: true,
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _records.length + _pendings.length,
+      itemCount: total,
       itemBuilder: (ctx, i) {
-        if (i < _pendings.length) {
-          final p = _pendings[i];
+        // reverse:true 이므로 큰 i가 화면 위. 카드는 가장 위.
+        if (showDigestCard && i == total - 1) {
+          return _DigestPreviewCard(
+            api: _api,
+            entry: _latestDigest!,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => DigestScreen(api: _api)),
+              );
+            },
+          );
+        }
+        final idx0 = i; // 0..pendings+records-1
+        if (idx0 < _pendings.length) {
+          final p = _pendings[idx0];
           return GestureDetector(
             onTap: () => _cancelPending(p),
             child: _PendingBubble(comment: p.comment, photo: p.photo),
           );
         }
-        final idx = i - _pendings.length;
+        final idx = idx0 - _pendings.length;
         return _RecordBubble(
           record: _records[idx],
           api: _api,
@@ -604,7 +708,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
     }
-    return const Center(child: CircularProgressIndicator(color: Colors.white));
+    return const Center(
+        child: CircularProgressIndicator(color: Colors.white));
   }
 
   Widget _shutterButton() {
@@ -625,6 +730,93 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               shape: BoxShape.circle,
               color: enabled ? Colors.white : Colors.white38,
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── 다이제스트 미리보기 카드 (홈 채팅 상단) ──────────────────
+
+class _DigestPreviewCard extends StatefulWidget {
+  final OracleApi api;
+  final DigestEntry entry;
+  final VoidCallback onTap;
+  const _DigestPreviewCard({
+    required this.api,
+    required this.entry,
+    required this.onTap,
+  });
+  @override
+  State<_DigestPreviewCard> createState() => _DigestPreviewCardState();
+}
+
+class _DigestPreviewCardState extends State<_DigestPreviewCard> {
+  String? _preview;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final body = await widget.api.getDigest(widget.entry.date);
+      if (!mounted) return;
+      final lines = body
+          .split('\n')
+          .where((l) => l.trim().isNotEmpty && !l.startsWith('#'))
+          .toList();
+      final preview = lines.take(2).join(' ').trim();
+      setState(() => _preview = preview.isEmpty ? '(빈 다이제스트)' : preview);
+    } catch (_) {
+      if (mounted) setState(() => _preview = '(미리보기 실패)');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: cs.secondaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.auto_stories, color: cs.onSecondaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '📓 ${widget.entry.date} 다이제스트',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: cs.onSecondaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _preview ?? '(불러오는 중...)',
+                      style: TextStyle(color: cs.onSecondaryContainer),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: cs.onSecondaryContainer),
+            ],
           ),
         ),
       ),
@@ -739,23 +931,24 @@ class _RecordBubble extends StatelessWidget {
                             .surfaceContainerHighest,
                         child: const Center(child: Text('📷')),
                       ),
-                      loadingBuilder: (ctx, child, progress) => progress == null
-                          ? child
-                          : Container(
-                              width: 160,
-                              height: 160,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerHighest,
-                              child: const Center(
-                                child: SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
+                      loadingBuilder: (ctx, child, progress) =>
+                          progress == null
+                              ? child
+                              : Container(
+                                  width: 160,
+                                  height: 160,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest,
+                                  child: const Center(
+                                    child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
                     ),
                   );
                 }).toList(),
@@ -777,7 +970,9 @@ class _RecordBubble extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: MarkdownBody(

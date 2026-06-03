@@ -12,6 +12,7 @@ import ingest as ingest_mod
 import nest_client
 import digest as digest_mod
 import threads as threads_mod
+import query as query_mod
 from config import VAULT_DIR
 
 
@@ -162,6 +163,24 @@ def ep_threads_get(thread_id: int):
     if not t:
         raise HTTPException(404, "not found")
     return {**t, "records": threads_mod.list_thread_records(thread_id)}
+
+
+# ── 자연어 검색·질의 ────────────────────────────────────────────
+
+class QueryReq(BaseModel):
+    question: str
+    limit: int = 30
+
+
+@router.post("/query")
+def ep_query(body: QueryReq):
+    """자연어 질문 → LLM이 vault·records·인덱스 보고 답변 + 참조 record_id."""
+    if not body.question.strip():
+        raise HTTPException(400, "question 비어있음")
+    try:
+        return query_mod.query(body.question.strip(), body.limit)
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # ── Layer 3: 상위 인덱스 ────────────────────────────────────────

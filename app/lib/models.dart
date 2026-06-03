@@ -100,6 +100,19 @@ class Council {
       );
 }
 
+/// 자연어 질의 응답 (POST /query)
+class QueryResult {
+  final String answer;
+  final List<String> referenced;   // record_id 배열
+  final String? alias;             // 사용된 LLM alias
+  QueryResult({
+    required this.answer,
+    required this.referenced,
+    this.alias,
+  });
+}
+
+
 /// 다이제스트 목록 항목 (GET /digest/list)
 class DigestEntry {
   final String date;     // YYYY-MM-DD
