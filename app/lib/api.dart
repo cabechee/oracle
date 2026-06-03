@@ -164,6 +164,19 @@ class OracleApi {
     return '$baseUrl/photos/$relOrAbs';
   }
 
+  /// record user_comment 수정 (vault 평문은 변경 없음, Mongo만 갱신).
+  Future<void> updateComment(String recordId, String newComment) async {
+    final uri = Uri.parse('$baseUrl/records/$recordId');
+    final resp = await http.patch(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_comment': newComment}),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception('record 수정 실패: ${resp.statusCode} ${resp.body}');
+    }
+  }
+
   Future<void> setReaction(String recordId, String reaction) async {
     final uri = Uri.parse('$baseUrl/records/$recordId/reaction');
     final resp = await http.post(

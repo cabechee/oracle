@@ -206,6 +206,16 @@ def ingest(
     }
 
 
+def update_comment(record_id: str, new_comment: str) -> bool:
+    """잘못 보낸 record의 user_comment 수정. vault 평문은 append-only 원칙대로 그대로 두고
+    MongoDB(UI source)만 갱신."""
+    res = db.records().update_one(
+        {"_id": record_id},
+        {"$set": {"user_comment": new_comment}},
+    )
+    return res.matched_count > 0
+
+
 def set_reaction(record_id: str, reaction: str) -> bool:
     """유저 이모지 피드백 (interesting | useful | skip 등 자유)."""
     res = db.records().update_one(

@@ -75,6 +75,23 @@ def ep_reaction(record_id: str, body: ReactionBody):
     return {"ok": True}
 
 
+class RecordPatch(BaseModel):
+    user_comment: Optional[str] = None
+
+
+@router.patch("/records/{record_id}")
+def ep_patch_record(record_id: str, body: RecordPatch):
+    """record 부분 수정. 현재는 user_comment 만 지원 (잘못 보낸 거 정정).
+    vault 평문은 append-only — Mongo만 갱신."""
+    changed = False
+    if body.user_comment is not None:
+        if ingest_mod.update_comment(record_id, body.user_comment):
+            changed = True
+        else:
+            raise HTTPException(404, "record not found")
+    return {"ok": True, "changed": changed}
+
+
 @router.get("/records")
 def ep_list_records(limit: int = 50, offset: int = 0):
     """최근 Record 목록 (채팅 무한스크롤)."""

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -16,12 +17,13 @@ import 'digest_screen.dart';
 import 'index_screen.dart';
 import 'llm_picker.dart';
 import 'models.dart';
+import 'onboarding_screen.dart';
 import 'query_screen.dart';
 
 const _kModelKey = 'selected_model';
+const _kLastSeenDigestKey = 'last_seen_digest_date';
 
 /// 진행 중인 ingest 단위. 동시에 여러 개 가능 (fire-and-forget).
-/// pending bubble 탭하면 _cancelPending — UI에서 제거.
 class _Pending {
   final String id;
   final String? comment;
@@ -68,7 +70,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String? _cameraError;
 
   // ── 입력 ───────────────────────────────────────────────────
-  File? _photo; // 방금 찍은(또는 갤러리·공유로 받은) 사진
+  File? _photo;
   final _commentCtrl = TextEditingController();
 
   // ── LLM 선택 ───────────────────────────────────────────────
@@ -80,12 +82,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _listening = false;
   String _voiceBase = '';
 
-  // ── 갤러리·외부 공유 인텐트 ────────────────────────────────
+  // ── 갤러리·외부 공유 ───────────────────────────────────────
   final ImagePicker _picker = ImagePicker();
   StreamSubscription<List<SharedMediaFile>>? _shareSub;
 
-  // ── 다이제스트 미리보기 카드 (홈 상단) ─────────────────────
+  // ── 다이제스트 미리보기 ────────────────────────────────────
   DigestEntry? _latestDigest;
+
+  // ── 푸시 알림 ──────────────────────────────────────────────
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
@@ -94,10 +100,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _initCamera();
     _initSpeech();
     _initShareListener();
+    _initNotifications();
     _loadSelectedModel();
     _load(initial: true);
     _loadLatestDigest();
     _scroll.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowOnboarding());
   }
 
   @override
@@ -119,8 +127,56 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (mounted) setState(() => _cameraReady = false);
     } else if (state == AppLifecycleState.resumed) {
       if (!_cameraReady) _initCamera();
-      _loadLatestDigest(); // resume 시 자정 새 다이제스트 확인
+      _loadLatestDigest();
     }
+  }
+
+  // ── 푸시 알림 init + 새 다이제스트 알림 ────────────────────
+  Future<void> _initNotifications() async {
+    try {
+      const init = InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      );
+      await _notifications.initialize(init);
+      // Android 13+ 권한 요청 (없으면 silent)
+      await _notifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    } catch (_) {}
+  }
+
+  Future<void> _notifyNewDigest(String date) async {
+    try {
+      const details = NotificationDetails(
+        android: AndroidNotificationDetails(
+          'oracle_digest',
+          '다이제스트',
+          channelDescription: '자정 다이제스트 도착 알림',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      );
+      await _notifications.show(
+        0,
+        '📓 새 다이제스트',
+        '$date — 탭해서 보기',
+        details,
+      );
+    } catch (_) {}
+  }
+
+  // ── 온보딩 라우팅 — 첫 실행 시 한 번 ──────────────────────
+  Future<void> _maybeShowOnboarding() async {
+    final done = await isOnboardingDone();
+    if (done || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => OnboardingScreen(
+          onDone: () => Navigator.of(ctx).pop(),
+        ),
+      ),
+    );
   }
 
   // ── 카메라 ───────────────────────────────────────────────
@@ -189,22 +245,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  // ── 공유 인텐트 — 외부 앱에서 Oracle로 던지기 ─────────────
+  // ── 공유 인텐트 ───────────────────────────────────────────
   Future<void> _initShareListener() async {
     try {
-      _shareSub = ReceiveSharingIntent.instance.getMediaStream().listen(
-        _handleSharedMedia,
-        onError: (_) {},
-      );
+      _shareSub = ReceiveSharingIntent.instance
+          .getMediaStream()
+          .listen(_handleSharedMedia, onError: (_) {});
       final initial =
           await ReceiveSharingIntent.instance.getInitialMedia();
       if (initial.isNotEmpty) {
         _handleSharedMedia(initial);
         ReceiveSharingIntent.instance.reset();
       }
-    } catch (_) {
-      // 공유 인텐트 실패는 silent
-    }
+    } catch (_) {}
   }
 
   void _handleSharedMedia(List<SharedMediaFile> files) {
@@ -237,15 +290,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _toast('공유 받음 — 검토 후 전송');
   }
 
-  // ── 다이제스트 미리보기 fetch ─────────────────────────────
+  // ── 다이제스트 미리보기 + 새 다이제스트 알림 ──────────────
   Future<void> _loadLatestDigest() async {
     try {
       final list = await _api.listDigests();
       if (!mounted) return;
-      setState(() => _latestDigest = list.isNotEmpty ? list.first : null);
-    } catch (_) {
-      // 미리보기 fetch 실패는 silent
-    }
+      final latest = list.isNotEmpty ? list.first : null;
+      setState(() => _latestDigest = latest);
+      if (latest != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final lastSeen = prefs.getString(_kLastSeenDigestKey);
+        if (lastSeen != latest.date) {
+          _notifyNewDigest(latest.date);
+          await prefs.setString(_kLastSeenDigestKey, latest.date);
+        }
+      }
+    } catch (_) {}
   }
 
   // ── 음성 인식 ─────────────────────────────────────────────
@@ -307,7 +367,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  // ── 전송 / pending ─────────────────────────────────────────
+  // ── 전송 ──────────────────────────────────────────────────
   Future<void> _submit() async {
     if (_listening) {
       await _speech.cancel();
@@ -370,18 +430,93 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('아니요'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('아니요')),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('제거'),
-          ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('제거')),
         ],
       ),
     );
     if (ok == true && mounted) {
       setState(() => _pendings.removeWhere((x) => x.id == p.id));
+    }
+  }
+
+  // ── record 편집 (잘못 보낸 거 정정) ──────────────────────
+  Future<void> _editRecord(int idx) async {
+    final ctrl = TextEditingController(text: _records[idx].userComment);
+    final newText = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('코멘트 수정',
+                  style: Theme.of(ctx).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: '코멘트 (비우면 빈 코멘트로 갱신)',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '* vault 정본 평문은 변경되지 않습니다(append-only). UI source(Mongo)만 갱신.',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(ctx).colorScheme.outline,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, null),
+                    child: const Text('취소'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, ctrl.text),
+                    child: const Text('저장'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (newText == null || !mounted) return;
+    try {
+      await _api.updateComment(_records[idx].id, newText);
+      setState(() {
+        _records[idx] = Record(
+          id: _records[idx].id,
+          ts: _records[idx].ts,
+          userComment: newText,
+          imagePaths: _records[idx].imagePaths,
+          vlmCaption: _records[idx].vlmCaption,
+          insight: _records[idx].insight,
+          reaction: _records[idx].reaction,
+        );
+      });
+    } catch (e) {
+      _toast('수정 실패: $e');
     }
   }
 
@@ -634,7 +769,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: total,
       itemBuilder: (ctx, i) {
-        // reverse:true 이므로 큰 i가 화면 위. 카드는 가장 위.
         if (showDigestCard && i == total - 1) {
           return _DigestPreviewCard(
             api: _api,
@@ -647,7 +781,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             },
           );
         }
-        final idx0 = i; // 0..pendings+records-1
+        final idx0 = i;
         if (idx0 < _pendings.length) {
           final p = _pendings[idx0];
           return GestureDetector(
@@ -656,27 +790,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           );
         }
         final idx = idx0 - _pendings.length;
-        return _RecordBubble(
-          record: _records[idx],
-          api: _api,
-          onReact: (emoji) async {
-            try {
-              await _api.setReaction(_records[idx].id, emoji);
-              setState(() {
-                _records[idx] = Record(
-                  id: _records[idx].id,
-                  ts: _records[idx].ts,
-                  userComment: _records[idx].userComment,
-                  imagePaths: _records[idx].imagePaths,
-                  vlmCaption: _records[idx].vlmCaption,
-                  insight: _records[idx].insight,
-                  reaction: emoji,
-                );
-              });
-            } catch (e) {
-              _toast('반응 실패: $e');
-            }
-          },
+        return GestureDetector(
+          onLongPress: () => _editRecord(idx),
+          child: _RecordBubble(
+            record: _records[idx],
+            api: _api,
+            onReact: (emoji) async {
+              try {
+                await _api.setReaction(_records[idx].id, emoji);
+                setState(() {
+                  _records[idx] = Record(
+                    id: _records[idx].id,
+                    ts: _records[idx].ts,
+                    userComment: _records[idx].userComment,
+                    imagePaths: _records[idx].imagePaths,
+                    vlmCaption: _records[idx].vlmCaption,
+                    insight: _records[idx].insight,
+                    reaction: emoji,
+                  );
+                });
+              } catch (e) {
+                _toast('반응 실패: $e');
+              }
+            },
+          ),
         );
       },
     );
@@ -737,7 +874,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-// ── 다이제스트 미리보기 카드 (홈 채팅 상단) ──────────────────
+// ── 다이제스트 미리보기 카드 ──────────────────────────────────
 
 class _DigestPreviewCard extends StatefulWidget {
   final OracleApi api;
