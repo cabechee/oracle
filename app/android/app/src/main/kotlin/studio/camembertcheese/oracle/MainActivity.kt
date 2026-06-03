@@ -1,4 +1,4 @@
-package studio.camembertcheese.app
+package studio.camembertcheese.oracle
 
 import io.flutter.embedding.android.FlutterActivity
 
