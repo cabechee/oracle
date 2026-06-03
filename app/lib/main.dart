@@ -11,6 +11,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import 'api.dart';
 import 'digest_screen.dart';
+import 'index_screen.dart';
 import 'llm_picker.dart';
 import 'models.dart';
 
@@ -384,6 +385,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           ),
           IconButton(
+            icon: const Icon(Icons.travel_explore_outlined),
+            tooltip: '상위 인덱스 + 펜딩 환기',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => IndexScreen(api: _api),
+                ),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.auto_stories_outlined),
             tooltip: '다이제스트 보기',
             onPressed: () {
@@ -410,135 +423,158 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
       body: SafeArea(
         top: false, // AppBar가 top inset 처리
-        child: Column(
+        child: LayoutBuilder(builder: (ctx, constraints) {
+          // 폴드 펼친 화면 등 가로 큰 화면이면 좌우 분할.
+          final isWide = constraints.maxWidth >= 800;
+          if (isWide) {
+            return Row(
+              children: [
+                Expanded(flex: 6, child: _buildCameraSection(constraints)),
+                const VerticalDivider(width: 1),
+                Expanded(
+                    flex: 5,
+                    child: Column(
+                      children: [
+                        _buildInputBar(),
+                        Expanded(child: _buildChatList()),
+                      ],
+                    )),
+              ],
+            );
+          }
+          return Column(
+            children: [
+              SizedBox(
+                  height: constraints.maxHeight * 5 / 9,
+                  child: _buildCameraSection(constraints)),
+              _buildInputBar(),
+              Expanded(child: _buildChatList()),
+            ],
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildCameraSection(BoxConstraints constraints) {
+    return ClipRect(
+      child: Container(
+        color: Colors.black,
+        width: double.infinity,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            // 카메라/사진 — 동적으로 사용 가능 공간의 약 5/9 차지.
-            // ClipRect로 child의 overflow를 시각적으로 차단 (카메라/이미지가 채팅 영역 침범 방지).
-            Expanded(
-              flex: 5,
-              child: ClipRect(
-                child: Container(
-                  color: Colors.black,
-                  width: double.infinity,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _cameraOrPhoto(),
-                      if (_photo != null)
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: Material(
-                            color: Colors.black54,
-                            shape: const CircleBorder(),
-                            child: IconButton(
-                              icon: const Icon(Icons.close,
-                                  color: Colors.white),
-                              onPressed: _clearPhoto,
-                              tooltip: '사진 제거',
-                            ),
-                          ),
-                        ),
-                      Positioned(
-                        bottom: 12,
-                        left: 0,
-                        right: 0,
-                        child: Center(child: _shutterButton()),
-                      ),
-                    ],
+            _cameraOrPhoto(),
+            if (_photo != null)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Material(
+                  color: Colors.black54,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: _clearPhoto,
+                    tooltip: '사진 제거',
                   ),
                 ),
               ),
-            ),
-            // 입력바 (음성 + 텍스트 + 전송)
-            Container(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(color: Theme.of(context).dividerColor),
-                ),
-              ),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      _listening ? Icons.mic : Icons.mic_none_outlined,
-                      color: _listening
-                          ? Theme.of(context).colorScheme.error
-                          : null,
-                    ),
-                    tooltip: _listening ? '인식 중 — 탭해서 정지' : '음성 코멘트',
-                    onPressed: _speechAvailable ? _toggleVoice : null,
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _commentCtrl,
-                      decoration: InputDecoration(
-                        hintText: _listening
-                            ? '듣고 있어요...'
-                            : '코멘트(선택) · 사진 없이 텍스트만 보내도 OK',
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      minLines: 1,
-                      maxLines: 3,
-                      textInputAction: TextInputAction.newline,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    icon: const Icon(Icons.send),
-                    onPressed: _submit,
-                    tooltip: '전송',
-                  ),
-                ],
-              ),
-            ),
-            // 채팅 (큐 + record) — 약 4/9
-            Expanded(
-              flex: 4,
-              child: ListView.builder(
-                controller: _scroll,
-                reverse: true,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: _records.length + _pendings.length,
-                itemBuilder: (ctx, i) {
-                  if (i < _pendings.length) {
-                    final p = _pendings[i];
-                    return GestureDetector(
-                      onTap: () => _cancelPending(p),
-                      child: _PendingBubble(comment: p.comment, photo: p.photo),
-                    );
-                  }
-                  final idx = i - _pendings.length;
-                  return _RecordBubble(
-                  record: _records[idx],
-                  api: _api,
-                  onReact: (emoji) async {
-                    try {
-                      await _api.setReaction(_records[idx].id, emoji);
-                      setState(() {
-                        _records[idx] = Record(
-                          id: _records[idx].id,
-                          ts: _records[idx].ts,
-                          userComment: _records[idx].userComment,
-                          imagePaths: _records[idx].imagePaths,
-                          vlmCaption: _records[idx].vlmCaption,
-                          insight: _records[idx].insight,
-                          reaction: emoji,
-                        );
-                      });
-                    } catch (e) {
-                      _toast('반응 실패: $e');
-                    }
-                    },
-                  );
-                },
-              ),
+            Positioned(
+              bottom: 12,
+              left: 0,
+              right: 0,
+              child: Center(child: _shutterButton()),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildInputBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              _listening ? Icons.mic : Icons.mic_none_outlined,
+              color: _listening
+                  ? Theme.of(context).colorScheme.error
+                  : null,
+            ),
+            tooltip: _listening ? '인식 중 — 탭해서 정지' : '음성 코멘트',
+            onPressed: _speechAvailable ? _toggleVoice : null,
+          ),
+          Expanded(
+            child: TextField(
+              controller: _commentCtrl,
+              decoration: InputDecoration(
+                hintText: _listening
+                    ? '듣고 있어요...'
+                    : '코멘트(선택) · 사진 없이 텍스트만 보내도 OK',
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+              minLines: 1,
+              maxLines: 3,
+              textInputAction: TextInputAction.newline,
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.send),
+            onPressed: _submit,
+            tooltip: '전송',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatList() {
+    return ListView.builder(
+      controller: _scroll,
+      reverse: true,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: _records.length + _pendings.length,
+      itemBuilder: (ctx, i) {
+        if (i < _pendings.length) {
+          final p = _pendings[i];
+          return GestureDetector(
+            onTap: () => _cancelPending(p),
+            child: _PendingBubble(comment: p.comment, photo: p.photo),
+          );
+        }
+        final idx = i - _pendings.length;
+        return _RecordBubble(
+          record: _records[idx],
+          api: _api,
+          onReact: (emoji) async {
+            try {
+              await _api.setReaction(_records[idx].id, emoji);
+              setState(() {
+                _records[idx] = Record(
+                  id: _records[idx].id,
+                  ts: _records[idx].ts,
+                  userComment: _records[idx].userComment,
+                  imagePaths: _records[idx].imagePaths,
+                  vlmCaption: _records[idx].vlmCaption,
+                  insight: _records[idx].insight,
+                  reaction: emoji,
+                );
+              });
+            } catch (e) {
+              _toast('반응 실패: $e');
+            }
+          },
+        );
+      },
     );
   }
 

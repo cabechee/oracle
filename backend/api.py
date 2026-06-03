@@ -164,6 +164,23 @@ def ep_threads_get(thread_id: int):
     return {**t, "records": threads_mod.list_thread_records(thread_id)}
 
 
+# ── Layer 3: 상위 인덱스 ────────────────────────────────────────
+
+@router.get("/index/master")
+def ep_index_master():
+    """vault index/master.md — 사람용 검색 진입점 (자정 배치가 갱신)."""
+    text = digest_mod.read_master_index()
+    if text is None:
+        raise HTTPException(404, "master index 없음 — 자정 배치 한 번 이상 돌아야 생성")
+    return {"text": text}
+
+
+@router.get("/index/meta")
+def ep_index_meta():
+    """MongoDB index_meta 컬렉션 — 월별 통계(가벼운 구조 검색용)."""
+    return {"months": digest_mod.list_index_meta()}
+
+
 # ── Nest 상태 확인 (디버그) ─────────────────────────────────────
 
 @router.get("/nest/health")

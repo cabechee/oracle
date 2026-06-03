@@ -63,6 +63,44 @@ class OracleApi {
     return (data['text'] as String?) ?? '';
   }
 
+  /// 상위 인덱스 vault master.md 본문.
+  Future<String> getMasterIndex() async {
+    final resp = await http.get(Uri.parse('$baseUrl/index/master'));
+    if (resp.statusCode == 404) return '';
+    if (resp.statusCode != 200) {
+      throw Exception('index/master 실패: ${resp.statusCode}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    return (data['text'] as String?) ?? '';
+  }
+
+  /// MongoDB index_meta (월별 가벼운 구조).
+  Future<List<Map<String, dynamic>>> getIndexMeta() async {
+    final resp = await http.get(Uri.parse('$baseUrl/index/meta'));
+    if (resp.statusCode != 200) {
+      throw Exception('index/meta 실패: ${resp.statusCode}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    return ((data['months'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+  }
+
+  /// 펜딩 thread (X일 무언급) 후보 목록.
+  Future<List<Map<String, dynamic>>> getSilentThreads({
+    int minDays = 3,
+    int maxDays = 30,
+  }) async {
+    final uri = Uri.parse(
+        '$baseUrl/threads/silent?min_days=$minDays&max_days=$maxDays');
+    final resp = await http.get(uri);
+    if (resp.statusCode != 200) {
+      throw Exception('silent 실패: ${resp.statusCode}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    return ((data['items'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+  }
+
   /// 자정 배치 수동 트리거 (target_date 안 주면 어제).
   Future<Map<String, dynamic>> runDigest({String? targetDate}) async {
     final qp = targetDate != null ? '?target_date=$targetDate' : '';
