@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>h59.oracle.backend</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chocolat/projects/oracle/backend/.venv/bin/uvicorn</string>
+        <string>main:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8001</string>
+    </array>
+
+    <!-- /opt/homebrew/bin 을 PATH에 넣어야 Nest가 spawn한 CLI 도구들 호출 가능 (oracle은 Nest로 위임이지만 일관성) -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/chocolat/projects/oracle/backend</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/chocolat/data/logs/oracle-backend.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/chocolat/data/logs/oracle-backend.log</string>
+</dict>
+</plist>

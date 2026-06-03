@@ -98,6 +98,42 @@ def images_from_paths(paths: List[str]) -> List[Dict[str, str]]:
     return out
 
 
+def list_models() -> List[Dict[str, Any]]:
+    """Nest에 등록된 모델 alias 목록. 폰 LLM 선택 UI용."""
+    r = _http().get("/api/models")
+    r.raise_for_status()
+    return r.json()
+
+
+def list_councils() -> List[Dict[str, Any]]:
+    """Nest에 등록된 council(다중 모델 합성) alias 목록."""
+    r = _http().get("/api/councils")
+    r.raise_for_status()
+    return r.json()
+
+
+def default_alias(prefer_vision: bool = False) -> Optional[str]:
+    """Nest에 등록된 enabled 모델 중 첫 alias 반환 — 매 호출 시 fresh fetch.
+
+    prefer_vision=True면 vision 지원 모델만 후보. 없으면 None.
+    Nest 도달 실패도 None — 호출자가 에러 처리.
+
+    *동적*: Nest registry에 모델 추가/제거하면 즉시 반영(캐시 없음).
+    """
+    try:
+        models = list_models()
+    except Exception:
+        return None
+    enabled = [m for m in models if m.get("enabled")]
+    if prefer_vision:
+        v = [m for m in enabled if m.get("vision")]
+        if v:
+            return v[0].get("alias")
+    if enabled:
+        return enabled[0].get("alias")
+    return None
+
+
 def health() -> Dict[str, Any]:
     """Nest health (토큰 불필요)."""
     return httpx.get(f"{NEST_BASE_URL}/api/health", timeout=5).json()

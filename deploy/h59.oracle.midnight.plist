@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>h59.oracle.midnight</string>
+
+    <!--
+      매일 00:05 — 어제 하루치 자정 배치 트리거.
+      backend의 POST /digest/run (target_date 안 주면 어제 default).
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/curl</string>
+        <string>-s</string>
+        <string>-X</string>
+        <string>POST</string>
+        <string>--max-time</string>
+        <string>900</string>
+        <string>http://localhost:8001/digest/run</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+
+    <!-- 부팅 시 즉시 실행 X (자정에만) -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/chocolat/data/logs/oracle-midnight.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chocolat/data/logs/oracle-midnight.log</string>
+</dict>
+</plist>

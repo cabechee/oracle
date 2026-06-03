@@ -25,17 +25,19 @@ NEST_TIMEOUT = int(os.getenv("NEST_TIMEOUT", "300"))
 
 
 # ── Task → Nest alias 매핑 ──────────────────────────────────────
-# 디폴트 = claude (Opus max, vision). 사용자가 .env 로 자유 변경.
+# 디폴트 = "" (env override 없으면 빈 값). 빈 값이면 ingest가 Nest에 등록된
+# enabled 모델 중 첫 모델을 자동 선택 — Nest에 모델 추가/제거 즉시 반영.
+# 특정 task에 모델 고정하려면 .env에 ORACLE_VLM=xxx 같이 명시.
 TASK_ALIAS = {
     # Layer 1 (인입 시점, 즉시)
-    "vlm_caption":   os.getenv("ORACLE_VLM",     "claude"),
-    "insight":       os.getenv("ORACLE_INSIGHT", "claude"),
+    "vlm_caption":   os.getenv("ORACLE_VLM",     ""),
+    "insight":       os.getenv("ORACLE_INSIGHT", ""),
     # Layer 3 (자정 배치) — 슬라이스 다음 단계에서 사용
-    "type_classify": os.getenv("ORACLE_TYPE",    "claude"),
-    "thread_judge":  os.getenv("ORACLE_THREAD",  "claude"),
-    "daily_digest":  os.getenv("ORACLE_DIGEST",  "claude"),
-    "index_update":  os.getenv("ORACLE_INDEX",   "claude"),
-    "query":         os.getenv("ORACLE_QUERY",   "claude"),
+    "type_classify": os.getenv("ORACLE_TYPE",    ""),
+    "thread_judge":  os.getenv("ORACLE_THREAD",  ""),
+    "daily_digest":  os.getenv("ORACLE_DIGEST",  ""),
+    "index_update":  os.getenv("ORACLE_INDEX",   ""),
+    "query":         os.getenv("ORACLE_QUERY",   ""),
 }
 
 
@@ -54,4 +56,4 @@ VAULT_DIR = os.getenv("VAULT_DIR", _default_vault)
 
 # ── 서버 ────────────────────────────────────────────────────────
 HOST = os.getenv("ORACLE_HOST", "0.0.0.0")
-PORT = int(os.getenv("ORACLE_PORT", "8765"))   # finder=8000과 겹치지 않게
+PORT = int(os.getenv("ORACLE_PORT", "8001"))   # finder=8000 옆 (8765=claude-dashboard 차지, 회피)

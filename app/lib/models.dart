@@ -44,3 +44,85 @@ class Record {
     );
   }
 }
+
+
+/// Nest 등록 모델 (단일)
+class LlmModel {
+  final String alias;
+  final String name;
+  final String? tier;        // local | cloud
+  final String? provider;    // claude | codex | gemini | openai_compat ...
+  final String? type;        // cli | api
+  final String? effort;      // low/medium/high/xhigh/max
+  final bool vision;
+
+  LlmModel({
+    required this.alias,
+    required this.name,
+    this.tier,
+    this.provider,
+    this.type,
+    this.effort,
+    required this.vision,
+  });
+
+  factory LlmModel.fromJson(Map<String, dynamic> j) => LlmModel(
+        alias: j['alias'] as String,
+        name: (j['name'] as String?) ?? (j['alias'] as String),
+        tier: j['tier'] as String?,
+        provider: j['provider'] as String?,
+        type: j['type'] as String?,
+        effort: j['effort'] as String?,
+        vision: ((j['vision'] as int?) ?? 0) == 1,
+      );
+}
+
+/// Nest council (다중 모델 합성)
+class Council {
+  final String alias;
+  final String name;
+  final List<String> members;
+  final String? chairAlias;
+
+  Council({
+    required this.alias,
+    required this.name,
+    required this.members,
+    this.chairAlias,
+  });
+
+  factory Council.fromJson(Map<String, dynamic> j) => Council(
+        alias: j['alias'] as String,
+        name: (j['name'] as String?) ?? (j['alias'] as String),
+        members:
+            ((j['member_aliases'] as List?)?.cast<String>()) ?? const <String>[],
+        chairAlias: j['chair_alias'] as String?,
+      );
+}
+
+/// 다이제스트 목록 항목 (GET /digest/list)
+class DigestEntry {
+  final String date;     // YYYY-MM-DD
+  final int size;
+  DigestEntry({required this.date, required this.size});
+  factory DigestEntry.fromJson(Map<String, dynamic> j) => DigestEntry(
+        date: j['date'] as String,
+        size: (j['size'] as int?) ?? 0,
+      );
+}
+
+/// /llm/models 응답 통합
+class LlmCatalog {
+  final List<LlmModel> models;
+  final List<Council> councils;
+  LlmCatalog({required this.models, required this.councils});
+
+  factory LlmCatalog.fromJson(Map<String, dynamic> j) => LlmCatalog(
+        models: ((j['models'] as List?) ?? const [])
+            .map((e) => LlmModel.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        councils: ((j['councils'] as List?) ?? const [])
+            .map((e) => Council.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}

@@ -82,6 +82,28 @@ def day_vault_path(ts: datetime) -> str:
     return str(p.relative_to(VAULT_DIR))
 
 
+def to_vault_rel(path: str) -> str:
+    """절대경로/상대경로 어느 것이든 vault 기준 상대경로로 정규화.
+    vault 밖이거나 변환 실패 시 원본 그대로 반환 (legacy 데이터 안전).
+    """
+    if not path:
+        return path
+    try:
+        rel = os.path.relpath(path, VAULT_DIR)
+        if rel.startswith(".."):
+            return path
+        return rel
+    except ValueError:
+        return path
+
+
+def absolute_from_rel(rel_or_abs: str) -> str:
+    """vault-relative 경로를 절대경로로. 이미 절대면 그대로."""
+    if os.path.isabs(rel_or_abs):
+        return rel_or_abs
+    return str((Path(VAULT_DIR) / rel_or_abs).resolve())
+
+
 def read_day(ts: datetime) -> str:
     """그날 vault 파일 전체 본문 (자정 다이제스트 입력용). 없으면 빈 문자열."""
     p = _day_path(ts)

@@ -59,14 +59,14 @@ brew services start mongodb-community
 
 ```bash
 # 사진 + 코멘트
-curl -X POST http://localhost:8765/ingest \
+curl -X POST http://localhost:8001/ingest \
   -F "file=@/abs/photo.jpg" -F "comment=야채 양 보소"
 
 # 텍스트만
-curl -X POST http://localhost:8765/ingest -F "comment=오늘 점심 뭐 먹지"
+curl -X POST http://localhost:8001/ingest -F "comment=오늘 점심 뭐 먹지"
 
 # Nest 도달 여부
-curl http://localhost:8765/nest/health
+curl http://localhost:8001/nest/health
 ```
 
 응답: `{record_id, ts, insight, vlm_caption, vault_path, image_paths}`.
