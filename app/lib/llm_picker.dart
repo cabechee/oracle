@@ -90,6 +90,17 @@ class _LlmPickerSheetState extends State<_LlmPickerSheet> {
                   );
                 }
                 final c = _catalog!;
+                // 로컬 → 클라우드 순서로 정렬 (로컬·프라이버시 강조).
+                // tier null/unknown은 끝에.
+                final sortedModels = [...c.models]..sort((a, b) {
+                    int rank(String? tier) {
+                      if (tier == 'local') return 0;
+                      if (tier == 'cloud') return 1;
+                      return 2;
+                    }
+                    final r = rank(a.tier).compareTo(rank(b.tier));
+                    return r != 0 ? r : a.alias.compareTo(b.alias);
+                  });
                 return ListView(
                   shrinkWrap: true,
                   children: [
@@ -106,8 +117,8 @@ class _LlmPickerSheetState extends State<_LlmPickerSheet> {
                       onTap: () => Navigator.pop(context, ''),
                     ),
                     const Divider(height: 1),
-                    // 개별 모델
-                    for (final m in c.models)
+                    // 개별 모델 — 로컬 먼저 (프라이버시·비용 강조), 그 다음 클라우드
+                    for (final m in sortedModels)
                       ListTile(
                         leading: Icon(
                           m.tier == 'local'
