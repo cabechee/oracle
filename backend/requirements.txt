@@ -4,3 +4,4 @@ python-dotenv
 httpx
 pymongo
 python-multipart
+Pillow

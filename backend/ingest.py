@@ -19,6 +19,43 @@ import db
 from config import TASK_ALIAS
 
 
+def _exif_location(path: str) -> Optional[str]:
+    """이미지 EXIF에서 GPS 좌표(위도,경도) 문자열 추출. 없거나 실패하면 None.
+
+    카메라 직촬 사진에는 GPS EXIF가 있고, 갤러리에서 받은 사진도 원본 EXIF가 있으면 추출 가능.
+    image_picker로 resize된 경우 EXIF가 lose됐을 수 있음 — graceful.
+    """
+    try:
+        from PIL import Image
+        from PIL.ExifTags import TAGS, GPSTAGS
+        with Image.open(path) as img:
+            exif = img._getexif() or {}
+        gps_info: Dict[Any, Any] = {}
+        for tag_id, value in exif.items():
+            if TAGS.get(tag_id) == "GPSInfo" and isinstance(value, dict):
+                gps_info = {GPSTAGS.get(k, k): v for k, v in value.items()}
+                break
+        if not gps_info:
+            return None
+        lat_v = gps_info.get("GPSLatitude")
+        lat_r = gps_info.get("GPSLatitudeRef")
+        lon_v = gps_info.get("GPSLongitude")
+        lon_r = gps_info.get("GPSLongitudeRef")
+        if not (lat_v and lat_r and lon_v and lon_r):
+            return None
+
+        def _deg(triplet, ref) -> float:
+            d, m, s = (float(triplet[0]), float(triplet[1]), float(triplet[2]))
+            r = d + m / 60 + s / 3600
+            return -r if ref in ("S", "W") else r
+
+        lat = _deg(lat_v, lat_r)
+        lon = _deg(lon_v, lon_r)
+        return f"{lat:.6f},{lon:.6f}"
+    except Exception:
+        return None
+
+
 def _resolve_alias(task_key: str, override: Optional[str], prefer_vision: bool) -> Optional[str]:
     """alias 결정 chain — Nest 변경에 동적 반응.
 
@@ -73,6 +110,12 @@ def ingest(
         abs_paths.append(corpus.save_image(ts, 1, image_bytes, image_ext))
     image_paths: List[str] = [corpus.to_vault_rel(p) for p in abs_paths]
 
+    # EXIF GPS — 사진 첫 장에서 추출, prompt + record에 location 힌트로
+    location: Optional[str] = None
+    if abs_paths:
+        location = _exif_location(abs_paths[0])
+    location_hint = f"\n[사진 GPS: {location}]" if location else ""
+
     # 2. VLM 캡션 — 이미지가 있을 때만. alias는 동적 chain으로 결정.
     vlm_caption = ""
     vlm_alias: Optional[str] = None
@@ -83,7 +126,10 @@ def ingest(
             try:
                 r = nest_client.call(
                     alias=vlm_alias,
-                    prompt="이 사진을 풍부하게 묘사해주세요. 보이는 모든 객체·글자·맥락을 한 단락으로.",
+                    prompt=(
+                        "이 사진을 풍부하게 묘사해주세요. 보이는 모든 객체·글자·맥락을 한 단락으로."
+                        + location_hint
+                    ),
                     images=nest_images,
                     system=VLM_SYSTEM,
                 )
@@ -104,7 +150,7 @@ def ingest(
         prompt_parts.append(f"[유저 코멘트]\n{user_comment}")
     if vlm_caption:
         prompt_parts.append(f"[사진 묘사]\n{vlm_caption}")
-    insight_prompt = "\n\n".join(prompt_parts) or "(빈 입력)"
+    insight_prompt = ("\n\n".join(prompt_parts) or "(빈 입력)") + location_hint
 
     if insight_alias:
         try:
@@ -139,6 +185,7 @@ def ingest(
         "vault_path": vault_path,
         "image_paths": image_paths,
         "user_comment": user_comment or "",
+        "location": location,    # "lat,lon" 문자열 또는 None
         "vlm": {"alias": vlm_alias, "caption": vlm_caption} if vlm_alias else None,
         "insight": {"alias": insight_alias, "text": insight_text},
         "reaction": None,
