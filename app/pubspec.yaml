@@ -17,6 +17,8 @@ dependencies:
   camera: ^0.11.0
   permission_handler: ^11.3.1
   speech_to_text: ^7.0.0
+  record: ^5.1.2
+  path_provider: ^2.1.4
   image_picker: ^1.1.2
   receive_sharing_intent: ^1.8.1
   flutter_local_notifications: ^17.2.4

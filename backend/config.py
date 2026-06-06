@@ -32,6 +32,12 @@ TASK_ALIAS = {
     # Layer 1 (인입 시점, 즉시)
     "vlm_caption":   os.getenv("ORACLE_VLM",     ""),
     "insight":       os.getenv("ORACLE_INSIGHT", ""),
+    # 검색 임베딩 (인입 시 record 부착 + 질의 시 질문 벡터화). Nest에 api 모델
+    # (openai|openai_compat)을 'embed' alias로 등록. 빈 값이면 임베딩 비활성 → 최근순 검색.
+    "embed":         os.getenv("ORACLE_EMBED",   ""),
+    # 소리(오디오) 인식 — 인입 시 오디오를 인식하는 모델. 오디오 입력 가능 모델 권장(예: gemini).
+    # 빈 값이면 오디오는 저장만 하고 인식 skip(graceful).
+    "audio":         os.getenv("ORACLE_AUDIO",   ""),
     # Layer 3 (자정 배치) — 슬라이스 다음 단계에서 사용
     "type_classify": os.getenv("ORACLE_TYPE",    ""),
     "thread_judge":  os.getenv("ORACLE_THREAD",  ""),
@@ -39,6 +45,13 @@ TASK_ALIAS = {
     "index_update":  os.getenv("ORACLE_INDEX",   ""),
     "query":         os.getenv("ORACLE_QUERY",   ""),
 }
+
+
+# ── 인사이트 맥락 (메시지 간 연속성) ────────────────────────────
+# insight 생성 시 최근 캡처를 맥락으로 주입 — 시간 윈도우(세션) + 개수 상한(토큰).
+# CONTEXT_MAX=0 이면 맥락 비활성. .env(ORACLE_CONTEXT_MINUTES / ORACLE_CONTEXT_MAX)로 조절.
+CONTEXT_MINUTES = int(os.getenv("ORACLE_CONTEXT_MINUTES", "30"))
+CONTEXT_MAX = int(os.getenv("ORACLE_CONTEXT_MAX", "8"))
 
 
 # ── MongoDB ─────────────────────────────────────────────────────

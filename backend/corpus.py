@@ -33,6 +33,34 @@ def save_image(ts: datetime, idx: int, content: bytes, ext: str = "jpg") -> str:
     return str(p.resolve())
 
 
+def _audio_dir(ts: datetime) -> Path:
+    return Path(VAULT_DIR) / "audio" / f"{ts.year:04d}/{ts.month:02d}"
+
+
+def save_audio(ts: datetime, idx: int, content: bytes, ext: str = "m4a") -> str:
+    """오디오 저장 → 절대경로 반환 (Nest /api/call이 절대경로 요구)."""
+    d = _audio_dir(ts)
+    d.mkdir(parents=True, exist_ok=True)
+    fname = f"{ts.day:02d}-{ts.strftime('%H%M%S')}-{idx}.{ext}"
+    p = d / fname
+    p.write_bytes(content)
+    return str(p.resolve())
+
+
+def _video_dir(ts: datetime) -> Path:
+    return Path(VAULT_DIR) / "video" / f"{ts.year:04d}/{ts.month:02d}"
+
+
+def save_video(ts: datetime, idx: int, content: bytes, ext: str = "mp4") -> str:
+    """영상 저장 → 절대경로 반환."""
+    d = _video_dir(ts)
+    d.mkdir(parents=True, exist_ok=True)
+    fname = f"{ts.day:02d}-{ts.strftime('%H%M%S')}-{idx}.{ext}"
+    p = d / fname
+    p.write_bytes(content)
+    return str(p.resolve())
+
+
 def append_record(
     *,
     ts: datetime,
@@ -41,6 +69,9 @@ def append_record(
     image_paths: List[str],
     vlm_caption: str,
     insight_text: str,
+    audio_paths: List[str] = None,
+    audio_caption: str = "",
+    video_paths: List[str] = None,
 ) -> str:
     """vault 마크다운에 한 Record append. 반환: anchor 문자열(HHMM)."""
     path = _day_path(ts)
@@ -52,18 +83,20 @@ def append_record(
     if is_new:
         parts.append(f"# {ts.strftime('%Y-%m-%d')}\n")
 
-    # 헤더: ## HH:MM  (이미지가 있으면 Obsidian wiki-link로 inline)
+    # 헤더: ## HH:MM  (이미지·오디오가 있으면 Obsidian wiki-link로 inline 임베드)
     parts.append(f"\n## {ts.strftime('%H:%M')}")
-    for img in image_paths:
+    for att in list(image_paths) + list(audio_paths or []) + list(video_paths or []):
         try:
-            rel = os.path.relpath(img, VAULT_DIR)
+            rel = os.path.relpath(att, VAULT_DIR)
         except ValueError:
-            rel = img
+            rel = att
         parts.append(f" ![[{rel}]]")
     parts.append("\n")
 
     if user_comment:
         parts.append(f"**유저**: {user_comment}\n")
+    if audio_caption:
+        parts.append(f"**소리**: {audio_caption}\n")
     if vlm_caption:
         parts.append(f"**VLM**: {vlm_caption}\n")
     if insight_text:

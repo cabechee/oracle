@@ -23,6 +23,10 @@ _MIME_BY_EXT = {
     "jpg": "image/jpeg", "jpeg": "image/jpeg",
     "png": "image/png", "webp": "image/webp",
     "gif": "image/gif", "heic": "image/heic",
+    # 오디오
+    "m4a": "audio/mp4", "mp3": "audio/mpeg", "wav": "audio/wav",
+    "aac": "audio/aac", "ogg": "audio/ogg", "webm": "audio/webm",
+    "flac": "audio/flac",
 }
 
 
@@ -49,6 +53,7 @@ def call(
     prompt: str,
     *,
     images: Optional[List[Dict[str, str]]] = None,
+    audio: Optional[List[Dict[str, str]]] = None,
     system: Optional[str] = None,
     effort: Optional[str] = None,
     expect_json: bool = False,
@@ -56,11 +61,14 @@ def call(
 ) -> Dict[str, Any]:
     """Nest /api/call. 반환: {ok, provider, model, text, duration_ms, ...}.
 
-    images: [{"path": "/abs/path.jpg"}] — Nest가 절대경로 요구.
+    images/audio: [{"b64": "...", "mime": "..."}] 또는 [{"path": "/abs/..."}].
+    오디오 인식은 오디오 입력 가능 모델(예: gemini) alias 로 보낼 것.
     """
     payload: Dict[str, Any] = {"alias": alias, "prompt": prompt}
     if images:
         payload["images"] = images
+    if audio:
+        payload["audio"] = audio
     if system is not None:
         payload["system"] = system
     if effort is not None:
@@ -82,6 +90,30 @@ def call_text(alias: str, prompt: str, **kwargs: Any) -> str:
     return (call(alias, prompt, **kwargs).get("text") or "").strip()
 
 
+def embed(alias: str, inputs, **extra: Any) -> Dict[str, Any]:
+    """Nest /api/embed. inputs: str | list[str].
+
+    반환: {ok, provider, model, embeddings: [[...]], dims, count, duration_ms, ...}.
+    """
+    payload: Dict[str, Any] = {"alias": alias, "input": inputs}
+    payload.update(extra)
+    r = _http().post("/api/embed", json=payload)
+    r.raise_for_status()
+    data = r.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Nest embed 실패: {data}")
+    return data
+
+
+def embed_one(alias: str, text: str, **extra: Any) -> List[float]:
+    """단일 텍스트 → 벡터(list[float])."""
+    data = embed(alias, [text], **extra)
+    vecs = data.get("embeddings") or []
+    if not vecs:
+        raise RuntimeError(f"Nest embed 빈 결과: {data}")
+    return vecs[0]
+
+
 def images_from_paths(paths: List[str]) -> List[Dict[str, str]]:
     """로컬 파일 경로 리스트 → Nest용 base64 이미지 리스트.
 
@@ -92,6 +124,21 @@ def images_from_paths(paths: List[str]) -> List[Dict[str, str]]:
     for p in paths:
         ext = p.rsplit(".", 1)[-1].lower() if "." in p else "jpg"
         mime = _MIME_BY_EXT.get(ext, "image/jpeg")
+        with open(p, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        out.append({"b64": b64, "mime": mime})
+    return out
+
+
+def audio_from_paths(paths: List[str]) -> List[Dict[str, str]]:
+    """로컬 오디오 파일 경로 → Nest용 base64 리스트.
+
+    oracle(bert) ↔ Nest(chocolat) 머신 분리라 path 직접 전달 불가 → 인라인 base64.
+    """
+    out: List[Dict[str, str]] = []
+    for p in paths:
+        ext = p.rsplit(".", 1)[-1].lower() if "." in p else "m4a"
+        mime = _MIME_BY_EXT.get(ext, "audio/mp4")
         with open(p, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("ascii")
         out.append({"b64": b64, "mime": mime})

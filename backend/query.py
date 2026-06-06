@@ -11,6 +11,7 @@ import re
 from typing import Dict, Any, List
 
 import nest_client
+import embedding as embedding_mod
 import db
 import digest as digest_mod
 import threads as threads_mod
@@ -46,9 +47,18 @@ def query(question: str, limit: int = 30) -> Dict[str, Any]:
 
     master = digest_mod.read_master_index() or "(인덱스 아직 생성 안 됨)"
 
-    # 후보 records — 최근 limit건. (차후: 키워드 매칭·임베딩 필터)
+    # 후보 records — 임베딩 의미검색 top-k. 임베딩 불가(alias 미설정/Nest 실패/
+    # 임베딩된 record 없음) 시 최근순 fallback — graceful.
+    hits = embedding_mod.search(question, top_k=limit)
+    if hits:
+        ids = [h[0] for h in hits]
+        by_id = {r["_id"]: r for r in db.records().find({"_id": {"$in": ids}})}
+        rows = [by_id[i] for i in ids if i in by_id]   # 유사도 순서 유지
+    else:
+        rows = list(db.records().find().sort("ts", -1).limit(limit))
+
     candidates: List[Dict[str, Any]] = []
-    for r in db.records().find().sort("ts", -1).limit(limit):
+    for r in rows:
         ts = r.get("ts")
         candidates.append({
             "id": r["_id"],

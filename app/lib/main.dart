@@ -10,9 +10,11 @@ import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'api.dart';
+import 'applog.dart';
 import 'digest_screen.dart';
 import 'index_screen.dart';
 import 'llm_picker.dart';
@@ -28,7 +30,14 @@ class _Pending {
   final String id;
   final String? comment;
   final File? photo;
-  _Pending({required this.id, this.comment, this.photo});
+  final String? audioPath;
+  final String? videoPath;
+  _Pending(
+      {required this.id,
+      this.comment,
+      this.photo,
+      this.audioPath,
+      this.videoPath});
 }
 
 void main() => runApp(const OracleApp());
@@ -56,7 +65,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _api = OracleApi();
   final _scroll = ScrollController();
   final List<Record> _records = [];
@@ -71,16 +81,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   // ── 입력 ───────────────────────────────────────────────────
   File? _photo;
+  File? _video;
+  bool _recordingVideo = false;
   final _commentCtrl = TextEditingController();
 
   // ── LLM 선택 ───────────────────────────────────────────────
   String? _selectedModel;
 
-  // ── 음성 STT ───────────────────────────────────────────────
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  bool _speechAvailable = false;
-  bool _listening = false;
-  String _voiceBase = '';
+  // ── 음성: 순수 녹음 (받아쓰기 STT 제거) ────────────────────
+  bool _listening = false;   // 음성 녹음 중
+  final AudioRecorder _recorder = AudioRecorder();
+  bool _recordAvailable = false;
+  String? _audioPath;
+
+  // ── 탭 (홈 / 히스토리 / 기록) ──────────────────────────────
+  late final TabController _tab;
 
   // ── 갤러리·외부 공유 ───────────────────────────────────────
   final ImagePicker _picker = ImagePicker();
@@ -96,9 +111,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    AppLog.init();
+    _tab = TabController(length: 3, vsync: this, initialIndex: 2); // 첫 실행 = 기록 탭
     WidgetsBinding.instance.addObserver(this);
     _initCamera();
-    _initSpeech();
+    _initRecord();
     _initShareListener();
     _initNotifications();
     _loadSelectedModel();
@@ -115,6 +132,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _scroll.dispose();
     _commentCtrl.dispose();
     _shareSub?.cancel();
+    _recorder.dispose();
+    _tab.dispose();
     super.dispose();
   }
 
@@ -128,6 +147,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.resumed) {
       if (!_cameraReady) _initCamera();
       _loadLatestDigest();
+      _refresh(); // 복귀 시 최신 record 반영 (백그라운드 중 완료분 표시)
     }
   }
 
@@ -202,7 +222,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         orElse: () => cams.first,
       );
       final ctrl = CameraController(back, ResolutionPreset.high,
-          enableAudio: false);
+          enableAudio: true);   // 영상 녹화에 소리 포함
       await ctrl.initialize();
       if (!mounted) {
         await ctrl.dispose();
@@ -244,6 +264,45 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _toast('갤러리 실패: $e');
     }
   }
+
+  // ── 영상: 카메라 녹화(셔터 길게) + 갤러리 선택 ─────────────
+  Future<void> _startVideoRecording() async {
+    if (!_cameraReady || _camera == null || _camera!.value.isRecordingVideo) {
+      return;
+    }
+    try {
+      await _camera!.startVideoRecording();
+      if (mounted) setState(() => _recordingVideo = true);
+    } catch (e) {
+      _toast('영상 녹화 실패: $e');
+    }
+  }
+
+  Future<void> _stopVideoRecording() async {
+    if (_camera == null || !_camera!.value.isRecordingVideo) return;
+    try {
+      final f = await _camera!.stopVideoRecording();
+      if (!mounted) return;
+      setState(() {
+        _recordingVideo = false;
+        _video = File(f.path);
+      });
+    } catch (e) {
+      if (mounted) setState(() => _recordingVideo = false);
+      _toast('영상 저장 실패: $e');
+    }
+  }
+
+  Future<void> _pickVideoFromGallery() async {
+    try {
+      final x = await _picker.pickVideo(source: ImageSource.gallery);
+      if (x != null && mounted) setState(() => _video = File(x.path));
+    } catch (e) {
+      _toast('영상 갤러리 실패: $e');
+    }
+  }
+
+  void _clearVideo() => setState(() => _video = null);
 
   // ── 공유 인텐트 ───────────────────────────────────────────
   Future<void> _initShareListener() async {
@@ -309,85 +368,91 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   // ── 음성 인식 ─────────────────────────────────────────────
-  Future<void> _initSpeech() async {
+  Future<void> _initRecord() async {
     try {
       var status = await Permission.microphone.status;
-      if (!status.isGranted) {
-        status = await Permission.microphone.request();
-      }
-      if (!status.isGranted) return;
-      _speechAvailable = await _speech.initialize(
-        onError: (_) {
-          if (mounted) setState(() => _listening = false);
-        },
-        onStatus: (s) {
-          if (s == 'notListening' || s == 'done') {
-            if (mounted) setState(() => _listening = false);
-          }
-        },
-      );
-      if (mounted) setState(() {});
-    } catch (_) {}
+      if (!status.isGranted) status = await Permission.microphone.request();
+      _recordAvailable = status.isGranted && await _recorder.hasPermission();
+    } catch (_) {
+      _recordAvailable = false;
+    }
+    if (mounted) setState(() {});
   }
 
-  Future<void> _toggleVoice() async {
-    if (!_speechAvailable) {
-      _toast('음성 인식 사용 불가 (권한·기기 미지원)');
-      return;
-    }
+  Future<void> _toggleAudioRecord() async {
     if (_listening) {
-      await _speech.stop();
-      if (mounted) setState(() => _listening = false);
+      String? path;
+      try {
+        path = await _recorder.stop();
+      } catch (e) {
+        AppLog.err('audio stop: $e');
+      }
+      if (mounted) {
+        setState(() {
+          _listening = false;
+          if (path != null) _audioPath = path;
+        });
+      }
       return;
     }
-    _voiceBase = _commentCtrl.text;
-    if (_voiceBase.isNotEmpty && !_voiceBase.endsWith(' ')) {
-      _voiceBase += ' ';
+    try {
+      if (await _recorder.hasPermission()) {
+        final dir = await getTemporaryDirectory();
+        final fp =
+            '${dir.path}/oracle_rec_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        await _recorder.start(
+          const RecordConfig(encoder: AudioEncoder.aacLc),
+          path: fp,
+        );
+        if (mounted) setState(() => _listening = true);
+      } else {
+        _toast('녹음 사용 불가 (마이크 권한 확인)');
+      }
+    } catch (e) {
+      AppLog.err('audio start: $e');
+      _toast('녹음 실패: $e');
     }
-    setState(() => _listening = true);
-    await _speech.listen(
-      listenOptions: stt.SpeechListenOptions(
-        partialResults: true,
-        cancelOnError: true,
-        listenMode: stt.ListenMode.dictation,
-        localeId: 'ko_KR',
-        listenFor: const Duration(minutes: 1),
-        pauseFor: const Duration(seconds: 3),
-      ),
-      onResult: (r) {
-        if (!mounted || !_listening) return;
-        final merged = _voiceBase + r.recognizedWords;
-        setState(() {
-          _commentCtrl.text = merged;
-          _commentCtrl.selection = TextSelection.fromPosition(
-            TextPosition(offset: merged.length),
-          );
-        });
-      },
-    );
+  }
+
+  Future<void> _toggleVideoRecord() async {
+    if (_recordingVideo) {
+      await _stopVideoRecording();
+    } else {
+      await _startVideoRecording();
+    }
   }
 
   // ── 전송 ──────────────────────────────────────────────────
   Future<void> _submit() async {
     if (_listening) {
-      await _speech.cancel();
+      // 녹음 중이면 정지하고 오디오 확보
+      try {
+        final p = await _recorder.stop();
+        if (p != null) _audioPath = p;
+      } catch (_) {}
       if (mounted) setState(() => _listening = false);
     }
-    _voiceBase = '';
 
     final comment = _commentCtrl.text.trim();
-    if (_photo == null && comment.isEmpty) {
-      _toast('사진을 찍거나 코멘트를 입력하세요');
+    if (_photo == null &&
+        comment.isEmpty &&
+        _audioPath == null &&
+        _video == null) {
+      _toast('사진·영상·코멘트·녹음 중 하나는 있어야 해요');
       return;
     }
     final pending = _Pending(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       comment: comment.isEmpty ? null : comment,
       photo: _photo,
+      audioPath: _audioPath,
+      videoPath: _video?.path,
     );
     setState(() {
       _pendings.insert(0, pending);
       _photo = null;
+      _video = null;
+      _audioPath = null;
       _commentCtrl.clear();
     });
     unawaited(_processIngest(pending));
@@ -398,6 +463,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final r = await _api.ingest(
         comment: p.comment,
         imageFile: p.photo,
+        audioFile: p.audioPath != null ? File(p.audioPath!) : null,
+        videoFile: p.videoPath != null ? File(p.videoPath!) : null,
         model: _selectedModel,
       );
       final recWithComment = Record(
@@ -544,6 +611,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  /// 최신부터 다시 로드 (당겨서 새로고침 · 앱 복귀 시).
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    setState(() {
+      _records.clear();
+      _hasMore = true;
+    });
+    await _load(initial: true);
+    await _loadLatestDigest();
+  }
+
   // ── LLM 선택 ───────────────────────────────────────────────
   Future<void> _loadSelectedModel() async {
     final prefs = await SharedPreferences.getInstance();
@@ -582,6 +660,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Oracle'),
+        bottom: TabBar(
+          controller: _tab,
+          tabs: const [
+            Tab(text: '홈'),
+            Tab(text: '히스토리'),
+            Tab(text: '기록'),
+          ],
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
@@ -598,165 +684,236 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: '검색·질의 (자연어)',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => QueryScreen(api: _api)),
-              );
-            },
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => QueryScreen(api: _api))),
           ),
           IconButton(
             icon: const Icon(Icons.travel_explore_outlined),
             tooltip: '상위 인덱스 + 펜딩 환기',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => IndexScreen(api: _api)),
-              );
-            },
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => IndexScreen(api: _api))),
           ),
           IconButton(
             icon: const Icon(Icons.auto_stories_outlined),
             tooltip: '다이제스트 보기',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => DigestScreen(api: _api)),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: '새로고침',
-            onPressed: () async {
-              setState(() {
-                _records.clear();
-                _hasMore = true;
-              });
-              await _load(initial: true);
-              await _loadLatestDigest();
-            },
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => DigestScreen(api: _api))),
           ),
         ],
       ),
       body: SafeArea(
         top: false,
-        child: LayoutBuilder(builder: (ctx, constraints) {
-          final isWide = constraints.maxWidth >= 800;
-          if (isWide) {
-            return Row(
-              children: [
-                Expanded(flex: 6, child: _buildCameraSection(constraints)),
-                const VerticalDivider(width: 1),
-                Expanded(
-                  flex: 5,
-                  child: Column(
-                    children: [
-                      _buildInputBar(),
-                      Expanded(child: _buildChatList()),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          }
-          return Column(
-            children: [
-              SizedBox(
-                height: constraints.maxHeight * 5 / 9,
-                child: _buildCameraSection(constraints),
-              ),
-              _buildInputBar(),
-              Expanded(child: _buildChatList()),
-            ],
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _buildCameraSection(BoxConstraints constraints) {
-    return ClipRect(
-      child: Container(
-        color: Colors.black,
-        width: double.infinity,
-        child: Stack(
-          fit: StackFit.expand,
+        child: TabBarView(
+          controller: _tab,
           children: [
-            _cameraOrPhoto(),
-            if (_photo != null)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Material(
-                  color: Colors.black54,
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white),
-                    onPressed: _clearPhoto,
-                    tooltip: '사진 제거',
-                  ),
-                ),
-              ),
-            Positioned(
-              bottom: 12,
-              left: 0,
-              right: 0,
-              child: Center(child: _shutterButton()),
-            ),
+            _buildHomeTab(),
+            RefreshIndicator(onRefresh: _refresh, child: _buildChatList()),
+            _buildRecordTab(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildInputBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Theme.of(context).dividerColor),
+  // 홈 — 비활성 placeholder (추후 채움)
+  Widget _buildHomeTab() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.home_outlined,
+                size: 56, color: Theme.of(context).disabledColor),
+            const SizedBox(height: 12),
+            Text('홈은 곧 채워질 예정이에요',
+                style: TextStyle(color: Theme.of(context).disabledColor)),
+          ],
         ),
       ),
-      child: Row(
-        children: [
-          IconButton(
-            icon: Icon(
-              _listening ? Icons.mic : Icons.mic_none_outlined,
-              color: _listening ? Theme.of(context).colorScheme.error : null,
-            ),
-            tooltip: _listening ? '인식 중 — 탭해서 정지' : '음성 코멘트',
-            onPressed: _speechAvailable ? _toggleVoice : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.photo_library_outlined),
-            tooltip: '갤러리에서 사진',
-            onPressed: _pickFromGallery,
-          ),
-          Expanded(
-            child: TextField(
-              controller: _commentCtrl,
-              decoration: InputDecoration(
-                hintText: _listening
-                    ? '듣고 있어요...'
-                    : '코멘트(선택) · 사진 없이 텍스트만 보내도 OK',
-                border: const OutlineInputBorder(),
-                isDense: true,
+    );
+  }
+
+  // 기록 — 카메라 프리뷰 + 사진/영상/음성 + 텍스트 + 전송
+  Widget _buildRecordTab() {
+    return Column(
+      children: [
+        Expanded(
+          child: ClipRect(
+            child: Container(
+              color: Colors.black,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _cameraOrPhoto(),
+                  // 우상단 반투명 갤러리 버튼
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Material(
+                      color: Colors.black38,
+                      shape: const CircleBorder(),
+                      child: IconButton(
+                        icon: const Icon(Icons.photo_library_outlined,
+                            color: Colors.white),
+                        tooltip: '갤러리',
+                        onPressed: _pickFromGalleryMenu,
+                      ),
+                    ),
+                  ),
+                  // 첨부 제거
+                  if (_photo != null || _video != null)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Material(
+                        color: Colors.black54,
+                        shape: const CircleBorder(),
+                        child: IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          tooltip: '첨부 제거',
+                          onPressed: () {
+                            _clearPhoto();
+                            _clearVideo();
+                          },
+                        ),
+                      ),
+                    ),
+                  // 음성 녹음 오버레이
+                  if (_listening)
+                    Container(
+                      color: Colors.black54,
+                      child: const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.mic, color: Colors.redAccent, size: 64),
+                            SizedBox(height: 12),
+                            Text('녹음 중… 음성 버튼을 다시 눌러 정지',
+                                style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // 영상 녹화 표시
+                  if (_recordingVideo)
+                    const Positioned(
+                      top: 12,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Chip(
+                          backgroundColor: Colors.red,
+                          label: Text('● 녹화 중',
+                              style: TextStyle(color: Colors.white)),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              minLines: 1,
-              maxLines: 3,
-              textInputAction: TextInputAction.newline,
             ),
           ),
-          const SizedBox(width: 4),
-          IconButton(
-            icon: const Icon(Icons.send),
-            onPressed: _submit,
-            tooltip: '전송',
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _captureButton(
+                icon: Icons.photo_camera_outlined,
+                label: '사진',
+                onTap: _cameraReady ? _capture : null,
+              ),
+              _captureButton(
+                icon: _recordingVideo ? Icons.stop : Icons.videocam_outlined,
+                label: '영상',
+                active: _recordingVideo,
+                onTap: _cameraReady ? _toggleVideoRecord : null,
+              ),
+              _captureButton(
+                icon: _listening ? Icons.stop : Icons.mic_none_outlined,
+                label: '음성',
+                active: _listening,
+                onTap: _recordAvailable ? _toggleAudioRecord : null,
+              ),
+            ],
           ),
-        ],
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: TextField(
+            controller: _commentCtrl,
+            decoration: const InputDecoration(
+              hintText: '코멘트(선택) · 텍스트만 보내도 OK',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            minLines: 1,
+            maxLines: 3,
+            textInputAction: TextInputAction.newline,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              icon: const Icon(Icons.send),
+              label: const Text('전송'),
+              onPressed: _submit,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _captureButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    bool active = false,
+  }) {
+    final color = active ? Theme.of(context).colorScheme.error : null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton.filledTonal(
+          icon: Icon(icon, color: color),
+          iconSize: 28,
+          onPressed: onTap,
+          tooltip: label,
+        ),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(fontSize: 12, color: color)),
+      ],
+    );
+  }
+
+  Future<void> _pickFromGalleryMenu() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_outlined),
+              title: const Text('사진'),
+              onTap: () => Navigator.pop(context, 'photo'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.movie_outlined),
+              title: const Text('영상'),
+              onTap: () => Navigator.pop(context, 'video'),
+            ),
+          ],
+        ),
       ),
     );
+    if (choice == 'photo') await _pickFromGallery();
+    if (choice == 'video') await _pickVideoFromGallery();
   }
 
   Widget _buildChatList() {
@@ -823,6 +980,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_photo != null) {
       return Image.file(_photo!, fit: BoxFit.cover);
     }
+    if (_video != null) {
+      return GestureDetector(
+        onTap: _clearVideo,
+        child: Container(
+          color: Colors.black,
+          child: const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.videocam, color: Colors.white, size: 48),
+                SizedBox(height: 8),
+                Text('영상 첨부됨 · 탭해서 제거',
+                    style: TextStyle(color: Colors.white)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     if (_cameraReady && _camera != null) {
       return FittedBox(
         fit: BoxFit.cover,
@@ -847,30 +1023,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     return const Center(
         child: CircularProgressIndicator(color: Colors.white));
-  }
-
-  Widget _shutterButton() {
-    final enabled = _cameraReady && _camera != null;
-    return GestureDetector(
-      onTap: enabled ? _capture : null,
-      child: Container(
-        width: 72,
-        height: 72,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 4),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: enabled ? Colors.white : Colors.white38,
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 
