@@ -55,6 +55,23 @@ class Record {
   /// JSON 객체를 안전하게 `Map<String, dynamic>`로 (아니면 null).
   static Map<String, dynamic>? _asMap(dynamic v) =>
       v is Map ? v.cast<String, dynamic>() : null;
+
+  /// 일부 필드만 바꾼 복제본 (리액션·코멘트 편집용).
+  Record copyWith({
+    String? userComment,
+    String? reaction,
+  }) =>
+      Record(
+        id: id,
+        ts: ts,
+        userComment: userComment ?? this.userComment,
+        imagePaths: imagePaths,
+        vlmCaption: vlmCaption,
+        insight: insight,
+        suggestion: suggestion,
+        analysis: analysis,
+        reaction: reaction ?? this.reaction,
+      );
 }
 
 
