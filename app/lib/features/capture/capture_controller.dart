@@ -336,6 +336,7 @@ class CaptureController extends ChangeNotifier {
     _audioPath = null;
     commentCtrl.clear();
     _notify();
+    onToast('전송됨 — 히스토리 탭에서 결과 확인');
     unawaited(_processIngest(pending));
   }
 
