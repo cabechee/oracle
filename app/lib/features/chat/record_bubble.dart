@@ -268,17 +268,25 @@ Widget _analysisPanel(BuildContext context, Map<String, dynamic> analysis) {
 }
 
 /// 분석 JSON → (라벨, 값) 행 목록. 빈 값은 건너뜀.
+///
+/// 알려진 스키마 키(scene/objects/...)는 보기 좋은 한글 라벨로, 그 외 키는 그대로
+/// 일반 렌더 — 모델이 스키마와 다른 구조를 내놔도 분석 내용이 표시되도록.
 List<(String, String)> _analysisRows(Map<String, dynamic> a) {
   final out = <(String, String)>[];
+  final used = <String>{};
   String s(dynamic v) => (v ?? '').toString().trim();
 
   final scene = s(a['scene']);
-  if (scene.isNotEmpty) out.add(('장면', scene));
+  if (scene.isNotEmpty) {
+    out.add(('장면', scene));
+  }
+  used.add('scene');
 
   final objs = a['objects'];
   if (objs is List && objs.isNotEmpty) {
     out.add(('객체', objs.map((e) => e.toString()).join(', ')));
   }
+  used.add('objects');
 
   final attrs = a['attributes'];
   if (attrs is Map && attrs.isNotEmpty) {
@@ -288,14 +296,26 @@ List<(String, String)> _analysisRows(Map<String, dynamic> a) {
         .toList();
     if (parts.isNotEmpty) out.add(('속성', parts.join(' · ')));
   }
+  used.add('attributes');
 
   final rels = a['relationships'];
   if (rels is List && rels.isNotEmpty) {
     out.add(('관계', rels.map((e) => e.toString()).join(', ')));
   }
+  used.add('relationships');
 
   final ocr = s(a['ocr_text']);
-  if (ocr.isNotEmpty) out.add(('글자', ocr));
+  if (ocr.isNotEmpty) {
+    out.add(('글자', ocr));
+  }
+  used.add('ocr_text');
+
+  // 스키마 외 키 — 그대로 표시 (구조가 달라도 분석을 숨기지 않음)
+  for (final e in a.entries) {
+    if (used.contains(e.key)) continue;
+    final v = _attrVal(e.value);
+    if (v.trim().isNotEmpty) out.add((e.key, v));
+  }
 
   return out;
 }
