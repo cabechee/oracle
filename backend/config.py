@@ -42,6 +42,8 @@ TASK_ALIAS = {
     "type_classify": os.getenv("ORACLE_TYPE",    ""),
     "thread_judge":  os.getenv("ORACLE_THREAD",  ""),
     "daily_digest":  os.getenv("ORACLE_DIGEST",  ""),
+    "weekly_journal":  os.getenv("ORACLE_WEEKLY",  ""),
+    "monthly_journal": os.getenv("ORACLE_MONTHLY", ""),
     "index_update":  os.getenv("ORACLE_INDEX",   ""),
     "query":         os.getenv("ORACLE_QUERY",   ""),
 }
@@ -52,6 +54,20 @@ TASK_ALIAS = {
 # CONTEXT_MAX=0 이면 맥락 비활성. .env(ORACLE_CONTEXT_MINUTES / ORACLE_CONTEXT_MAX)로 조절.
 CONTEXT_MINUTES = int(os.getenv("ORACLE_CONTEXT_MINUTES", "30"))
 CONTEXT_MAX = int(os.getenv("ORACLE_CONTEXT_MAX", "8"))
+
+
+# ── 메모리 검색 3요소 스코어 (Generative Agents식) ───────────────
+# 검색 점수 = W_SIM·유사도 + W_RECENCY·최근성(지수감쇠) + W_IMPORTANCE·중요도(reaction).
+# 각 요소는 후보 집합 안에서 min-max 정규화 후 가중합. 가중치 0이면 그 요소 무시.
+# TAU_DAYS = 최근성 감쇠 시정수(클수록 과거를 덜 깎음). 일상 캡처 빈도에 맞춰 튜닝.
+MEMORY_W_SIM = float(os.getenv("ORACLE_MEM_W_SIM", "1.0"))
+MEMORY_W_RECENCY = float(os.getenv("ORACLE_MEM_W_RECENCY", "1.0"))
+MEMORY_W_IMPORTANCE = float(os.getenv("ORACLE_MEM_W_IMPORTANCE", "1.0"))
+MEMORY_RECENCY_TAU_DAYS = float(os.getenv("ORACLE_MEM_TAU_DAYS", "30"))
+
+# 워킹 메모리(즉답 인사이트에 주입) — 지난 N일 일 저널 + 오늘 raw 캡처. (M3)
+# 0이면 비활성. .env(ORACLE_WORKING_DAYS)로 조절.
+WORKING_MEMORY_DAYS = int(os.getenv("ORACLE_WORKING_DAYS", "30"))
 
 
 # ── MongoDB ─────────────────────────────────────────────────────

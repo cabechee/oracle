@@ -78,6 +78,40 @@ def embed_record(record_id: str, rec: Optional[Dict[str, Any]] = None) -> bool:
     return True
 
 
+def embed_text(text: str) -> Optional[Dict[str, Any]]:
+    """임의 텍스트 임베딩 → {embedding, embed_meta} 또는 None(graceful).
+
+    journals 등 record 아닌 대상에 임베딩을 붙일 때 공용으로 사용.
+    """
+    alias = embed_alias()
+    if not alias or not (text or "").strip():
+        return None
+    try:
+        data = nest_client.embed(alias, [text])
+    except Exception:
+        return None
+    vecs = data.get("embeddings") or []
+    if not vecs or not vecs[0]:
+        return None
+    return {
+        "embedding": vecs[0],
+        "embed_meta": {
+            "alias": alias,
+            "model": data.get("model"),
+            "dims": data.get("dims"),
+        },
+    }
+
+
+def embed_journal(journal_id: str, text: str) -> bool:
+    """journals 문서 한 건에 임베딩 부착 (graceful)."""
+    e = embed_text(text)
+    if not e:
+        return False
+    db.journals().update_one({"_id": journal_id}, {"$set": e})
+    return True
+
+
 def search(question: str, top_k: int = 12) -> Optional[List[Tuple[str, float]]]:
     """질문 임베딩 → embedding 보유 record 와 brute-force 코사인 top_k.
 
