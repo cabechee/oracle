@@ -69,6 +69,7 @@ def append_record(
     image_paths: List[str],
     vlm_caption: str,
     insight_text: str,
+    suggestion: str = "",
     audio_paths: List[str] = None,
     audio_caption: str = "",
     video_paths: List[str] = None,
@@ -98,9 +99,11 @@ def append_record(
     if audio_caption:
         parts.append(f"**소리**: {audio_caption}\n")
     if vlm_caption:
-        parts.append(f"**VLM**: {vlm_caption}\n")
+        parts.append(f"**분석**: {vlm_caption}\n")
     if insight_text:
-        parts.append(f"**LLM**: {insight_text}\n")
+        parts.append(f"**코멘트**: {insight_text}\n")
+    if suggestion:
+        parts.append(f"**제안**: {suggestion}\n")
     parts.append(f"<!-- {record_id} -->\n")
 
     with open(path, "a", encoding="utf-8") as f:

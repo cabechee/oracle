@@ -30,6 +30,9 @@ def build_text(rec: Dict[str, Any]) -> str:
     ins = (rec.get("insight") or {}).get("text")
     if ins:
         parts.append(str(ins))
+    sug = rec.get("suggestion")
+    if sug:
+        parts.append(str(sug))
     au = (rec.get("audio") or {}).get("caption")
     if au:
         parts.append(str(au))

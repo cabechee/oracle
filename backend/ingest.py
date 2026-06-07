@@ -106,6 +106,23 @@ def _recent_context(now: datetime) -> str:
     return "\n".join(lines)
 
 
+def _summarize_analysis(analysis) -> str:
+    """사진 분석 JSON → 사람/검색용 한 줄 요약 (vlm.caption 호환)."""
+    if not analysis:
+        return ""
+    parts = []
+    scene = str(analysis.get("scene") or "").strip()
+    if scene:
+        parts.append(scene)
+    objs = analysis.get("objects") or []
+    if objs:
+        parts.append("객체: " + ", ".join(str(o) for o in objs[:8]))
+    ocr = str(analysis.get("ocr_text") or "").strip()
+    if ocr:
+        parts.append("글자: " + ocr[:150])
+    return " · ".join(parts)
+
+
 VLM_SYSTEM = """당신은 사진을 풍부하게 묘사하는 보조입니다.
 - 객체, 텍스트(OCR로 읽히는 글자 전부), 색감, 분위기, 맥락을 평문 한 단락으로.
 - 사실 묘사만. 의견·해석·추천은 다음 단계 LLM의 몫.
@@ -176,28 +193,8 @@ def ingest(
         location = _exif_location(abs_paths[0])
     location_hint = f"\n[사진 GPS: {location}]" if location else ""
 
-    # 2. VLM 캡션 — 이미지가 있을 때만. alias는 동적 chain으로 결정.
-    vlm_caption = ""
-    vlm_alias: Optional[str] = None
+    # 사진 첨부 → Nest용 이미지 (사진 3단계 vision에서 사용)
     nest_images = nest_client.images_from_paths(abs_paths) if abs_paths else None
-    if abs_paths:
-        vlm_alias = _resolve_alias("vlm_caption", model, prefer_vision=True)
-        if vlm_alias:
-            try:
-                r = nest_client.call(
-                    alias=vlm_alias,
-                    prompt=(
-                        "이 사진을 풍부하게 묘사해주세요. 보이는 모든 객체·글자·맥락을 한 단락으로."
-                        + location_hint
-                    ),
-                    images=nest_images,
-                    system=VLM_SYSTEM,
-                )
-                vlm_caption = (r.get("text") or "").strip()
-            except Exception as e:
-                vlm_caption = f"(VLM 실패: {e})"
-        else:
-            vlm_caption = "(VLM alias 미설정 — Nest에 enabled 모델 없음)"
 
     # 2.5 소리 인식 — 명시된 오디오 모델(TASK_ALIAS['audio'])이 있을 때만.
     # 아무 모델(claude 등)에 오디오를 보내면 안 되므로 default/폰 model 폴백을 쓰지 않는다.
@@ -218,39 +215,59 @@ def ingest(
             audio_caption = f"(소리 인식 실패: {e})"
     # audio_alias 없으면 저장만 (audio_caption 빈 문자열)
 
-    # 3. LLM 즉답 인사이트 — 항상 (사용자 결정: 전부 트리거). 동적 chain.
+    # 2~3. 인사이트 — 사진이면 3단계(분석→코멘트→제안), 아니면 텍스트/오디오 단일.
+    context_block = _recent_context(ts)
     insight_alias = _resolve_alias("insight", model, prefer_vision=bool(abs_paths))
+    vlm_alias: Optional[str] = None
+    vlm_caption = ""
+    analysis: Optional[Dict[str, Any]] = None
+    suggestion = ""
+    insight_text = ""
+
     if not insight_alias:
         insight_text = "(insight alias 미설정 — Nest에 enabled 모델 없음)"
-        # 빈 alias로 nest_client.call 호출 방지
         insight_alias = ""
-    prompt_parts: List[str] = []
-    if user_comment:
-        prompt_parts.append(f"[유저 코멘트]\n{user_comment}")
-    if vlm_caption:
-        prompt_parts.append(f"[사진 묘사]\n{vlm_caption}")
-    if audio_caption:
-        prompt_parts.append(f"[소리]\n{audio_caption}")
-    insight_prompt = ("\n\n".join(prompt_parts) or "(빈 입력)") + location_hint
-    context_block = _recent_context(ts)
-    if context_block:
-        insight_prompt = (
-            f"[최근 맥락 — 직전 대화 흐름, 참고만]\n{context_block}\n\n"
-            f"---\n\n[지금 입력]\n{insight_prompt}"
-        )
 
-    if insight_alias:
+    # 이번 입력(코멘트 + 소리 + GPS) 한 덩어리
+    _ui: List[str] = []
+    if user_comment:
+        _ui.append(f"코멘트: {user_comment}")
+    if audio_caption:
+        _ui.append(f"소리: {audio_caption}")
+    user_input = " / ".join(_ui) + location_hint
+
+    if abs_paths and insight_alias:
+        # 사진 3단계 (describe-then-reason): 분석 JSON → 맥락 코멘트 + 디스커버리 제안
+        from agent import vision
         try:
-            r = nest_client.call(
-                alias=insight_alias,
-                prompt=insight_prompt,
-                images=nest_images,
-                system=INSIGHT_SYSTEM,
+            v = vision.process(insight_alias, nest_images,
+                               user_input=user_input, context=context_block, memory="")
+            analysis = v["analysis"]
+            insight_text = v["comment"] or "(코멘트 생성 실패)"
+            suggestion = v["suggestion"]
+            vlm_alias = insight_alias
+            vlm_caption = _summarize_analysis(analysis)
+        except Exception as e:
+            insight_text = f"(인사이트 생성 실패: {e})"
+    elif insight_alias:
+        # 텍스트/오디오만 — 단일 인사이트
+        prompt_parts: List[str] = []
+        if user_comment:
+            prompt_parts.append(f"[유저 코멘트]\n{user_comment}")
+        if audio_caption:
+            prompt_parts.append(f"[소리]\n{audio_caption}")
+        insight_prompt = ("\n\n".join(prompt_parts) or "(빈 입력)") + location_hint
+        if context_block:
+            insight_prompt = (
+                f"[최근 맥락 — 직전 대화 흐름, 참고만]\n{context_block}\n\n"
+                f"---\n\n[지금 입력]\n{insight_prompt}"
             )
+        try:
+            r = nest_client.call(alias=insight_alias, prompt=insight_prompt,
+                                 system=INSIGHT_SYSTEM)
             insight_text = (r.get("text") or "").strip()
         except Exception as e:
             insight_text = f"(인사이트 생성 실패: {e})"
-    # 위 _resolve_alias 실패 시 insight_text는 이미 설정됨
 
     # 4. Vault 평문 append (정본) — LLM 응답까지 전부 평문화
     #    (vault 마크다운 안에선 절대→상대 변환됨 — append_record가 처리)
@@ -261,6 +278,7 @@ def ingest(
         image_paths=abs_paths,
         vlm_caption=vlm_caption,
         insight_text=insight_text,
+        suggestion=suggestion,
         audio_paths=audio_abs,
         audio_caption=audio_caption,
         video_paths=video_abs,
@@ -279,8 +297,10 @@ def ingest(
         "user_comment": user_comment or "",
         "location": location,    # "lat,lon" 문자열 또는 None
         "vlm": {"alias": vlm_alias, "caption": vlm_caption} if vlm_alias else None,
+        "analysis": analysis,                              # 사진 3단계 1단계 JSON (신규)
         "audio": {"alias": audio_alias, "caption": audio_caption} if audio_alias else None,
         "insight": {"alias": insight_alias, "text": insight_text},
+        "suggestion": suggestion or None,                  # 디스커버리 제안 (신규)
         "reaction": None,
         # 자정 배치가 부착할 것들 — 시작은 null/빈리스트
         "type_hint": None,
@@ -293,6 +313,8 @@ def ingest(
         "record_id": record_id,
         "ts": ts.isoformat(),
         "insight": insight_text,
+        "suggestion": suggestion,
+        "analysis": analysis,
         "vlm_caption": vlm_caption,
         "audio_caption": audio_caption,
         "vault_path": vault_path,
