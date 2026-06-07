@@ -127,13 +127,23 @@ class CaptureController extends ChangeNotifier {
 
   Future<void> capture() async {
     if (!cameraReady || camera == null) return;
-    try {
-      final pic = await camera!.takePicture();
-      if (_disposed) return;
-      photo = File(pic.path);
-      _notify();
-    } catch (e) {
-      onToast('촬영 실패: $e');
+    // 막 띄운 직후 첫 takePicture가 카메라 미정착으로 간헐 실패 → 1회 자동 재시도.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final cam = camera;
+      if (cam == null || _disposed) return;
+      try {
+        final pic = await cam.takePicture();
+        if (_disposed) return;
+        photo = File(pic.path);
+        _notify();
+        return;
+      } catch (e) {
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          continue;
+        }
+        onToast('촬영 실패: $e');
+      }
     }
   }
 
