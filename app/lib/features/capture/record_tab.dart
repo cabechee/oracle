@@ -94,7 +94,8 @@ class RecordTab extends StatelessWidget {
                   context,
                   icon: Icons.photo_camera_outlined,
                   label: '사진',
-                  onTap: c.cameraReady ? c.capture : null,
+                  // 항상 활성 — 콜드 스타트 직후 눌러도 capture()가 준비를 기다렸다 촬영.
+                  onTap: c.capture,
                 ),
                 _captureButton(
                   context,

@@ -125,9 +125,23 @@ class CaptureController extends ChangeNotifier {
     }
   }
 
+  /// 카메라가 준비될 때까지 잠깐 대기(콜드 스타트 직후 init 중이면 ~수백ms).
+  /// 첫 탭이 미준비 카메라에 떨어져 무시되던 문제 방지. 권한거부 등은 즉시 false.
+  Future<bool> _ensureCameraReady({int timeoutMs = 4000}) async {
+    final steps = timeoutMs ~/ 100;
+    for (var i = 0; i < steps; i++) {
+      if (_disposed) return false;
+      if (cameraReady && camera != null) return true;
+      if (cameraError != null && camera == null) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    return cameraReady && camera != null;
+  }
+
   Future<void> capture() async {
-    if (!cameraReady || camera == null) return;
-    // 막 띄운 직후 첫 takePicture가 카메라 미정착으로 간헐 실패 → 1회 자동 재시도.
+    // 콜드 스타트 직후 카메라가 막 init 중일 수 있음 — 준비될 때까지 잠깐 대기 후 촬영.
+    if (!await _ensureCameraReady()) return;
+    // 막 띄운 직후 첫 takePicture가 미정착으로 간헐 실패 → 1회 자동 재시도.
     for (var attempt = 0; attempt < 2; attempt++) {
       final cam = camera;
       if (cam == null || _disposed) return;
