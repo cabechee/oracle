@@ -5,6 +5,8 @@ class Record {
   final List<String> imagePaths;
   final String? vlmCaption;
   final String insight;
+  final String? suggestion;             // 디스커버리 제안 (사진 3단계)
+  final Map<String, dynamic>? analysis; // 사진 분석 JSON (사진 3단계 1단계)
   final String? reaction;
 
   Record({
@@ -14,6 +16,8 @@ class Record {
     required this.imagePaths,
     required this.vlmCaption,
     required this.insight,
+    this.suggestion,
+    this.analysis,
     this.reaction,
   });
 
@@ -26,6 +30,8 @@ class Record {
             (j['image_paths'] as List?)?.cast<String>() ?? const <String>[],
         vlmCaption: j['vlm_caption'] as String?,
         insight: (j['insight'] as String?) ?? '',
+        suggestion: j['suggestion'] as String?,
+        analysis: _asMap(j['analysis']),
       );
 
   /// GET /records 응답 (MongoDB 문서)
@@ -40,9 +46,15 @@ class Record {
           (j['image_paths'] as List?)?.cast<String>() ?? const <String>[],
       vlmCaption: vlm is Map ? vlm['caption'] as String? : null,
       insight: insight is Map ? ((insight['text'] as String?) ?? '') : '',
+      suggestion: j['suggestion'] as String?,
+      analysis: _asMap(j['analysis']),
       reaction: j['reaction'] as String?,
     );
   }
+
+  /// JSON 객체를 안전하게 `Map<String, dynamic>`로 (아니면 null).
+  static Map<String, dynamic>? _asMap(dynamic v) =>
+      v is Map ? v.cast<String, dynamic>() : null;
 }
 
 

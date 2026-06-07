@@ -474,6 +474,8 @@ class _HomePageState extends State<HomePage>
         imagePaths: r.imagePaths,
         vlmCaption: r.vlmCaption,
         insight: r.insight,
+        suggestion: r.suggestion,
+        analysis: r.analysis,
       );
       if (!mounted) return;
       setState(() {
@@ -579,6 +581,8 @@ class _HomePageState extends State<HomePage>
           imagePaths: _records[idx].imagePaths,
           vlmCaption: _records[idx].vlmCaption,
           insight: _records[idx].insight,
+          suggestion: _records[idx].suggestion,
+          analysis: _records[idx].analysis,
           reaction: _records[idx].reaction,
         );
       });
@@ -963,6 +967,8 @@ class _HomePageState extends State<HomePage>
                     imagePaths: _records[idx].imagePaths,
                     vlmCaption: _records[idx].vlmCaption,
                     insight: _records[idx].insight,
+                    suggestion: _records[idx].suggestion,
+                    analysis: _records[idx].analysis,
                     reaction: emoji,
                   );
                 });
@@ -1271,6 +1277,10 @@ class _RecordBubble extends StatelessWidget {
                 ),
               ),
             ),
+            if ((record.suggestion ?? '').trim().isNotEmpty)
+              _suggestionBubble(context, record.suggestion!.trim()),
+            if (record.analysis != null && record.analysis!.isNotEmpty)
+              _analysisPanel(context, record.analysis!),
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 6),
               child: Row(
@@ -1332,4 +1342,137 @@ Widget _userBubble(BuildContext context, String text) {
       ),
     ),
   );
+}
+
+/// 디스커버리 제안 — 코멘트(중립 버블)와 구분되는 액센트 버블.
+Widget _suggestionBubble(BuildContext context, String text) {
+  final cs = Theme.of(context).colorScheme;
+  return Padding(
+    padding: const EdgeInsets.only(top: 6),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.82,
+        ),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          decoration: BoxDecoration(
+            color: cs.primaryContainer,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '💡 제안',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: cs.onPrimaryContainer,
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              SelectableText(
+                text,
+                style: TextStyle(color: cs.onPrimaryContainer),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// 사진 분석 JSON — 접이식 패널. 비어있는 필드는 생략.
+Widget _analysisPanel(BuildContext context, Map<String, dynamic> analysis) {
+  final rows = _analysisRows(analysis);
+  if (rows.isEmpty) return const SizedBox.shrink();
+  final cs = Theme.of(context).colorScheme;
+  return Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        dense: true,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 6),
+        childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        title: Text(
+          '🔍 분석',
+          style: Theme.of(context)
+              .textTheme
+              .labelLarge
+              ?.copyWith(color: cs.outline),
+        ),
+        children: rows
+            .map(
+              (r) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: RichText(
+                  text: TextSpan(
+                    style: Theme.of(context).textTheme.bodySmall,
+                    children: [
+                      TextSpan(
+                        text: '${r.$1}  ',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: cs.outline,
+                        ),
+                      ),
+                      TextSpan(
+                        text: r.$2,
+                        style: TextStyle(color: cs.onSurface),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    ),
+  );
+}
+
+/// 분석 JSON → (라벨, 값) 행 목록. 빈 값은 건너뜀.
+List<(String, String)> _analysisRows(Map<String, dynamic> a) {
+  final out = <(String, String)>[];
+  String s(dynamic v) => (v ?? '').toString().trim();
+
+  final scene = s(a['scene']);
+  if (scene.isNotEmpty) out.add(('장면', scene));
+
+  final objs = a['objects'];
+  if (objs is List && objs.isNotEmpty) {
+    out.add(('객체', objs.map((e) => e.toString()).join(', ')));
+  }
+
+  final attrs = a['attributes'];
+  if (attrs is Map && attrs.isNotEmpty) {
+    final parts = attrs.entries
+        .map((e) => '${e.key}: ${_attrVal(e.value)}')
+        .where((x) => x.trim().endsWith(':') == false)
+        .toList();
+    if (parts.isNotEmpty) out.add(('속성', parts.join(' · ')));
+  }
+
+  final rels = a['relationships'];
+  if (rels is List && rels.isNotEmpty) {
+    out.add(('관계', rels.map((e) => e.toString()).join(', ')));
+  }
+
+  final ocr = s(a['ocr_text']);
+  if (ocr.isNotEmpty) out.add(('글자', ocr));
+
+  return out;
+}
+
+/// attributes 값이 스칼라/리스트/맵 어떤 형태든 한 줄로.
+String _attrVal(dynamic v) {
+  if (v is Map) {
+    return v.entries.map((e) => '${e.key} ${e.value}').join(', ');
+  }
+  if (v is List) return v.map((e) => e.toString()).join(', ');
+  return v?.toString() ?? '';
 }
