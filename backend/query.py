@@ -13,7 +13,7 @@ from typing import Dict, Any, List
 import nest_client
 from agent import memory as memory_mod
 import db
-import digest as digest_mod
+import index as index_mod
 import threads as threads_mod
 from config import TASK_ALIAS
 
@@ -71,7 +71,7 @@ def query(question: str, limit: int = 30) -> Dict[str, Any]:
             "referenced": [],
         }
 
-    master = digest_mod.read_master_index() or "(인덱스 아직 생성 안 됨)"
+    master = index_mod.read_master_index() or "(인덱스 아직 생성 안 됨)"
 
     # 후보 — agent.memory 3요소 스코어(유사도+최근성+중요도)로 저널+record 합집합 top-k.
     # 임베딩 불가(alias 미설정/Nest 실패/임베딩된 후보 없음) 시 최근순 fallback — graceful.

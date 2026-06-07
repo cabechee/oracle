@@ -1,7 +1,7 @@
 """Thread 관리 — 정체성 닻.
 
 각 thread = 여러 record를 잇는 명시적 연결(상태 X, 정체성만).
-ingest 시점엔 thread 부착 X — 자정 배치(digest.run_daily)가 LLM으로 판정 후 부착.
+ingest 시점엔 thread 부착 X — 자정 배치(nightly.run_daily)가 LLM으로 판정 후 부착.
 
 silent_threads = "5일째 무언급" 같은 펜딩 환기 후보.
 """
