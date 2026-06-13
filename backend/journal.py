@@ -9,9 +9,9 @@ from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-import nest_client
 import db
 import embedding as embedding_mod
+from agent import llm
 from config import VAULT_DIR
 from nightly_common import records_brief, resolve_alias
 
@@ -26,6 +26,7 @@ DAILY_JOURNAL_SYSTEM = """당신은 유저의 하루를 '일기'로 적습니다
 - **요약하지 말 것.** 그날의 구체적 디테일(무엇을·언제·어떤 맥락이었는지)을 살려 시간 순서로 서술한다. 사소하거나 드물어 보이는 디테일도 버리지 않는다 — 나중에 검색·회상의 단서가 된다.
 - 1인칭 관찰자 시점의 자연스러운 한국어 산문. 아침·낮·저녁의 흐름이 드러나게. 정형 헤더·불릿 나열보다 흐르는 문장.
 - 기록이 적은 날은 짧게, 많은 날은 길게. 억지로 늘이거나 줄이지 않는다.
+- **유저는 하루를 전부 기록하지 않는다 — 매우 산발적이다.** 기록과 기록 사이 빈 시간에도 분명 무언가를 하고 있었으니, 적힌 조각만으로 하루 전체를 단정하거나 빈 시간을 '아무것도 안 한 날·쉰 날'로 서술하지 말 것. 보이지 않는 대부분이 있다는 전제로, 적힌 조각만 충실히 적는다.
 - 본문 끝에 (해당될 때만, 없으면 생략):
   - ⚠️ 며칠째 무언급된 thread를 부드럽게 짚어줌 ("MX Master 4 thread 5일째 무언급 — 마무리됐나요?")
   - 👍 useful/interesting 표시한 항목들의 공통점 한 줄
@@ -60,12 +61,20 @@ MONTHLY_JOURNAL_SYSTEM = """당신은 유저의 한 달을 돌아보는 '월간 
 # ── 일 저널 ─────────────────────────────────────────────────
 
 def aggregate_reactions(records: List[Dict[str, Any]]) -> Dict[str, int]:
-    """그 날 record들의 이모지 반응 집계 (취향 신호)."""
-    counts = {"interesting": 0, "useful": 0, "skip": 0}
+    """그 날 record들의 반응 집계 (취향 신호).
+
+    섹션별 reactions(analysis|comment|discovery)는 "섹션:값" 키로,
+    legacy 단일 reaction은 값 그대로 — 둘 다 한 dict에 합산.
+    """
+    counts: Dict[str, int] = {}
     for r in records:
         rxn = r.get("reaction")
-        if rxn in counts:
-            counts[rxn] += 1
+        if rxn:
+            counts[rxn] = counts.get(rxn, 0) + 1
+        for sec, val in (r.get("reactions") or {}).items():
+            if val:
+                key = f"{sec}:{val}"
+                counts[key] = counts.get(key, 0) + 1
     return counts
 
 
@@ -74,6 +83,7 @@ def make_daily_journal(
     target: date,
     silent_threads: Optional[List[Dict[str, Any]]] = None,
     reactions: Optional[Dict[str, int]] = None,
+    signals: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """그날 기록 → 시간순 서술 일기 본문(# 날짜 헤더 포함)."""
     alias = resolve_alias("daily_digest")
@@ -83,16 +93,20 @@ def make_daily_journal(
         f"## 오늘({target.isoformat()}) 기록 ({len(records)}건, 시간순)",
         json.dumps(records_brief(records), ensure_ascii=False, indent=2),
     ]
+    if signals:
+        parts.append("\n## 📨 오늘 받은 연락 (문자·부재중 — 일상의 배경. 의미 있는 것만 자연스럽게 녹이고 광고·스팸은 무시)")
+        parts.append(json.dumps(signals, ensure_ascii=False, indent=1))
     if silent_threads:
         parts.append("\n## ⚠️ 펜딩 환기 후보 (며칠째 무언급 — 일기 마지막에 부드럽게 짚어주기)")
         parts.append(json.dumps(silent_threads, ensure_ascii=False, indent=2))
     if reactions and sum(reactions.values()) > 0:
-        parts.append("\n## 👍 오늘의 이모지 반응 집계")
+        parts.append("\n## 👍 오늘의 반응 집계 (섹션:값 — analysis=분석 정확도, comment=코멘트, discovery=디스커버리)")
         parts.append(json.dumps(reactions, ensure_ascii=False))
-        parts.append("(useful/interesting로 표시된 항목들의 공통점을 메모에 살짝)")
+        parts.append("(긍정 반응(comment:like·discovery:interesting 등) 항목들의 공통점을 취향 메모에 살짝. "
+                     "comment:dislike·analysis:wrong이 보이면 어떤 게 아빠와 안 맞았는지도 한 줄.)")
     prompt = "\n".join(parts) + "\n\n위 기록으로 오늘의 일기를 시간 순서대로 서술하세요(요약 금지)."
     try:
-        r = nest_client.call(alias=alias, prompt=prompt, system=DAILY_JOURNAL_SYSTEM)
+        r = llm.call(alias, prompt, system=DAILY_JOURNAL_SYSTEM)
         body = (r.get("text") or "").strip()
         return f"# {target.isoformat()}\n\n{body}\n"
     except Exception as e:
@@ -225,7 +239,7 @@ def _make_period_journal(
         parts.append(f"\n## 👍 이 기간 이모지 반응 집계\n{json.dumps(reactions, ensure_ascii=False)}")
     prompt = "\n\n".join(parts) + "\n\n위 저널들로 회고를 서술하세요(압축 요약 금지, 회고+피드백)."
     try:
-        r = nest_client.call(alias=alias, prompt=prompt, system=system)
+        r = llm.call(alias, prompt, system=system)
         body = (r.get("text") or "").strip()
         return f"{header}\n\n{body}\n"
     except Exception as e:

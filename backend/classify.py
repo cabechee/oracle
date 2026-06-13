@@ -6,8 +6,8 @@
 import json
 from typing import List, Dict, Any
 
-import nest_client
 import threads as threads_mod
+from agent import llm
 from nightly_common import records_brief, resolve_alias, parse_json_safe
 
 
@@ -67,7 +67,7 @@ def judge_threads(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         f"**위 {len(brief)}개 record_id 전부 assignments에 포함. JSON 객체 하나만, 첫 글자 `{{`.**"
     )
     try:
-        r = nest_client.call(alias=alias, prompt=prompt, system=THREAD_JUDGE_SYSTEM)
+        r = llm.call(alias, prompt, system=THREAD_JUDGE_SYSTEM)
         raw = r.get("text") or ""
         parsed = parse_json_safe(raw)
         if not parsed:
@@ -94,7 +94,7 @@ def classify_type_tags(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         f"**위 {len(brief)}개 record_id 전부 assignments에 포함. JSON 객체 하나만, 첫 글자 `{{`.**"
     )
     try:
-        r = nest_client.call(alias=alias, prompt=prompt, system=TYPE_TAG_SYSTEM)
+        r = llm.call(alias, prompt, system=TYPE_TAG_SYSTEM)
         raw = r.get("text") or ""
         parsed = parse_json_safe(raw)
         if not parsed:

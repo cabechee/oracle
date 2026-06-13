@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oracle 어드민</title>
+<style>
+  :root{
+    --paper:#FAF9F6; --ink:#161411; --gray:#9A948A; --faint:#C9C4BA;
+    --hair:#E5E2DA; --mat:#fff; --vermilion:#BC4B33; --soft:#211E19;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:-apple-system,'Pretendard',system-ui,sans-serif;font-size:14px;line-height:1.5}
+  header{padding:18px 24px;border-bottom:1px solid var(--hair);display:flex;
+    align-items:baseline;gap:14px;position:sticky;top:0;background:var(--paper);z-index:5}
+  header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:-.3px}
+  header .sub{color:var(--gray);font-size:12px}
+  .wrap{display:flex;min-height:calc(100vh - 59px)}
+  nav{width:200px;border-right:1px solid var(--hair);padding:16px 0;flex-shrink:0}
+  nav a{display:flex;justify-content:space-between;padding:9px 24px;cursor:pointer;
+    color:var(--soft);text-decoration:none;border-left:2px solid transparent}
+  nav a:hover{background:#F2F0EB}
+  nav a.active{border-left-color:var(--vermilion);color:var(--ink);font-weight:600;background:#F2F0EB}
+  nav a .n{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
+  main{flex:1;padding:20px 24px;overflow:auto}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  .bar h2{font-size:15px;margin:0;font-weight:600}
+  .bar .total{color:var(--gray);font-size:12px}
+  input[type=search]{flex:1;min-width:120px;max-width:280px;padding:7px 11px;
+    border:1px solid var(--hair);border-radius:7px;background:var(--mat);font-size:13px}
+  button{font-family:inherit;font-size:12.5px;padding:6px 12px;border:1px solid var(--hair);
+    background:var(--mat);border-radius:7px;cursor:pointer;color:var(--soft)}
+  button:hover{border-color:var(--gray)}
+  button.danger{color:var(--vermilion);border-color:#E8D5CF}
+  button.danger:hover{background:#FBF1EE}
+  button.accent{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .doc{border:1px solid var(--hair);border-radius:9px;background:var(--mat);
+    margin-bottom:10px;overflow:hidden}
+  .doc .head{display:flex;justify-content:space-between;align-items:center;
+    padding:10px 14px;cursor:pointer;gap:10px}
+  .doc .head:hover{background:#FCFBF9}
+  .doc .id{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--gray);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .doc .summary{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--soft)}
+  .doc .when{color:var(--faint);font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .doc pre{margin:0;padding:12px 14px;border-top:1px solid var(--hair);background:#FCFBF9;
+    font-family:ui-monospace,monospace;font-size:11.5px;line-height:1.55;
+    white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
+  .doc .actions{padding:8px 14px;border-top:1px solid var(--hair);text-align:right}
+  .thumb{width:40px;height:40px;object-fit:cover;border-radius:5px;border:1px solid var(--hair)}
+  .empty{color:var(--gray);padding:40px 0;text-align:center}
+  .more{display:block;margin:14px auto;}
+  .flag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;
+    background:#F2EFEA;color:var(--gray);margin-left:6px}
+  .flag.otp{background:#FBF1EE;color:var(--vermilion)}
+  .pf{border:1px solid var(--hair);border-radius:9px;background:var(--mat);padding:14px;margin-bottom:14px}
+  .pf label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}
+  .pf textarea{width:100%;min-height:90px;padding:10px;border:1px solid var(--hair);
+    border-radius:7px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.6;
+    resize:vertical;background:#FCFBF9;color:var(--ink)}
+  .pf .row{margin-top:8px;display:flex;gap:8px;align-items:center}
+  .pf .row .hint{color:var(--gray);font-size:11.5px;margin-left:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>Oracle 어드민</h1>
+  <span class="sub" id="sub">로딩…</span>
+</header>
+<div class="wrap">
+  <nav id="nav"></nav>
+  <main id="main"><div class="empty">컬렉션을 선택하세요</div></main>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let CUR = null, SKIP = 0, Q = '';
+
+async function api(path, opts){
+  const r = await fetch('/admin/api' + path, opts);
+  if(!r.ok) throw new Error(r.status + ' ' + await r.text());
+  return r.status === 204 ? null : r.json();
+}
+
+async function loadStats(){
+  const s = await api('/stats');
+  const total = s.collections.reduce((a,c)=>a+c.count,0);
+  $('#sub').textContent = total + ' docs · ' + s.collections.length + ' collections';
+  $('#nav').innerHTML = s.collections.map(c =>
+    `<a data-c="${c.name}" class="${c.name===CUR?'active':''}">
+       <span>${c.label}</span><span class="n">${c.count}</span></a>`).join('') +
+    (s.unbriefed_signals > 0
+      ? `<div style="padding:14px 24px;margin-top:8px;border-top:1px solid var(--hair)">
+           <div style="font-size:12px;color:var(--gray);margin-bottom:8px">
+             미요약 신호 ${s.unbriefed_signals}건</div>
+           <button class="accent" onclick="rebrief(this)">지금 요약</button></div>`
+      : '');
+  $('#nav').innerHTML += `<a data-c="__personas__" class="${CUR==='__personas__'?'active':''}"
+    style="border-top:1px solid var(--hair);margin-top:6px;padding-top:14px">
+    <span>⚙ 페르소나</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__excludes__" class="${CUR==='__excludes__'?'active':''}">
+    <span>🔕 신호 제외</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__models__" class="${CUR==='__models__'?'active':''}">
+    <span>🧠 모델 설정</span></a>`;
+  document.querySelectorAll('nav a').forEach(a =>
+    a.onclick = () => { CUR=a.dataset.c; SKIP=0; Q=''; render(); });
+}
+
+async function rebrief(btn){
+  btn.disabled = true; btn.textContent = '요약 중…';
+  try{
+    const r = await api('/signals/rebrief', {method:'POST'});
+    alert(`${r.briefed}건 요약 완료\n\n${r.summary || '(요약 없음)'}`);
+    await loadStats(); if(CUR) render();
+  }catch(e){ alert('실패: '+e.message); }
+  btn.disabled = false; btn.textContent = '지금 요약';
+}
+
+function fmtWhen(d){
+  if(!d) return '';
+  const t = new Date(d);
+  return isNaN(t) ? '' : t.toLocaleString('ko',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function summarize(doc){
+  return doc.user_comment || doc.summary || doc.text || doc.body ||
+    (doc.insight && doc.insight.text) || doc.date || doc.label || '—';
+}
+
+async function render(){
+  document.querySelectorAll('nav a').forEach(a =>
+    a.classList.toggle('active', a.dataset.c===CUR));
+  if(CUR==='__personas__') return renderPersonas();
+  if(CUR==='__excludes__') return renderExcludes();
+  if(CUR==='__models__') return renderModels();
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let data;
+  try{ data = await api(`/collection/${CUR}?limit=50&skip=${SKIP}&q=${encodeURIComponent(Q)}`); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+
+  const bar = `<div class="bar">
+    <h2>${CUR}</h2><span class="total">${data.total}건</span>
+    <input type="search" placeholder="검색 (_id·본문·요약·발신인)" value="${Q}"
+      onkeydown="if(event.key==='Enter'){Q=this.value;SKIP=0;render()}">
+  </div>`;
+
+  if(!data.docs.length){ m.innerHTML = bar + '<div class="empty">문서 없음</div>'; return; }
+
+  const rows = data.docs.map(d => {
+    const id = d._id;
+    const when = fmtWhen(d.ts || d.period_start || d.last_ts);
+    const otp = d.otp ? '<span class="flag otp">OTP</span>' : '';
+    const briefed = (CUR==='signals' && d.briefed===false) ? '<span class="flag">미요약</span>' : '';
+    return `<div class="doc" data-id="${id}">
+      <div class="head" onclick="toggle(this)">
+        <span class="summary">${esc(summarize(d))}${otp}${briefed}</span>
+        <span class="when">${when}</span>
+      </div>
+      <div class="body" hidden>
+        <pre>${esc(JSON.stringify(d,null,2))}</pre>
+        <div class="actions">
+          <span class="id">${id}</span>
+          <button class="danger" onclick="del('${id}',event)">삭제</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const shown = SKIP + data.docs.length;
+  const nav = [];
+  if(SKIP > 0) nav.push(`<button onclick="SKIP=Math.max(0,SKIP-50);render()">← 이전</button>`);
+  if(shown < data.total) nav.push(`<button onclick="SKIP+=50;render()">다음 →</button>`);
+  const more = nav.length
+    ? `<div style="text-align:center;margin:16px 0;color:var(--gray);font-size:12px">
+         ${SKIP+1}–${shown} / ${data.total} &nbsp; ${nav.join(' ')}</div>` : '';
+  m.innerHTML = bar + rows + more;
+}
+
+function toggle(head){
+  const b = head.parentElement.querySelector('.body');
+  b.hidden = !b.hidden;
+}
+
+async function renderPersonas(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let d;
+  try{ d = await api('/personas'); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  m.innerHTML = `<div class="bar"><h2>페르소나</h2>
+    <span class="total">베르(메인)·쿠키(서브) 말투·역할 · 저장 후 5초 내 반영</span></div>` +
+    d.fields.map(f => `
+      <div class="pf">
+        <label>${f.label} ${f.overridden?'<span class="flag">수정됨</span>':''}</label>
+        <textarea data-key="${f.key}">${esc(f.value)}</textarea>
+        <div class="row">
+          <button class="accent" onclick="savePersona('${f.key}',this)">저장</button>
+          ${f.overridden?`<button onclick="resetPersona('${f.key}')">디폴트로</button>`:''}
+          <span class="hint">${f.key}</span>
+        </div>
+      </div>`).join('');
+}
+
+async function savePersona(key, btn){
+  const ta = btn.closest('.pf').querySelector('textarea');
+  btn.disabled = true;
+  try{
+    await api('/personas', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({key, value: ta.value})});
+    renderPersonas();
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
+}
+
+async function resetPersona(key){
+  if(!confirm('디폴트로 되돌릴까요?')) return;
+  try{
+    await api('/personas', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({key, value: ''})});
+    renderPersonas();
+  }catch(e){ alert('실패: '+e.message); }
+}
+
+async function renderExcludes(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let d;
+  try{ d = await api('/signal-excludes'); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  m.innerHTML = `<div class="bar"><h2>신호 제외</h2>
+    <span class="total">발신자·앱·내용에 아래 문구가 포함되면 요약에서 제외 · 한 줄에 하나 · 원본은 남음</span></div>
+    <div class="pf">
+      <label>제외 패턴 (부분일치, 대소문자 무시)</label>
+      <textarea id="exTa" style="min-height:220px"
+        placeholder="예)&#10;CBC Maintenance&#10;세션 자동 종료&#10;광고">${esc((d.patterns||[]).join('\n'))}</textarea>
+      <div class="row">
+        <button class="accent" onclick="saveExcludes(this)">저장</button>
+        <span class="hint">다음 요약부터 적용</span>
+      </div>
+    </div>`;
+}
+
+async function saveExcludes(btn){
+  const ta = document.getElementById('exTa');
+  const patterns = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
+  btn.disabled = true;
+  try{
+    await api('/signal-excludes', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({patterns})});
+    btn.textContent = '저장됨 ✓';
+    setTimeout(() => { btn.textContent = '저장'; btn.disabled = false; }, 1200);
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled = false; }
+}
+
+async function renderModels(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let d;
+  try{ d = await api('/task-aliases'); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  const sel = (val) => '<option value="">(env 디폴트)</option>' +
+    d.models.map(a => `<option value="${esc(a)}" ${a===val?'selected':''}>${esc(a)}</option>`).join('');
+  m.innerHTML = `<div class="bar"><h2>모델 설정</h2>
+    <span class="total">용도별 Nest 모델 — 저장 후 5초 내 반영 · 비우면 env 디폴트</span></div>` +
+    d.fields.map(f => `
+      <div class="pf">
+        <label>${f.label} <span class="hint">${f.key}</span></label>
+        <select style="width:100%;padding:9px;border:1px solid var(--hair);font:inherit;background:var(--paper)"
+          onchange="saveTaskAlias('${f.key}', this.value)">${sel(f.value)}</select>
+        <div class="hint" style="margin-top:4px">실제 적용: ${esc(f.effective) || '(자동 — Nest 첫 모델)'}</div>
+      </div>`).join('');
+}
+
+async function saveTaskAlias(key, value){
+  try{
+    await api('/task-aliases', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({key, value})});
+    renderModels();
+  }catch(e){ alert('저장 실패: '+e.message); }
+}
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function del(id, ev){
+  ev.stopPropagation();
+  if(!confirm(`삭제할까요?\n${id}`)) return;
+  try{ await api(`/collection/${CUR}/${encodeURIComponent(id)}`, {method:'DELETE'});
+    await loadStats(); render(); }
+  catch(e){ alert('삭제 실패: '+e.message); }
+}
+
+loadStats();
+</script>
+</body>
+</html>

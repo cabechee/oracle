@@ -5,12 +5,16 @@ class NotifService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
-  Future<void> init() async {
+  /// [onTap]: 알림 탭 시 payload(다이제스트 날짜)와 함께 호출 — "탭해서 보기" 동작.
+  Future<void> init({void Function(String? payload)? onTap}) async {
     try {
       const init = InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       );
-      await _plugin.initialize(init);
+      await _plugin.initialize(
+        init,
+        onDidReceiveNotificationResponse: (r) => onTap?.call(r.payload),
+      );
       // Android 13+ 권한 요청 (없으면 silent)
       await _plugin
           .resolvePlatformSpecificImplementation<
@@ -30,7 +34,8 @@ class NotifService {
           priority: Priority.high,
         ),
       );
-      await _plugin.show(0, '📓 새 다이제스트', '$date — 탭해서 보기', details);
+      await _plugin.show(0, '📓 새 다이제스트', '$date — 탭해서 보기', details,
+          payload: date);
     } catch (_) {}
   }
 }

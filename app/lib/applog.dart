@@ -17,6 +17,10 @@ class AppLog {
     try {
       final dir = await getApplicationDocumentsDirectory();
       _file = File('${dir.path}/oracle.log');
+      // 단순 로테이션 — 2MB 넘으면 비움 (append-only라 방치 시 무한 증식)
+      if (await _file!.exists() && await _file!.length() > 2 * 1024 * 1024) {
+        await _file!.writeAsString('');
+      }
     } catch (_) {}
   }
 

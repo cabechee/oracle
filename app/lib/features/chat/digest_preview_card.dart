@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../../api.dart';
+import '../../core/design.dart';
 import '../../models.dart';
 
-/// 채팅 타임라인 하단의 다이제스트 미리보기 카드 (탭 → DigestScreen).
+/// 타임라인 하단의 다이제스트 발행 행 — "No.N — 어제의 일기 / 읽기".
 class DigestPreviewCard extends StatefulWidget {
   final OracleApi api;
   final DigestEntry entry;
+  final int? issueNo;
   final VoidCallback onTap;
   const DigestPreviewCard({
     super.key,
     required this.api,
     required this.entry,
+    required this.issueNo,
     required this.onTap,
   });
   @override
@@ -36,54 +39,58 @@ class _DigestPreviewCardState extends State<DigestPreviewCard> {
           .where((l) => l.trim().isNotEmpty && !l.startsWith('#'))
           .toList();
       final preview = lines.take(2).join(' ').trim();
-      setState(() => _preview = preview.isEmpty ? '(빈 다이제스트)' : preview);
+      setState(() => _preview = preview.isEmpty ? '(빈 일기)' : preview);
     } catch (_) {
-      if (mounted) setState(() => _preview = '(미리보기 실패)');
+      if (mounted) setState(() => _preview = null);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: InkWell(
-        onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          decoration: BoxDecoration(
-            color: cs.secondaryContainer,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.auto_stories, color: cs.onSecondaryContainer),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '📓 ${widget.entry.date} 다이제스트',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: cs.onSecondaryContainer,
+    final title = widget.issueNo != null
+        ? 'No.${widget.issueNo} — 어제의 일기'
+        : '어제의 일기';
+    return InkWell(
+      onTap: widget.onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+            OracleSpace.screenH, 8, OracleSpace.screenH, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: OracleType.marginalia
+                          .copyWith(color: OracleColors.inkSoft)),
+                  if (_preview != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        _preview!,
+                        style: OracleType.label
+                            .copyWith(color: OracleColors.gray, fontSize: 11),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _preview ?? '(불러오는 중...)',
-                      style: TextStyle(color: cs.onSecondaryContainer),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
+                ],
               ),
-              Icon(Icons.chevron_right, color: cs.onSecondaryContainer),
-            ],
-          ),
+            ),
+            const SizedBox(width: 16),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('읽기',
+                  style: TextStyle(
+                    fontFamily: OracleType.sans,
+                    fontSize: 11,
+                    letterSpacing: 0.3,
+                    color: OracleColors.vermilion,
+                  )),
+            ),
+          ],
         ),
       ),
     );

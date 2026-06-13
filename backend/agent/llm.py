@@ -47,7 +47,42 @@ def call_text(alias: str, prompt: str, **kw: Any) -> str:
 
 
 def embed(alias: str, inputs, **kw: Any) -> Dict[str, Any]:
+    """임베딩 — 기본은 Nest /api/embed. ORACLE_EMBED_URL 설정 시 로컬 서버 직결.
+
+    (chocolat 라이브 Nest가 /api/embed 미배포라 임시 우회 — Nest 갱신 후
+    env에서 ORACLE_EMBED_URL 지우면 원래 경로로 복귀.)
+    """
+    from config import EMBED_DIRECT_URL
+    if EMBED_DIRECT_URL:
+        return _embed_direct(EMBED_DIRECT_URL, inputs)
     return nest_client.embed(alias, inputs, **kw)
+
+
+# 임베딩 입력 길이 캡 — llama-server는 입력이 ubatch(4096토큰)를 넘으면 거부.
+# 한국어 ~1.5자/토큰 기준 안전 마진. 검색 품질은 앞부분 수천 자로 충분 — 정본은 그대로.
+_EMBED_MAX_CHARS = 3500
+
+
+def _embed_direct(url: str, inputs) -> Dict[str, Any]:
+    """OpenAI 호환 /v1/embeddings 직접 호출 → Nest embed 응답 shape로 변환."""
+    import httpx
+    if isinstance(inputs, str):
+        inputs = [inputs]
+    inputs = [t[:_EMBED_MAX_CHARS] for t in inputs]
+    r = httpx.post(url, json={"input": inputs}, timeout=60)
+    r.raise_for_status()
+    data = r.json()
+    vecs = [item["embedding"] for item in data.get("data", [])]
+    if not vecs:
+        raise RuntimeError(f"임베딩 빈 결과: {data}")
+    return {
+        "ok": True,
+        "provider": "local-direct",
+        "model": data.get("model") or "local-embed",
+        "embeddings": vecs,
+        "dims": len(vecs[0]),
+        "count": len(vecs),
+    }
 
 
 def embed_one(alias: str, text: str, **kw: Any) -> List[float]:

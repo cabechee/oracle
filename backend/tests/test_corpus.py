@@ -60,3 +60,38 @@ def test_append_record_creates_day_file():
         assert "테스트 comment" in body
         assert "LLM 응답 본문" in body
         assert "<!-- rec-test-001 -->" in body
+
+
+def test_bake_orientation_rotates_pixels_and_keeps_gps():
+    """EXIF Orientation=6 JPEG → 픽셀 회전(가로↔세로) + 태그 제거 + GPS 보존."""
+    pytest = __import__("pytest")
+    Image = pytest.importorskip("PIL.Image")
+    import io
+    for mod in ("config", "corpus"):
+        sys.modules.pop(mod, None)
+    import corpus
+
+    # 1280x720 가로 픽셀 + Orientation 6 (= 시계방향 90도 돌려 보라) + GPS
+    im = Image.new("RGB", (1280, 720), (200, 100, 50))
+    exif = Image.Exif()
+    exif[0x0112] = 6                                   # Orientation
+    exif[0x8825] = {1: "N", 2: ((37, 1), (30, 1), (0, 1)),
+                    3: "E", 4: ((127, 1), (0, 1), (0, 1))}  # GPSInfo IFD
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", exif=exif.tobytes())
+
+    baked = corpus._bake_orientation(buf.getvalue())
+    out = Image.open(io.BytesIO(baked))
+    assert out.size == (720, 1280)                     # 세로로 굽힘
+    assert out.getexif().get(0x0112, 1) == 1           # 태그 소거(또는 정방향)
+    assert out.getexif().get_ifd(0x8825)               # GPS 살아있음
+
+
+def test_bake_orientation_passthrough_when_upright_or_not_jpeg():
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL.Image")
+    for mod in ("config", "corpus"):
+        sys.modules.pop(mod, None)
+    import corpus
+
+    assert corpus._bake_orientation(b"not an image") == b"not an image"

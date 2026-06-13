@@ -78,7 +78,8 @@ def ep_digest_list():
 @router.get("/digest/{date_str}")
 def ep_digest_get(date_str: str):
     """특정 날짜 다이제스트 마크다운."""
-    text = journal_svc.read_digest(date_str)
+    d = _parse_date(date_str)   # 날짜 형식 강제 — 임의 문자열로 파일명 조합 차단
+    text = journal_svc.read_digest(d.isoformat())
     if text is None:
         raise HTTPException(404, "not found")
-    return {"date": date_str, "text": text}
+    return {"date": d.isoformat(), "text": text}

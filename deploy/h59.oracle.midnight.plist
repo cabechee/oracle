@@ -8,6 +8,8 @@
     <!--
       매일 00:05 — 어제 하루치 자정 배치 트리거.
       backend의 POST /digest/run (target_date 안 주면 어제 default).
+      max-time 1800: 월요일+1일 겹치는 날은 일+주간+월간 LLM 5회+라 900으론 부족
+      (끊겨도 backend 처리는 완료되지만 결과 JSON 로그가 유실됨).
     -->
     <key>ProgramArguments</key>
     <array>
@@ -16,7 +18,7 @@
         <string>-X</string>
         <string>POST</string>
         <string>--max-time</string>
-        <string>900</string>
+        <string>1800</string>
         <string>http://localhost:8001/digest/run</string>
     </array>
 

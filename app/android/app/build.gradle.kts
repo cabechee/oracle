@@ -26,7 +26,7 @@ android {
         applicationId = "studio.camembertcheese.oracle"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 26   // health(Health Connect) 요구. 폰은 Android 16이라 무관.
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

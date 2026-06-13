@@ -1,20 +1,26 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../api.dart';
 import '../../applog.dart';
+import '../../core/design.dart';
 import '../../core/record_store.dart';
 import '../../digest_screen.dart';
 import '../../index_screen.dart';
 import '../../llm_picker.dart';
-import '../../models.dart';
+import '../../log_screen.dart';
 import '../../onboarding_screen.dart';
 import '../../query_screen.dart';
 import '../capture/capture_controller.dart';
 import '../capture/record_tab.dart';
 import '../chat/chat_controller.dart';
 import '../chat/chat_list.dart';
+import '../health/health_sync.dart';
 import '../notifications/notif_service.dart';
+import '../signals/signals_screen.dart';
+import '../signals/signals_sync.dart';
 import 'home_tab.dart';
 
 const _kModelKey = 'selected_model';
@@ -38,13 +44,12 @@ class _HomePageState extends State<HomePage>
   final NotifService _notif = NotifService();
 
   String? _selectedModel;
-  DigestEntry? _latestDigest;
 
   @override
   void initState() {
     super.initState();
     AppLog.init();
-    _tab = TabController(length: 3, vsync: this, initialIndex: 2); // 첫 실행 = 기록 탭
+    _tab = TabController(length: 4, vsync: this, initialIndex: 3); // 첫 실행 = 기록 탭
     WidgetsBinding.instance.addObserver(this);
 
     _store = RecordStore();
@@ -56,12 +61,28 @@ class _HomePageState extends State<HomePage>
     );
     _chat = ChatController(api: _api, store: _store, onToast: _toast);
 
-    _notif.init();
-    _capture.init();
+    _notif.init(onTap: _openDigestFromNotif);
     _loadSelectedModel();
     _chat.load(initial: true);
+    _chat.loadMessages();
     _loadLatestDigest();
+    // 카메라·SMS·통화·알림·WorkManager는 폰 전용 — 웹에선 조회/검색/대화만.
+    if (!kIsWeb) {
+      _capture.init();
+      _ensureSignalsPermissions();
+      maybeForegroundSync();
+      initNotificationListener();   // 앱 알림 수집 시작 (권한 있으면 구독)
+      syncHealth();                 // 수면·걸음 (Health Connect)
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowOnboarding());
+  }
+
+  /// 신호 동기화용 권한 — 1회만 요청, 거부해도 해당 소스만 건너뜀 (graceful).
+  Future<void> _ensureSignalsPermissions() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('signals_perm_asked') ?? false) return;
+    await prefs.setBool('signals_perm_asked', true);
+    await [Permission.sms, Permission.phone].request();
   }
 
   @override
@@ -76,6 +97,7 @@ class _HomePageState extends State<HomePage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (kIsWeb) return; // 웹은 카메라·신호 생명주기 처리 없음
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       _capture.onAppPause();
@@ -83,6 +105,7 @@ class _HomePageState extends State<HomePage>
       _capture.onAppResume();
       _loadLatestDigest();
       _chat.refresh(); // 복귀 시 최신 record 반영 (백그라운드 중 완료분)
+      maybeForegroundSync(); // 신호 동기화 — 배터리 최적화로 주기 밀려도 복귀 시 보장
     }
   }
 
@@ -98,12 +121,12 @@ class _HomePageState extends State<HomePage>
   }
 
   // ── 다이제스트 미리보기 + 새 다이제스트 알림 ──────────────
+  /// 새 다이제스트 도착 시 알림만 — 표시는 홈 탭(다이제스트는 히스토리에서 뺌).
   Future<void> _loadLatestDigest() async {
     try {
       final list = await _api.listDigests();
       if (!mounted) return;
       final latest = list.isNotEmpty ? list.first : null;
-      setState(() => _latestDigest = latest);
       if (latest != null) {
         final prefs = await SharedPreferences.getInstance();
         final lastSeen = prefs.getString(_kLastSeenDigestKey);
@@ -140,6 +163,23 @@ class _HomePageState extends State<HomePage>
     await _saveSelectedModel(picked.isEmpty ? null : picked);
   }
 
+  Widget _textAction(String label, VoidCallback onTap) {
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        minimumSize: const Size(40, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+      ),
+      child: Text(label,
+          style: const TextStyle(
+            fontFamily: OracleType.sans,
+            fontSize: 12.5,
+            letterSpacing: 0.2,
+            color: OracleColors.ink,
+          )),
+    );
+  }
+
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -157,49 +197,66 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  /// 알림 탭 — payload(날짜) 있으면 그 다이제스트 본문으로 바로.
+  void _openDigestFromNotif(String? date) {
+    if (!mounted) return;
+    if (date != null && date.isNotEmpty) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => DigestDetailScreen(api: _api, date: date)),
+      );
+    } else {
+      _openDigest();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Oracle'),
+        // 타이틀 long-press = 숨은 진단 로그 뷰 (개인용 디버그)
+        title: GestureDetector(
+          onLongPress: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const LogScreen())),
+          child: const Text('Oracle'),
+        ),
         bottom: TabBar(
           controller: _tab,
           tabs: const [
-            Tab(text: '홈'),
-            Tab(text: '히스토리'),
+            Tab(text: '오늘'),
+            Tab(text: '흐름'),
+            Tab(text: '신호'),
             Tab(text: '기록'),
           ],
         ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-            child: ActionChip(
-              avatar: const Icon(Icons.psychology_outlined, size: 18),
-              label: Text(
-                _selectedModel ?? '(자동)',
-                overflow: TextOverflow.ellipsis,
+          Center(
+            child: InkWell(
+              onTap: _openLlmPicker,
+              borderRadius: BorderRadius.circular(99),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  border:
+                      Border.all(color: OracleColors.hairline, width: 0.5),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  _selectedModel ?? '자동',
+                  style: OracleType.label
+                      .copyWith(color: OracleColors.gray, fontSize: 11),
+                ),
               ),
-              onPressed: _openLlmPicker,
-              tooltip: 'LLM 선택',
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '검색·질의 (자연어)',
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => QueryScreen(api: _api))),
-          ),
-          IconButton(
-            icon: const Icon(Icons.travel_explore_outlined),
-            tooltip: '상위 인덱스 + 펜딩 환기',
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => IndexScreen(api: _api))),
-          ),
-          IconButton(
-            icon: const Icon(Icons.auto_stories_outlined),
-            tooltip: '다이제스트 보기',
-            onPressed: _openDigest,
-          ),
+          _textAction('검색', () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => QueryScreen(api: _api)))),
+          _textAction('색인', () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => IndexScreen(api: _api)))),
+          _textAction('일기', _openDigest),
+          const SizedBox(width: 8),
         ],
       ),
       body: SafeArea(
@@ -207,18 +264,46 @@ class _HomePageState extends State<HomePage>
         child: TabBarView(
           controller: _tab,
           children: [
-            const HomeTab(),
+            HomeTab(api: _api, onGoHistory: () => _tab.animateTo(1)),
             RefreshIndicator(
               onRefresh: _onRefresh,
               child: ChatList(
                 store: _store,
                 chat: _chat,
                 api: _api,
-                latestDigest: _latestDigest,
-                onOpenDigest: _openDigest,
+                // 지나간 사진 백필은 웹에서만 (폰은 기록 탭 카메라로 지금 촬영)
+                onBackfill: kIsWeb ? _capture.backfillUpload : null,
               ),
             ),
-            RecordTab(c: _capture),
+            SignalsScreen(api: _api, embedded: true),
+            kIsWeb ? const _WebCaptureNotice() : RecordTab(c: _capture),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 웹 기록 탭 — 카메라·녹음은 폰 전용이라 안내만.
+class _WebCaptureNotice extends StatelessWidget {
+  const _WebCaptureNotice();
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.photo_camera_outlined,
+                size: 48, color: OracleColors.faint),
+            const SizedBox(height: 16),
+            Text('캡처는 폰 앱에서',
+                style: OracleType.dateHeader, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text('웹에서는 기록을 보고, 검색하고, 대화할 수 있어요.\n'
+                '사진·음성 캡처는 폰에서 이어집니다.',
+                style: OracleType.marginalia, textAlign: TextAlign.center),
           ],
         ),
       ),

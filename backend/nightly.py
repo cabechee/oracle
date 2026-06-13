@@ -14,6 +14,7 @@ import db
 import threads as threads_mod
 import classify
 import journal
+import signals as signals_mod
 import index as index_mod
 
 
@@ -80,16 +81,28 @@ def _run_daily_inner(target_date: Optional[date] = None) -> Dict[str, Any]:
         if not isinstance(a, dict):
             continue
         rid = a.get("record_id")
-        tids = a.get("thread_ids") or []
+        raw_tids = a.get("thread_ids") or []
+        tids: list = []
+        for t in (raw_tids if isinstance(raw_tids, list) else []):
+            # threads._id 는 int — 문자열 id가 섞이면 메타 조회·집계가 어긋남(new_threads와 동일 가드)
+            try:
+                tids.append(int(t))
+            except (TypeError, ValueError):
+                print(f"[nightly] thread_id 비정수 — 무시: {t!r} (record {rid})", flush=True)
         if rid:
             db.records().update_one({"_id": rid}, {"$set": {"thread_ids": tids}})
     for nt in thread_res.get("new_threads", []) or []:
         if not isinstance(nt, dict):
             continue
         tid = nt.get("id")
-        if tid is not None:
+        if tid is None:
+            continue
+        try:
             threads_mod.upsert_thread(
                 int(tid), nt.get("name", f"thread-{tid}"), nt.get("lineage_from"))
+        except (TypeError, ValueError):
+            # LLM이 비정수 id를 내도 그 항목만 버리고 배치는 계속
+            print(f"[nightly] new_thread id 비정수 — 무시: {nt!r}", flush=True)
     result["thread_assignments"] = len(thread_res.get("assignments", []) or [])
     result["new_threads"] = len(thread_res.get("new_threads", []) or [])
 
@@ -115,8 +128,12 @@ def _run_daily_inner(target_date: Optional[date] = None) -> Dict[str, Any]:
     silent = threads_mod.silent_threads(min_days=3, max_days=30)
     result["silent_thread_count"] = len(silent)
 
-    # 5) 일 저널 (LLM, silent + reactions 포함된 풍부한 prompt) → vault digest + journals
-    digest_text = journal.make_daily_journal(records, target, silent, reactions)
+    # 4.5) 그날 받은 연락(문자·부재중, 비-OTP) — 일기의 배경 재료
+    day_signals = signals_mod.signals_for_day(target)
+    result["signal_count"] = len(day_signals)
+
+    # 5) 일 저널 (LLM, silent + reactions + signals 포함된 풍부한 prompt) → vault digest + journals
+    digest_text = journal.make_daily_journal(records, target, silent, reactions, day_signals)
     result["digest_path"] = journal.write_daily_digest_file(target, digest_text)
     result["digest_preview"] = digest_text[:200]
     result["journal_embedded"] = journal.save_day_journal(

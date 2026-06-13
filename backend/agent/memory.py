@@ -22,12 +22,24 @@ from config import (
     MEMORY_W_IMPORTANCE,
     MEMORY_RECENCY_TAU_DAYS,
     WORKING_MEMORY_DAYS,
+    WORKING_MEMORY_MAX_CHARS,
 )
 
 
 # reaction → record 중요도 스칼라 (정규화 전 raw). none=중립 baseline.
-_REACTION_IMPORTANCE = {"useful": 1.0, "interesting": 0.8, "skip": 0.0}
+_REACTION_IMPORTANCE = {"useful": 1.0, "interesting": 0.8, "skip": 0.0}   # legacy 단일
 _IMPORTANCE_BASELINE = 0.4
+# 섹션별 reactions → 중요도. comment만 좋아/싫어(2026-06-13), discovery·analysis는 3값 유지.
+_SECTION_IMPORTANCE = {
+    ("comment", "like"): 1.0, ("comment", "dislike"): 0.1,
+    ("discovery", "interesting"): 0.9, ("discovery", "known"): 0.4, ("discovery", "skip"): 0.1,
+    ("analysis", "accurate"): 0.55, ("analysis", "lacking"): 0.4, ("analysis", "wrong"): 0.35,
+}
+# 저널 집계 키별 가중 — "긍정 신호 많을수록 그 기간이 중요"
+_JOURNAL_POSITIVE_WEIGHTS = {
+    "useful": 0.12, "interesting": 0.08,                       # legacy
+    "comment:like": 0.12, "discovery:interesting": 0.08,
+}
 
 
 def _recency(ts: Any, now: datetime, tau_days: float) -> float:
@@ -39,13 +51,22 @@ def _recency(ts: Any, now: datetime, tau_days: float) -> float:
 
 
 def _record_importance(rec: Dict[str, Any]) -> float:
+    """섹션별 반응이 있으면 가장 강한 신호, 없으면 legacy 단일, 둘 다 없으면 baseline."""
+    section_vals = [
+        _SECTION_IMPORTANCE[(sec, val)]
+        for sec, val in (rec.get("reactions") or {}).items()
+        if val and (sec, val) in _SECTION_IMPORTANCE
+    ]
+    if section_vals:
+        return max(section_vals)
     return _REACTION_IMPORTANCE.get(rec.get("reaction"), _IMPORTANCE_BASELINE)
 
 
 def _journal_importance(j: Dict[str, Any]) -> float:
-    """저널은 그 기간의 reaction 집계로 중요도. 신호 많을수록 높게(상한 1)."""
+    """저널은 그 기간의 reaction 집계로 중요도. 긍정 신호 많을수록 높게(상한 1)."""
     rs = j.get("reaction_signal") or {}
-    raw = _IMPORTANCE_BASELINE + 0.12 * (rs.get("useful") or 0) + 0.08 * (rs.get("interesting") or 0)
+    raw = _IMPORTANCE_BASELINE + sum(
+        w * (rs.get(k) or 0) for k, w in _JOURNAL_POSITIVE_WEIGHTS.items())
     return min(1.0, raw)
 
 
@@ -89,7 +110,7 @@ def search(
     if "record" in kinds:
         cur = db.records().find(
             {"embedding": {"$exists": True, "$ne": None}},
-            {"_id": 1, "embedding": 1, "ts": 1, "reaction": 1},
+            {"_id": 1, "embedding": 1, "ts": 1, "reaction": 1, "reactions": 1},
         )
         for d in cur:
             v = d.get("embedding")
@@ -104,8 +125,11 @@ def search(
             })
 
     if "journal" in kinds:
+        # 일 저널(미시) + 주/월 회고(거시) 전부 후보 — 임베딩은 셋 다 이미 부착됨.
+        # "지난달 흐름" 같은 거시 질문은 week/month가, 구체 사실은 day/record가 잡힌다.
         cur = db.journals().find(
-            {"kind": "day", "embedding": {"$exists": True, "$ne": None}},
+            {"kind": {"$in": ["day", "week", "month"]},
+             "embedding": {"$exists": True, "$ne": None}},
             {"_id": 1, "embedding": 1, "period_end": 1, "period_start": 1,
              "date": 1, "reaction_signal": 1},
         )
@@ -129,7 +153,11 @@ def search(
     if mat.ndim != 2 or mat.shape[1] != qdim:
         return None
     mat_n = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8)
-    sims = (mat_n @ qn).tolist()
+    # macOS Accelerate BLAS가 유효 입력에도 FP 경고 플래그를 올리는 경우가 있어 억제,
+    # 비정상값은 0(무관)으로 — 불량 벡터 하나가 랭킹 전체를 오염시키지 않게.
+    with np.errstate(all="ignore"):
+        sims_arr = np.nan_to_num(mat_n @ qn, nan=0.0, posinf=0.0, neginf=0.0)
+    sims = sims_arr.tolist()
     recs = [_recency(c["ts"], now, MEMORY_RECENCY_TAU_DAYS) for c in cands]
     imps = [c["importance"] for c in cands]
 
@@ -176,28 +204,38 @@ def working_memory(now: Optional[datetime] = None, days: Optional[int] = None) -
     window_start = today_start - timedelta(days=days)
     parts: List[str] = []
 
-    # 1) 지난 N일 일 저널 (오름차순). 오늘 저널은 아직 없음(자정 생성).
+    # 1) 지난 N일 일 저널 — 문자 예산(WORKING_MEMORY_MAX_CHARS) 안에서 최신 날짜 우선.
+    #    저널이 쌓여도 캡처당 주입량이 무한 증가하지 않게 오래된 날짜부터 떨어뜨린다.
     jcur = db.journals().find(
         {"kind": "day", "period_start": {"$gte": window_start, "$lt": today_start}},
         {"_id": 1, "date": 1, "text": 1, "period_start": 1},
-    ).sort("period_start", 1)
+    ).sort("period_start", -1)   # 최신부터 — 예산 소진 시 오래된 쪽이 잘림
+    budget = WORKING_MEMORY_MAX_CHARS if WORKING_MEMORY_MAX_CHARS > 0 else None
+    used = 0
     jblocks: List[str] = []
     for j in jcur:
         t = (j.get("text") or "").strip()
         if not t:
             continue
         # 저장된 text는 보통 '# 날짜' 헤더로 시작 — 없으면 날짜 헤더를 붙여준다.
-        jblocks.append(t if t.lstrip().startswith("#") else f"## {j.get('date', '')}\n{t}")
+        block = t if t.lstrip().startswith("#") else f"## {j.get('date', '')}\n{t}"
+        if budget is not None and used + len(block) > budget:
+            break
+        used += len(block)
+        jblocks.append(block)
+    jblocks.reverse()   # 시간 순서(과거→최근)로 복원
     if jblocks:
         parts.append("[지난 며칠의 일기]\n" + "\n\n".join(jblocks))
 
-    # 2) 오늘 raw 캡처 (시간순)
+    # 2) 오늘 raw 캡처 (시간순) — '싫어' 표시한 건 제외(사용자가 부정한 건 기억에 안 남김)
     rcur = db.records().find(
         {"ts": {"$gte": today_start, "$lt": now}},
-        {"user_comment": 1, "insight": 1, "ts": 1},
+        {"user_comment": 1, "insight": 1, "ts": 1, "reactions": 1},
     ).sort("ts", 1)
     lines: List[str] = []
     for r in rcur:
+        if "dislike" in (r.get("reactions") or {}).values():
+            continue
         ts = r.get("ts")
         tstr = ts.strftime("%H:%M") if hasattr(ts, "strftime") else ""
         c = (r.get("user_comment") or "").strip()

@@ -119,13 +119,17 @@ def images_from_paths(paths: List[str]) -> List[Dict[str, str]]:
 
     oracle(bert) ↔ Nest(chocolat)가 다른 머신이라 path 직접 전달 불가 →
     파일 읽어서 base64로 인라인 전송. Nest가 cli 백엔드용으로 tmp에 떨궈줌.
+    JPEG은 EXIF Orientation을 픽셀에 구워서 보냄(LLM은 태그를 무시함) —
+    정본 파일은 원본 그대로, 변환은 전송 페이로드 한정.
     """
+    import corpus
     out: List[Dict[str, str]] = []
     for p in paths:
         ext = p.rsplit(".", 1)[-1].lower() if "." in p else "jpg"
         mime = _MIME_BY_EXT.get(ext, "image/jpeg")
         with open(p, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("ascii")
+            raw = f.read()
+        b64 = base64.b64encode(corpus._bake_orientation(raw)).decode("ascii")
         out.append({"b64": b64, "mime": mime})
     return out
 
@@ -139,6 +143,21 @@ def audio_from_paths(paths: List[str]) -> List[Dict[str, str]]:
     for p in paths:
         ext = p.rsplit(".", 1)[-1].lower() if "." in p else "m4a"
         mime = _MIME_BY_EXT.get(ext, "audio/mp4")
+        with open(p, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        out.append({"b64": b64, "mime": mime})
+    return out
+
+
+def video_from_paths(paths: List[str]) -> List[Dict[str, str]]:
+    """로컬 영상 경로 → Nest용 base64 (멀티모달 모델용, gemini @path 첨부).
+
+    영상은 무거우니 빠른 트랙(쿠키)에선 best-effort — 모델/CLI가 못 받으면 무시될 뿐.
+    """
+    out: List[Dict[str, str]] = []
+    for p in paths:
+        ext = p.rsplit(".", 1)[-1].lower() if "." in p else "mp4"
+        mime = _MIME_BY_EXT.get(ext, "video/mp4")
         with open(p, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("ascii")
         out.append({"b64": b64, "mime": mime})

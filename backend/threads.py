@@ -9,6 +9,7 @@ silent_threads = "5일째 무언급" 같은 펜딩 환기 후보.
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
+import corpus
 import db
 
 
@@ -59,12 +60,19 @@ def get_thread(thread_id: int) -> Optional[Dict[str, Any]]:
 
 
 def list_thread_records(thread_id: int, limit: int = 50) -> List[Dict[str, Any]]:
-    """한 thread에 속한 record들 (timeline)."""
-    cur = db.records().find({"thread_ids": thread_id}).sort("ts", -1).limit(limit)
+    """한 thread에 속한 record들 (timeline). 내부 검색 벡터 제외 + 경로 정규화."""
+    cur = (
+        db.records()
+        .find({"thread_ids": thread_id}, {"embedding": 0, "embed_meta": 0})
+        .sort("ts", -1)
+        .limit(limit)
+    )
     out: List[Dict[str, Any]] = []
     for r in cur:
         if hasattr(r.get("ts"), "isoformat"):
             r["ts"] = r["ts"].isoformat()
+        for f in ("image_paths", "audio_paths", "video_paths"):
+            r[f] = [corpus.to_vault_rel(p) for p in r.get(f, []) or []]
         out.append(r)
     return out
 

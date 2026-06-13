@@ -42,7 +42,7 @@ class OnboardingScreen extends StatelessWidget {
               _stepRow(context, '📷', '카메라 셔터 1회',
                   '앱을 켜면 바로 프리뷰. 셔터 한 번에 캡처.'),
               _stepRow(context, '🎤', '음성 또는 텍스트 코멘트',
-                  '마이크 탭 → 한국어 음성 인식 또는 텍스트 직접 입력 (둘 다 선택).'),
+                  '마이크 탭 → 음성 메모 녹음·첨부, 또는 텍스트 직접 입력 (둘 다 선택).'),
               _stepRow(context, '📤', '전송 → 즉답',
                   '전송 누르는 즉시 입력 비워지고 LLM이 백그라운드에서 응답. 계속 던질 수 있음.'),
               _stepRow(context, '📓', '매일 자정 다이제스트',

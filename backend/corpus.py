@@ -7,6 +7,7 @@ append-only 평문. 정본의 핵심 속성:
 """
 
 import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -23,12 +24,40 @@ def _images_dir(ts: datetime) -> Path:
     return Path(VAULT_DIR) / "images" / f"{ts.year:04d}/{ts.month:02d}"
 
 
+def _media_name(ts: datetime, idx: int, ext: str) -> str:
+    """미디어 파일명 — 초 단위 ts에 uuid 꼬리를 붙여 같은 초 동시 인입의 덮어쓰기 방지
+    (전송이 fire-and-forget이라 동시 ingest 가능, record_id와 같은 이유)."""
+    return f"{ts.day:02d}-{ts.strftime('%H%M%S')}-{idx}-{uuid.uuid4().hex[:6]}.{ext}"
+
+
+def _bake_orientation(content: bytes) -> bytes:
+    """JPEG의 EXIF Orientation을 픽셀에 굽기 — LLM 전송 직전 정규화 용도.
+
+    카메라 직촬 JPEG은 센서 방향 픽셀 + Orientation 태그로 오는데, LLM 경로(b64)는
+    태그를 적용하지 않아 모델이 누운 사진을 본다(vision 분석에 "90도 회전" 반복).
+    정본은 원본 그대로 저장(사용자 결정 2026-06-11) — 변환은 전송 페이로드에만.
+    나머지 EXIF(GPS 등)는 보존. 비JPEG·정방향·PIL 부재·실패 시 원본 그대로(graceful).
+    """
+    try:
+        import io
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(content)) as im:
+            if im.format != "JPEG" or im.getexif().get(0x0112, 1) == 1:
+                return content
+            baked = ImageOps.exif_transpose(im)
+            buf = io.BytesIO()
+            kw = {"exif": baked.info["exif"]} if baked.info.get("exif") else {}
+            baked.save(buf, "JPEG", quality=92, **kw)
+            return buf.getvalue()
+    except Exception:
+        return content
+
+
 def save_image(ts: datetime, idx: int, content: bytes, ext: str = "jpg") -> str:
-    """이미지 저장 → 절대경로 반환 (Nest /api/call이 절대경로 요구)."""
+    """이미지 저장 → 절대경로 반환 (Nest /api/call이 절대경로 요구). 원본 그대로."""
     d = _images_dir(ts)
     d.mkdir(parents=True, exist_ok=True)
-    fname = f"{ts.day:02d}-{ts.strftime('%H%M%S')}-{idx}.{ext}"
-    p = d / fname
+    p = d / _media_name(ts, idx, ext)
     p.write_bytes(content)
     return str(p.resolve())
 
@@ -41,8 +70,7 @@ def save_audio(ts: datetime, idx: int, content: bytes, ext: str = "m4a") -> str:
     """오디오 저장 → 절대경로 반환 (Nest /api/call이 절대경로 요구)."""
     d = _audio_dir(ts)
     d.mkdir(parents=True, exist_ok=True)
-    fname = f"{ts.day:02d}-{ts.strftime('%H%M%S')}-{idx}.{ext}"
-    p = d / fname
+    p = d / _media_name(ts, idx, ext)
     p.write_bytes(content)
     return str(p.resolve())
 
@@ -55,8 +83,7 @@ def save_video(ts: datetime, idx: int, content: bytes, ext: str = "mp4") -> str:
     """영상 저장 → 절대경로 반환."""
     d = _video_dir(ts)
     d.mkdir(parents=True, exist_ok=True)
-    fname = f"{ts.day:02d}-{ts.strftime('%H%M%S')}-{idx}.{ext}"
-    p = d / fname
+    p = d / _media_name(ts, idx, ext)
     p.write_bytes(content)
     return str(p.resolve())
 

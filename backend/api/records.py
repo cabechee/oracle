@@ -3,10 +3,11 @@
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import embedding as embedding_mod
 import ingest as ingest_mod
 from config import VAULT_DIR
 
@@ -14,12 +15,16 @@ router = APIRouter()
 
 
 class ReactionBody(BaseModel):
-    reaction: str   # "interesting" | "useful" | "skip" 등 자유 텍스트
+    reaction: str = ""              # 값 — 빈 문자열이면 해제 (section 지정 시)
+    section: Optional[str] = None   # analysis | comment | discovery (없으면 legacy 단일)
 
 
 @router.post("/records/{record_id}/reaction")
 def ep_reaction(record_id: str, body: ReactionBody):
-    ok = ingest_mod.set_reaction(record_id, body.reaction)
+    try:
+        ok = ingest_mod.set_reaction(record_id, body.reaction, section=body.section)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if not ok:
         raise HTTPException(404, "record not found")
     return {"ok": True}
@@ -30,7 +35,7 @@ class RecordPatch(BaseModel):
 
 
 @router.patch("/records/{record_id}")
-def ep_patch_record(record_id: str, body: RecordPatch):
+def ep_patch_record(record_id: str, body: RecordPatch, background_tasks: BackgroundTasks):
     """record 부분 수정. 현재는 user_comment 만 지원 (잘못 보낸 거 정정).
     vault 평문은 append-only — Mongo만 갱신."""
     changed = False
@@ -39,7 +44,28 @@ def ep_patch_record(record_id: str, body: RecordPatch):
             changed = True
         else:
             raise HTTPException(404, "record not found")
+    if changed:
+        # 코멘트가 바뀌면 검색 벡터도 새 내용으로 (임베딩 비활성이면 무해한 no-op)
+        background_tasks.add_task(embedding_mod.embed_record, record_id)
     return {"ok": True, "changed": changed}
+
+
+@router.post("/records/{record_id}/hide")
+def ep_hide(record_id: str):
+    """실수 업로드 취소 — 흐름에서 숨김(soft delete, 어드민엔 남음)."""
+    if not ingest_mod.hide_record(record_id):
+        raise HTTPException(404, "record not found")
+    return {"ok": True}
+
+
+@router.post("/records/{record_id}/reprocess")
+def ep_reprocess(record_id: str, part: str = "all"):
+    """내용이 이상할 때 다시 분석. part=all|quick|analysis|comment|discovery.
+    Mongo record만 갱신, 재처리 이력은 reprocess_log에 남음."""
+    r = ingest_mod.reprocess(record_id, part=part)
+    if not r:
+        raise HTTPException(404, "record not found")
+    return r
 
 
 @router.get("/records")

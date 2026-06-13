@@ -6,11 +6,12 @@
 
 ## 무엇을 하는가
 
-- 폰 카메라로 셔터 1회, 음성/텍스트 코멘트 → 즉시 LLM이 의견·인사이트로 응답 (fire-and-forget)
+- 폰 카메라로 셔터 1회, 음성/텍스트 코멘트 → 즉시 LLM이 의견·인사이트로 응답 (fire-and-forget, 비동기 인입+폴링)
+- **대화 모드** — 히스토리 탭 하단 입력으로 동반자와 자유 대화 (워킹메모리+3요소 검색 컨텍스트)
 - 매일 **자정 다이제스트** 자동 생성 — 그날의 테마·발견·환기 항목
-- **자연어 검색** — "지난주 마우스 관련 뭐였더라?" → 시간순 정리된 답변 + 참조 record
+- **자연어 검색** — "지난주 마우스 관련 뭐였더라?" → 답변 + 근거 record 썸네일 카드
 - **펜딩 환기** — 며칠째 무언급된 thread 자동 점검 (silent drop 방지)
-- **외부 공유 인텐트** — 카카오톡·갤러리·브라우저에서 Oracle로 바로 던지기
+- **외부 공유 인텐트** — 카카오톡·갤러리·브라우저에서 사진·영상·텍스트를 Oracle로 바로 던지기
 
 비슷한 카테고리(자동 라이프로깅 Rewind/Limitless, 텍스트 저널링 Day One/Rosebud, OSS 캡처 Memex)와 차이:
 - **의도적 캡처** + **즉답 인사이트** + **자정 능동 환기** 세 다리. 자동 캡처 아님.
@@ -27,34 +28,44 @@
 ## 디렉토리
 
 ```
-corpus/                # 정본 vault — 날짜별 마크다운 + 이미지 (gitignored)
-digest/                # 자정 다이제스트 (gitignored)
+corpus/                # 정본 vault — 날짜별 마크다운 + 이미지/오디오/영상 (gitignored)
+digest/                # 일 저널 (자정 생성, gitignored)
+journal/               # 주/월 회고 (gitignored)
 index/                 # 사람용 master.md 검색 진입점 (gitignored)
 backend/               # FastAPI (chocolat에서 LaunchAgent로 영구화)
-  config.py            # env·라우팅
-  nest_client.py       # Nest 게이트웨이 HTTP 클라이언트
-  db.py                # MongoDB (records · threads · index_meta)
-  corpus.py            # vault read/append
-  ingest.py            # 캡처 → VLM + 즉답 → Record (Layer 1)
-  threads.py           # thread 메타·active·silent 점검
-  digest.py            # 자정 배치 (Layer 2+3)
-  query.py             # 자연어 검색·질의
-  api.py               # FastAPI routes
   main.py              # 미들웨어 + entry
+  api/                 # 도메인 라우터 (얇음): ingest·records·journal·threads·query·index·nest
+  ingest.py            # 캡처 파이프라인 (Layer 1)
+  nightly.py           # 자정 오케스트레이션 (일 + 월요일 주간 + 1일 월간)
+  classify.py          # thread_judge + type/tags 분류 (Layer 2)
+  journal.py           # 일/주/월 서술 저널 생성·저장·조회 (Layer 3)
+  index.py             # 상위 인덱스 (master.md + index_meta)
+  query.py             # 자연어 검색·질의 (agent.memory 사용)
+  nightly_common.py    # 자정 공유 헬퍼 (records_brief·resolve_alias·parse_json_safe)
+  agent/               # llm(Nest 래퍼+cache_prefix hook) · vision(사진3단계) · memory(3요소 검색+워킹메모리)
+                       # · chat(대화 모드 MVP — 호문쿨루스 연동 시 교체 경계)
+  nest_client.py       # Nest 게이트웨이 HTTP 클라이언트
+  db.py                # MongoDB (records · threads · index_meta · journals)
+  corpus.py            # vault read/append
+  embedding.py         # record/journal 임베딩 생성·backfill
+  threads.py           # thread 메타·active·silent 점검
+  config.py            # env·task→alias 매핑
 app/                   # Flutter (Android, namespace: studio.camembertcheese.oracle)
   lib/
-    main.dart          # 카메라 메인 화면 + 채팅 + 입력바
-    api.dart           # REST 클라이언트
-    models.dart        # Record · LlmModel · DigestEntry · QueryResult
-    query_screen.dart  # 자연어 검색
-    digest_screen.dart # 다이제스트 목록·본문
-    index_screen.dart  # master.md + 펜딩 환기
-    llm_picker.dart    # Nest 동적 모델 picker
+    main.dart · app.dart            # 엔트리·테마
+    core/record_store.dart          # records+pendings SSOT (ChangeNotifier)
+    features/capture/               # 카메라·영상·오디오·갤러리·공유인텐트 + 전송
+    features/chat/                  # 히스토리 타임라인·버블·리액션·편집
+    features/home/                  # 앱 셸(탭·생명주기·모델선택)
+    features/notifications/         # 로컬 알림
+    api.dart · models.dart          # REST 클라이언트·모델
+    query_screen.dart · digest_screen.dart · index_screen.dart · llm_picker.dart · onboarding_screen.dart
 deploy/                # chocolat LaunchAgent plists
   h59.oracle.backend.plist        # backend (KeepAlive, 부팅 자동)
   h59.oracle.midnight.plist       # 매일 00:05 자정 배치 cron
   h59.oracle.mongo-backup.plist   # 매주 일 03:00 MongoDB 백업
-  backup-mongo.sh
+  h59.oracle.vault-backup.plist   # 매일 03:20 vault(정본) 스냅샷 백업
+  backup-mongo.sh · backup-vault.sh
 ```
 
 ## LLM 호출 — Nest 게이트웨이
@@ -119,15 +130,22 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/h59.oracle.mongo-backup.
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| POST | `/ingest` | 캡처 인입 (file/comment/model) → VLM + 즉답 → Record |
+| POST | `/ingest` | 캡처 인입 (file/audio/video/comment/model). `async_mode=1`이면 stub 즉시 반환(status=processing) + 백그라운드 처리 |
 | GET | `/records` | 최근 Record (paginated) |
+| GET | `/records/<id>` | Record 단건 (비동기 완료 폴링·참조 카드) |
+| POST | `/chat` | 대화 한 턴 → user/assistant 메시지 쌍 (저장됨) |
+| GET | `/chat/history` | 대화 메시지 목록 (타임라인 merge용) |
 | GET | `/photos/<vault-rel>` | 사진 서빙 |
 | POST | `/records/<id>/reaction` | 이모지 반응 (interesting/useful/skip) |
+| PATCH | `/records/<id>` | 코멘트 정정 (Mongo만, vault는 append-only) |
 | POST | `/digest/run` | 수동 자정 배치 (target_date 옵션) |
-| GET | `/digest/list` · `/digest/<date>` | 다이제스트 목록·본문 |
+| POST | `/journal/weekly` · `/journal/monthly` | 주/월 회고 수동 트리거 |
+| GET | `/journal/list` · `/journal/<jid>` | 일/주/월 저널 목록·본문 (Mongo) |
+| GET | `/digest/list` · `/digest/<date>` | 일 저널 파일 목록·본문 (vault) |
 | GET | `/index/master` · `/index/meta` | 상위 인덱스 (vault md + Mongo) |
 | GET | `/threads` · `/threads/<id>` · `/threads/silent` | thread 조회·펜딩 점검 |
 | POST | `/query` | 자연어 검색·질의 → 답변 + 참조 record_id |
+| POST | `/embed/backfill` | 임베딩 없는 record 일괄 임베딩 (ORACLE_EMBED 필요) |
 | GET | `/llm/models` | Nest 등록 모델·council (폰 picker) |
 
 ## 정본·캐시·자동화
@@ -135,11 +153,15 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/h59.oracle.mongo-backup.
 - `corpus/YYYY/MM/DD.md` — 정본 평문, 사람도 grep/Obsidian으로 직접 읽기 가능
 - MongoDB `oracle.records` — Record 메타·thread/tag/type 부착
 - MongoDB `oracle.index_meta` — 월별 통계 (검색 진입점)
+- MongoDB `oracle.conversations` — 대화 모드 메시지
 - MongoDB 주간 백업 → `~/data/backups/oracle-mongo/` (자동 4주 회전)
-- 매일 00:05 자정 배치 자동, 매주 일 03:00 mongo 백업 자동
+- **vault 일일 백업** → `~/data/backups/oracle-vault/YYYY-MM-DD/` (rsync 하드링크 증분, 14일 보관)
+- 매일 00:05 자정 배치, 03:20 vault 백업, 매주 일 03:00 mongo 백업 — 전부 자동
 
 ## 상태
 
-✅ Layer 1+3 작동 + chocolat 영구화 + GitHub public.
+✅ Layer 1~3 작동 + 메모리 M1~M4(일/주/월 저널 + 3요소 검색 + 워킹메모리) + 비동기 인입 + 대화 모드 + chocolat 영구화 + GitHub public.
 
-남은 polish (별도 사이클): 푸시 알림 · 온보딩 · record 편집 · 테스트 보강.
+⚠️ 보안 전제: 기본 무인증(LAN/tailnet 안에서만 노출 가정), 통신은 Tailscale(WireGuard) 위 HTTP.
+`ORACLE_TOKEN` 설정 시 토큰 인증 활성(loopback 면제) — 앱도 `--dart-define=ORACLE_TOKEN=...`으로 빌드.
+임베딩 검색은 `ORACLE_EMBED` 설정 + venv numpy 설치 시 활성 (미설정이면 최근순 fallback).

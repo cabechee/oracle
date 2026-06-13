@@ -2,60 +2,95 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import 'record_bubble.dart' show userBubble;
+import '../../core/design.dart';
+import 'record_bubble.dart' show mediaChip;
 
-/// 처리 중인 캡처 버블 — "생각 중..." (탭하면 큐에서 제거).
+/// 처리 중인 캡처 — "현상 중" (탭하면 큐에서 제거).
 class PendingBubble extends StatelessWidget {
   final String? comment;
-  final File? photo;
-  const PendingBubble({super.key, this.comment, this.photo});
+  final List<File> photos;
+  final bool hasAudio;
+  final bool hasVideo;
+  const PendingBubble({
+    super.key,
+    this.comment,
+    this.photos = const [],
+    this.hasAudio = false,
+    this.hasVideo = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (photo != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  photo!,
-                  width: 180,
-                  height: 180,
-                  fit: BoxFit.cover,
-                ),
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (photos.isNotEmpty)
+          Container(
+            color: OracleColors.mat,
+            padding: const EdgeInsets.all(4),
+            foregroundDecoration: BoxDecoration(
+              border: Border.all(color: OracleColors.matBorder, width: 0.5),
             ),
-          if (comment != null && comment!.isNotEmpty)
-            userBubble(context, comment!),
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Stack(
               children: [
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 8),
-                const Text('생각 중...'),
-                const SizedBox(width: 6),
-                Text(
-                  '· 탭해서 큐에서 제거',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.outline,
-                      ),
-                ),
+                Image.file(photos.first,
+                    width: 232, height: 154, fit: BoxFit.cover),
+                if (photos.length > 1)
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      color: Colors.black54,
+                      child: Text('${photos.length}장',
+                          style: OracleType.label
+                              .copyWith(color: OracleColors.paper)),
+                    ),
+                  ),
               ],
             ),
           ),
-        ],
-      ),
+        if (hasAudio || hasVideo)
+          Padding(
+            padding:
+                EdgeInsets.only(top: photos.isNotEmpty ? OracleSpace.inPhoto : 0),
+            child: Row(
+              children: [
+                if (hasAudio)
+                  Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: mediaChip(context, '음성 메모')),
+                if (hasVideo) mediaChip(context, '영상'),
+              ],
+            ),
+          ),
+        if (comment != null && comment!.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.only(
+                top: (photos.isNotEmpty || hasAudio || hasVideo)
+                    ? OracleSpace.inBlock
+                    : 0),
+            child: Text(comment!, style: OracleType.userBody),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: OracleSpace.inBlock),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(
+                    strokeWidth: 1, color: OracleColors.faint),
+              ),
+              const SizedBox(width: 8),
+              Text('현상 중 — 탭해서 취소',
+                  style: OracleType.marginalia
+                      .copyWith(color: OracleColors.faint)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

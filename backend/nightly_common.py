@@ -7,8 +7,8 @@ import json
 import re
 from typing import List, Dict, Any, Optional
 
-import nest_client
-from config import TASK_ALIAS
+from agent import llm
+from config import task_alias
 
 
 def records_brief(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -16,23 +16,30 @@ def records_brief(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     brief: List[Dict[str, Any]] = []
     for r in records:
         ts = r.get("ts")
-        brief.append({
+        b: Dict[str, Any] = {
             "id": r["_id"],
             "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts,
             "user_comment": (r.get("user_comment") or "")[:300],
             "vlm": ((r.get("vlm") or {}).get("caption") or "")[:300],
             "insight": ((r.get("insight") or {}).get("text") or "")[:300],
             "suggestion": (r.get("suggestion") or "")[:200],
-        })
+        }
+        # 음성 캡처·GPS — 있을 때만 (없는 record에 빈 키로 토큰 낭비 X)
+        audio_cap = ((r.get("audio") or {}).get("caption") or "")[:300]
+        if audio_cap:
+            b["audio"] = audio_cap
+        if r.get("location"):
+            b["location"] = r["location"]
+        brief.append(b)
     return brief
 
 
 def resolve_alias(task_key: str) -> Optional[str]:
     """alias 동적 chain: env(TASK_ALIAS) → Nest enabled 첫 모델."""
-    env_alias = TASK_ALIAS.get(task_key) or ""
+    env_alias = task_alias(task_key) or ""
     if env_alias:
         return env_alias
-    return nest_client.default_alias()
+    return llm.default_alias()
 
 
 def parse_json_safe(text: str) -> Dict[str, Any]:

@@ -94,3 +94,39 @@ def test_search_unions_and_ranks(patched):
 def test_search_none_when_no_embedding(monkeypatch):
     monkeypatch.setattr(memory.embedding_mod, "embed_text", lambda q: None)
     assert memory.search("q") is None
+
+
+# ── working_memory 문자 상한 ──────────────────────────────────
+
+def test_working_memory_caps_and_keeps_newest(monkeypatch):
+    """예산 초과 시 오래된 날짜부터 떨어지고, 남은 블록은 시간순."""
+    now = datetime(2026, 6, 10, 12, 0, 0)
+    journals = [
+        {"_id": f"day-2026-06-0{d}", "kind": "day", "date": f"2026-06-0{d}",
+         "text": f"# 2026-06-0{d}\n" + ("내용" * 800),   # 블록당 ~1600+자
+         "period_start": datetime(2026, 6, d)}
+        for d in range(1, 8)
+    ]
+
+    class _Col:
+        def __init__(self, docs):
+            self._docs = docs
+
+        def find(self, q, *_a, **_k):
+            return self
+
+        def sort(self, key, direction):
+            return sorted(self._docs, key=lambda x: x["period_start"],
+                          reverse=(direction == -1))
+
+    monkeypatch.setattr(memory.db, "journals", lambda: _Col(journals))
+    monkeypatch.setattr(memory.db, "records", lambda: _Col([]))
+    monkeypatch.setattr(memory, "WORKING_MEMORY_MAX_CHARS", 3500)
+
+    out = memory.working_memory(now, days=30)
+    # 예산 3500자 → 최신 2개(06-07, 06-06)만 들어가고 나머지는 잘림
+    assert "2026-06-07" in out
+    assert "2026-06-06" in out
+    assert "2026-06-01" not in out
+    # 시간순(과거→최근) 유지
+    assert out.index("2026-06-06") < out.index("2026-06-07")

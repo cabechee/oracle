@@ -10,12 +10,12 @@ import json
 import re
 from typing import Dict, Any, List
 
-import nest_client
+from agent import llm
 from agent import memory as memory_mod
 import db
 import index as index_mod
 import threads as threads_mod
-from config import TASK_ALIAS
+from config import task_alias
 
 
 QUERY_SYSTEM = """당신은 유저의 일상 데이터에서 답을 찾는 비서입니다.
@@ -37,7 +37,7 @@ QUERY_SYSTEM = """당신은 유저의 일상 데이터에서 답을 찾는 비�
 
 def _record_candidate(r: Dict[str, Any]) -> Dict[str, Any]:
     ts = r.get("ts")
-    return {
+    c = {
         "id": r["_id"],
         "kind": "record",
         "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts,
@@ -48,6 +48,11 @@ def _record_candidate(r: Dict[str, Any]) -> Dict[str, Any]:
         "thread_ids": r.get("thread_ids") or [],
         "type": r.get("type_hint"),
     }
+    # 음성 캡처는 audio.caption에만 내용이 있음 — 빼면 검색에서 안 보임
+    audio_cap = ((r.get("audio") or {}).get("caption") or "")[:250]
+    if audio_cap:
+        c["audio"] = audio_cap
+    return c
 
 
 def _journal_candidate(j: Dict[str, Any]) -> Dict[str, Any]:
@@ -59,22 +64,12 @@ def _journal_candidate(j: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def query(question: str, limit: int = 30) -> Dict[str, Any]:
-    """자연어 질문 처리. 동기 호출, FastAPI threadpool에서 실행됨.
+def build_candidates(question: str, limit: int = 30) -> List[Dict[str, Any]]:
+    """질문 관련 후보(record+journal) 수집 — query/chat 공용.
 
-    Returns: {"answer": str, "referenced": [record_id...], "alias": str}.
+    agent.memory 3요소 스코어(유사도+최근성+중요도)로 저널+record 합집합 top-k.
+    임베딩 불가(alias 미설정/Nest 실패/임베딩된 후보 없음) 시 최근순 fallback — graceful.
     """
-    alias = TASK_ALIAS.get("query") or nest_client.default_alias()
-    if not alias:
-        return {
-            "answer": "(query alias 미설정 — Nest에 enabled 모델 없음)",
-            "referenced": [],
-        }
-
-    master = index_mod.read_master_index() or "(인덱스 아직 생성 안 됨)"
-
-    # 후보 — agent.memory 3요소 스코어(유사도+최근성+중요도)로 저널+record 합집합 top-k.
-    # 임베딩 불가(alias 미설정/Nest 실패/임베딩된 후보 없음) 시 최근순 fallback — graceful.
     hits = memory_mod.search(question, top_k=limit)
     candidates: List[Dict[str, Any]] = []
     if hits:
@@ -93,7 +88,36 @@ def query(question: str, limit: int = 30) -> Dict[str, Any]:
             candidates.append(_record_candidate(r))
         for j in db.journals().find({"kind": "day"}).sort("period_start", -1).limit(7):
             candidates.append(_journal_candidate(j))
+    return candidates
 
+
+def extract_referenced(text: str) -> tuple:
+    """LLM 답변 끝의 `referenced: [rec-...]` 추출 → (본문, record_id 리스트).
+
+    query/chat 공용 — 본문에서 referenced 줄은 제거(중복 표시 방지).
+    """
+    referenced: List[str] = []
+    m = re.search(r"referenced\s*[:：]\s*\[([^\]]*)\]", text)
+    if m:
+        referenced = re.findall(r"rec-[\w-]+", m.group(1))
+        text = re.sub(r"\n*`?referenced\s*[:：][^\n]*", "", text).strip()
+    return text, referenced
+
+
+def query(question: str, limit: int = 30) -> Dict[str, Any]:
+    """자연어 질문 처리. 동기 호출, FastAPI threadpool에서 실행됨.
+
+    Returns: {"answer": str, "referenced": [record_id...], "alias": str}.
+    """
+    alias = task_alias("query") or llm.default_alias()
+    if not alias:
+        return {
+            "answer": "(query alias 미설정 — Nest에 enabled 모델 없음)",
+            "referenced": [],
+        }
+
+    master = index_mod.read_master_index() or "(인덱스 아직 생성 안 됨)"
+    candidates = build_candidates(question, limit)
     silent = threads_mod.silent_threads(min_days=3, max_days=30)
 
     prompt = (
@@ -108,19 +132,12 @@ def query(question: str, limit: int = 30) -> Dict[str, Any]:
     )
 
     try:
-        r = nest_client.call(alias=alias, prompt=prompt, system=QUERY_SYSTEM)
+        r = llm.call(alias, prompt, system=QUERY_SYSTEM)
         text = (r.get("text") or "").strip()
     except Exception as e:
         return {"answer": f"(질의 실패: {e})", "referenced": []}
 
-    # referenced parse — 'rec-' 패턴 추출
-    referenced: List[str] = []
-    m = re.search(r"referenced\s*[:：]\s*\[([^\]]*)\]", text)
-    if m:
-        referenced = re.findall(r"rec-[\w-]+", m.group(1))
-        # 본문에서 referenced 줄 제거(중복 표시 방지)
-        text = re.sub(r"\n*referenced\s*[:：][^\n]*", "", text).strip()
-
+    text, referenced = extract_referenced(text)
     return {
         "answer": text,
         "referenced": referenced,

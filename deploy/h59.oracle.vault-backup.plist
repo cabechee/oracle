@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>h59.oracle.vault-backup</string>
+
+    <!--
+      매일 03:20 — vault(정본: corpus 사진·평문 + digest/journal/index) 스냅샷 백업.
+      rsync 하드링크 증분이라 디스크는 "한 벌 + 일일 변경분"만 차지. 14일 보관.
+      Mongo는 별도 주간 백업(h59.oracle.mongo-backup) — vault가 정본이라 이쪽이 핵심.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/chocolat/projects/oracle/deploy/backup-vault.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>20</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/chocolat/data/logs/oracle-vault-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chocolat/data/logs/oracle-vault-backup.log</string>
+</dict>
+</plist>

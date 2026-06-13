@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import 'applog.dart';
@@ -10,17 +11,36 @@ import 'models.dart';
 class OracleApi {
   final String baseUrl;
 
+  /// opt-in API 토큰 — backend ORACLE_TOKEN과 같은 값으로 빌드:
+  /// flutter build apk --dart-define=ORACLE_TOKEN=...  (비우면 헤더 미전송)
+  static const _token = String.fromEnvironment('ORACLE_TOKEN');
+
   OracleApi({String? baseUrl})
       : baseUrl = baseUrl ??
-            const String.fromEnvironment(
-              'ORACLE_API',
-              defaultValue: 'http://chocolat.tail575fea.ts.net:8001',
-            );
+            // 웹: FastAPI가 같은 origin에 서빙 → 자기가 로드된 곳으로 API 호출(CORS 불필요).
+            // 모바일: Tailscale magic DNS 고정 (빌드타임 override 가능).
+            (kIsWeb
+                ? Uri.base.origin
+                : const String.fromEnvironment(
+                    'ORACLE_API',
+                    defaultValue: 'http://chocolat.tail575fea.ts.net:8001',
+                  ));
 
-  // 타임아웃 — LLM 경유(ingest/query/digest)는 길게, 단순 조회는 짧게.
-  static const _ingestTimeout = Duration(seconds: 120);
-  static const _llmTimeout = Duration(seconds: 120);
+  // 타임아웃 — LLM 경유(query/chat)는 길게, 단순 조회는 짧게.
+  // ingest는 비동기(즉시 202성 응답)지만 영상 업로드가 있어 넉넉히.
+  // digest 수동 실행은 월요일/1일에 일+주+월 배치가 겹치면 매우 길다 — plist max-time(1800)에 맞춤.
+  static const _ingestTimeout = Duration(seconds: 300);
+  static const _llmTimeout = Duration(seconds: 300);
+  static const _digestRunTimeout = Duration(seconds: 1800);
   static const _getTimeout = Duration(seconds: 15);
+
+  /// 공통 헤더 — 토큰 빌드 시에만 부착.
+  Map<String, String> get authHeaders =>
+      _token.isEmpty ? const {} : const {'X-Oracle-Token': _token};
+
+  /// Image.network 등 미디어 로딩용 헤더 (토큰 없으면 null).
+  Map<String, String>? get photoHeaders =>
+      _token.isEmpty ? null : const {'X-Oracle-Token': _token};
 
   static String _short(String s) =>
       s.length > 200 ? '${s.substring(0, 200)}…' : s;
@@ -55,17 +75,29 @@ class OracleApi {
 
   Future<Record> ingest({
     String? comment,
-    File? imageFile,
+    List<File> imageFiles = const [],
+    List<({List<int> bytes, String name})> imageBytesList = const [],
     File? audioFile,
     File? videoFile,
     String? model,
+    bool asyncMode = true,
+    bool backfill = false,
   }) async {
     final uri = Uri.parse('$baseUrl/ingest');
     final req = http.MultipartRequest('POST', uri);
+    req.headers.addAll(authHeaders);
     if (comment != null && comment.isNotEmpty) req.fields['comment'] = comment;
     if (model != null && model.isNotEmpty) req.fields['model'] = model;
-    if (imageFile != null) {
-      req.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+    // 비동기 인입 — 백엔드가 stub(status=processing)을 즉시 반환, 완료는 폴링으로
+    if (asyncMode) req.fields['async_mode'] = '1';
+    if (backfill) req.fields['backfill'] = '1'; // 지나간 사진 — EXIF 촬영시각을 ts로
+    // 사진은 'file' 필드를 여러 번 — 백엔드가 한 record로 묶음(구앱은 1개 → 호환)
+    for (final f in imageFiles) {
+      req.files.add(await http.MultipartFile.fromPath('file', f.path));
+    }
+    for (final b in imageBytesList) {
+      // 웹/백필 — 경로 없는 bytes 업로드
+      req.files.add(http.MultipartFile.fromBytes('file', b.bytes, filename: b.name));
     }
     if (audioFile != null) {
       req.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
@@ -97,7 +129,7 @@ class OracleApi {
   /// 자정 배치로 생성된 다이제스트 목록 (최신순).
   Future<List<DigestEntry>> listDigests() async {
     final resp = await _req(
-        'GET /digest/list', () => http.get(Uri.parse('$baseUrl/digest/list')));
+        'GET /digest/list', () => http.get(Uri.parse('$baseUrl/digest/list'), headers: authHeaders));
     if (resp.statusCode != 200) {
       throw Exception('digest/list 실패: ${resp.statusCode}');
     }
@@ -109,7 +141,7 @@ class OracleApi {
   /// 특정 날짜의 다이제스트 마크다운 본문.
   Future<String> getDigest(String dateStr) async {
     final resp = await _req('GET /digest/$dateStr',
-        () => http.get(Uri.parse('$baseUrl/digest/$dateStr')));
+        () => http.get(Uri.parse('$baseUrl/digest/$dateStr'), headers: authHeaders));
     if (resp.statusCode != 200) {
       throw Exception('digest 실패: ${resp.statusCode}');
     }
@@ -120,7 +152,7 @@ class OracleApi {
   /// 상위 인덱스 vault master.md 본문.
   Future<String> getMasterIndex() async {
     final resp = await _req('GET /index/master',
-        () => http.get(Uri.parse('$baseUrl/index/master')));
+        () => http.get(Uri.parse('$baseUrl/index/master'), headers: authHeaders));
     if (resp.statusCode == 404) return '';
     if (resp.statusCode != 200) {
       throw Exception('index/master 실패: ${resp.statusCode}');
@@ -132,7 +164,7 @@ class OracleApi {
   /// MongoDB index_meta (월별 가벼운 구조).
   Future<List<Map<String, dynamic>>> getIndexMeta() async {
     final resp = await _req(
-        'GET /index/meta', () => http.get(Uri.parse('$baseUrl/index/meta')));
+        'GET /index/meta', () => http.get(Uri.parse('$baseUrl/index/meta'), headers: authHeaders));
     if (resp.statusCode != 200) {
       throw Exception('index/meta 실패: ${resp.statusCode}');
     }
@@ -146,7 +178,7 @@ class OracleApi {
     final resp = await _req(
       'POST /query',
       () => http.post(Uri.parse('$baseUrl/query'),
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', ...authHeaders},
           body: jsonEncode({'question': question, 'limit': limit})),
       timeout: _llmTimeout,
     );
@@ -168,8 +200,10 @@ class OracleApi {
   }) async {
     final resp = await _req(
         'GET /threads/silent',
-        () => http.get(Uri.parse(
-            '$baseUrl/threads/silent?min_days=$minDays&max_days=$maxDays')));
+        () => http.get(
+            Uri.parse(
+                '$baseUrl/threads/silent?min_days=$minDays&max_days=$maxDays'),
+            headers: authHeaders));
     if (resp.statusCode != 200) {
       throw Exception('silent 실패: ${resp.statusCode}');
     }
@@ -182,8 +216,8 @@ class OracleApi {
   Future<Map<String, dynamic>> runDigest({String? targetDate}) async {
     final qp = targetDate != null ? '?target_date=$targetDate' : '';
     final resp = await _req(
-        'POST /digest/run', () => http.post(Uri.parse('$baseUrl/digest/run$qp')),
-        timeout: _llmTimeout);
+        'POST /digest/run', () => http.post(Uri.parse('$baseUrl/digest/run$qp'), headers: authHeaders),
+        timeout: _digestRunTimeout);
     if (resp.statusCode != 200) {
       throw Exception('digest/run 실패: ${resp.statusCode} ${resp.body}');
     }
@@ -193,7 +227,7 @@ class OracleApi {
   /// Nest 등록 모델 + council 목록. AppBar 모델 선택용.
   Future<LlmCatalog> listLlmModels() async {
     final resp = await _req(
-        'GET /llm/models', () => http.get(Uri.parse('$baseUrl/llm/models')));
+        'GET /llm/models', () => http.get(Uri.parse('$baseUrl/llm/models'), headers: authHeaders));
     if (resp.statusCode != 200) {
       throw Exception('models 실패: ${resp.statusCode}');
     }
@@ -205,14 +239,88 @@ class OracleApi {
   Future<List<Record>> listRecent({int limit = 50, int offset = 0}) async {
     final resp = await _req(
         'GET /records?limit=$limit&offset=$offset',
-        () => http
-            .get(Uri.parse('$baseUrl/records?limit=$limit&offset=$offset')));
+        () => http.get(
+            Uri.parse('$baseUrl/records?limit=$limit&offset=$offset'),
+            headers: authHeaders));
     if (resp.statusCode != 200) {
       throw Exception('records 실패: ${resp.statusCode}');
     }
     final data = jsonDecode(utf8.decode(resp.bodyBytes));
     final items = (data['items'] as List).cast<Map<String, dynamic>>();
     return items.map(Record.fromMongo).toList();
+  }
+
+  /// record 단건 조회 — 비동기 ingest 완료 폴링 + 참조 카드용.
+  Future<Record> getRecord(String recordId) async {
+    final resp = await _req(
+        'GET /records/$recordId',
+        () => http.get(Uri.parse('$baseUrl/records/$recordId'),
+            headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('record 조회 실패: ${resp.statusCode}');
+    }
+    return Record.fromMongo(
+        jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  /// 재처리 — 같은 사진·코멘트로 다시 돌려 갱신된 record 반환.
+  /// part = all|quick|analysis|comment|discovery (부분 재처리).
+  Future<Record> reprocess(String recordId, {String part = 'all'}) async {
+    final resp = await _req(
+        'POST /records/$recordId/reprocess',
+        () => http.post(
+            Uri.parse('$baseUrl/records/$recordId/reprocess?part=$part'),
+            headers: authHeaders),
+        timeout: _llmTimeout);
+    if (resp.statusCode != 200) {
+      throw Exception('재처리 실패: ${resp.statusCode}');
+    }
+    return Record.fromMongo(
+        jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  /// 실수 업로드 취소 — record를 흐름에서 숨김 (soft delete, 어드민엔 남음).
+  Future<void> hideRecord(String recordId) async {
+    await _req(
+        'POST /records/$recordId/hide',
+        () => http.post(Uri.parse('$baseUrl/records/$recordId/hide'),
+            headers: authHeaders));
+  }
+
+  /// 대화 한 턴 — user/assistant 메시지 쌍 반환 (서버에 저장됨).
+  Future<List<ChatMessage>> sendChat(String message,
+      {List<String> mentionIds = const []}) async {
+    final resp = await _req(
+      'POST /chat',
+      () => http.post(Uri.parse('$baseUrl/chat'),
+          headers: {'Content-Type': 'application/json', ...authHeaders},
+          body: jsonEncode({'message': message, 'mention_ids': mentionIds})),
+      timeout: _llmTimeout,
+    );
+    if (resp.statusCode != 200) {
+      throw Exception('chat 실패: ${resp.statusCode} ${resp.body}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    return ((data['messages'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map(ChatMessage.fromJson)
+        .toList();
+  }
+
+  /// 대화 메시지 목록 (최신순) — record 타임라인과 merge용.
+  Future<List<ChatMessage>> listChatMessages({int limit = 200}) async {
+    final resp = await _req(
+        'GET /chat/history',
+        () => http.get(Uri.parse('$baseUrl/chat/history?limit=$limit'),
+            headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('chat/history 실패: ${resp.statusCode}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    return ((data['items'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map(ChatMessage.fromJson)
+        .toList();
   }
 
   /// vault-relative 경로 → 전체 URL (`<baseUrl>/photos/<rel>`).
@@ -229,19 +337,98 @@ class OracleApi {
     final resp = await _req(
         'PATCH /records/$recordId',
         () => http.patch(Uri.parse('$baseUrl/records/$recordId'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...authHeaders},
             body: jsonEncode({'user_comment': newComment})));
     if (resp.statusCode != 200) {
       throw Exception('record 수정 실패: ${resp.statusCode} ${resp.body}');
     }
   }
 
-  Future<void> setReaction(String recordId, String reaction) async {
+  /// 홈 표지 — 오늘 요약·어제 한 줄·신호 brief·그날의 오늘 (조회 전용, 빠름).
+  Future<Map<String, dynamic>> fetchHomeCover() async {
+    final resp = await _req('GET /home/cover',
+        () => http.get(Uri.parse('$baseUrl/home/cover'), headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('home/cover 실패: ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// 최신 발행물 (조간/석간) — 알림 폴링용. 없으면 null.
+  Future<Map<String, dynamic>?> fetchBriefingLatest() async {
+    final resp = await _req('GET /briefing/latest',
+        () => http.get(Uri.parse('$baseUrl/briefing/latest'),
+            headers: authHeaders));
+    if (resp.statusCode != 200) return null;
+    final d = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+    return d.isEmpty ? null : d;
+  }
+
+  /// 건강 지표 동기화 — 오늘 걸음·어젯밤 수면(분). 있는 값만 부분 갱신.
+  Future<void> syncMetrics({int? sleepMin, int? steps}) async {
+    final today =
+        '${DateTime.now().year.toString().padLeft(4, '0')}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
+    await _req(
+        'POST /metrics/sync',
+        () => http.post(Uri.parse('$baseUrl/metrics/sync'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: jsonEncode(
+                {'date': today, 'sleep_min': sleepMin, 'steps': steps})));
+  }
+
+  /// 신호 분류 항목 피드백 — "inaccurate"(부정확) 또는 null(해제).
+  Future<void> setBriefFeedback(
+      String briefId, int itemIndex, String? feedback) async {
+    final resp = await _req(
+        'POST /signals/brief/$briefId/feedback',
+        () => http.post(
+            Uri.parse('$baseUrl/signals/brief/$briefId/feedback'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: jsonEncode({'item_index': itemIndex, 'feedback': feedback})));
+    if (resp.statusCode != 200) {
+      throw Exception('feedback 실패: ${resp.statusCode}');
+    }
+  }
+
+  /// 신호 로그 — 과거 요약(brief) + 원본 신호(문자·부재중) 최신순.
+  Future<Map<String, dynamic>> fetchSignalsRecent() async {
+    final resp = await _req('GET /signals/recent',
+        () => http.get(Uri.parse('$baseUrl/signals/recent'),
+            headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('signals/recent 실패: ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// 신호 동기화 — 미읽음 SMS·부재중·앱 알림 → 백엔드 저장+로컬 LLM 분류·요약.
+  /// 반환: {new_sms, new_calls, new_notif, summary} (새 신호 없으면 summary 빈 문자열).
+  Future<Map<String, dynamic>> syncSignals(
+      List<Map<String, dynamic>> sms, List<Map<String, dynamic>> calls,
+      {List<Map<String, dynamic>> notifications = const []}) async {
+    final resp = await _req(
+        'POST /signals/sync',
+        () => http.post(Uri.parse('$baseUrl/signals/sync'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: jsonEncode(
+                {'sms': sms, 'calls': calls, 'notifications': notifications})));
+    if (resp.statusCode != 200) {
+      throw Exception('signals 실패: ${resp.statusCode} ${resp.body}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// 섹션별 리액션 (analysis|comment|discovery). reaction 빈 문자열 = 해제.
+  Future<void> setReaction(String recordId, String reaction,
+      {String? section}) async {
     final resp = await _req(
         'POST /records/$recordId/reaction',
         () => http.post(Uri.parse('$baseUrl/records/$recordId/reaction'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'reaction': reaction})));
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: jsonEncode({
+              'reaction': reaction,
+              'section': ?section,
+            })));
     if (resp.statusCode != 200) {
       throw Exception('reaction 실패: ${resp.statusCode}');
     }

@@ -9,6 +9,7 @@ MongoDB가 손실돼도 vault에서 재생성 가능한 캐시 성격.
 - index_meta: 월별 태그/엔티티/thread 활동 가벼운 구조 (자정 갱신)
 - journals:   일/주/월 서술 저널 (semantic 계층, 자정·주·월 배치가 생성 + 임베딩)
               _id = "day-YYYY-MM-DD" | "week-YYYY-Www" | "month-YYYY-MM"
+- conversations: 대화 모드 메시지 (role=user|assistant, ts 순 타임라인)
 """
 
 from typing import Optional
@@ -46,6 +47,35 @@ def journals() -> Collection:
     return _conn().journals
 
 
+def conversations() -> Collection:
+    return _conn().conversations
+
+
+def signals() -> Collection:
+    """수동 신호 원본 (SMS·부재중·알림) — record와 분리된 스트림, 패턴 창발용."""
+    return _conn().signals
+
+
+def signal_briefs() -> Collection:
+    """신호 요약본 (30분 주기) — 앱 알림으로 나간 brief 이력."""
+    return _conn().signal_briefs
+
+
+def settings() -> Collection:
+    """런타임 설정 — personas override 등 (어드민 편집). _id로 문서 구분."""
+    return _conn().settings
+
+
+def metrics() -> Collection:
+    """일별 건강 지표 (수면·걸음) — _id=날짜(YYYY-MM-DD). 홈 표지·조간 재료."""
+    return _conn().metrics
+
+
+def briefings() -> Collection:
+    """발행물 — 조간·석간 (_id=morning|evening-YYYY-MM-DD). 베르가 cron으로 합성."""
+    return _conn().briefings
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:
@@ -54,6 +84,10 @@ def ensure_indexes() -> None:
         threads().create_index("status")
         journals().create_index("kind")
         journals().create_index("period_start")
+        conversations().create_index("ts")
+        signals().create_index("ts")
+        signals().create_index("kind")
+        signal_briefs().create_index("ts")
     except Exception:
         # MongoDB가 안 떠 있어도 import는 통과 (api/ingest 호출 시 fail)
         pass

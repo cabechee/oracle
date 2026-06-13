@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>h59.embed</string>
+
+    <!--
+      로컬 임베딩 서버 — Qwen3-Embedding-0.6B (Q8 GGUF, ~1GB RAM).
+      oracle 검색 임베딩용이지만 Nest 경유라 다른 프로젝트도 재사용 가능 (공유 인프라).
+      127.0.0.1 바인딩 — 같은 머신의 Nest만 호출 (외부 노출 X).
+      pooling last = Qwen3-Embedding 공식 권장. 교체 시: 모델 파일 바꾸고 재시작 + oracle /embed/backfill.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/llama-server</string>
+        <string>--embeddings</string>
+        <string>--pooling</string>
+        <string>last</string>
+        <string>-m</string>
+        <string>/Users/chocolat/llm/embed/qwen3-embedding-0.6b-q8_0.gguf</string>
+        <string>-c</string>
+        <string>8192</string>
+        <!-- 임베딩(non-causal pooling)은 입력이 ubatch 안에 다 들어가야 함 —
+             기본 512토큰이면 긴 record/저널에서 연결 끊김. 4096으로. -->
+        <string>-b</string>
+        <string>4096</string>
+        <string>--ubatch-size</string>
+        <string>4096</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>7790</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/chocolat/data/logs/embed-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chocolat/data/logs/embed-server.log</string>
+</dict>
+</plist>
