@@ -113,6 +113,36 @@ def make_daily_journal(
         return f"# {target.isoformat()}\n\n(일기 생성 실패: {e})\n"
 
 
+DAY_SUMMARY3_SYSTEM = """당신은 유저의 하루 일기를 딱 3줄로 요약합니다.
+- 그날의 핵심 3가지를 각각 한 줄로, 구체적으로(무엇을 했는지 — 막연한 감상 X).
+- 메타·인사 없이 본문만. 각 줄 짧게, '~함/~했음/~다녀옴' 같은 사실 종결.
+- 정확히 3줄. 번호·불릿·따옴표 없이 줄바꿈으로만 구분."""
+
+
+def make_day_summary3(body_text: str) -> str:
+    """일기 본문 → 그날 핵심 3줄 (표지 '오늘의 한 줄'용). 미설정/실패면 ''.
+
+    줄바꿈으로 합친 문자열 반환 — 표지가 그대로 여러 줄로 표시한다.
+    """
+    alias = resolve_alias("daily_digest")
+    body = (body_text or "").strip()
+    # 생성 실패 마커거나 본문(헤더 제외)이 빈약하면 요약하지 않음 — 빈 하루를
+    # 억지로 요약하려다 "요약할 본문이 없습니다" 같은 메타 응답이 나오는 것 방지.
+    core = "\n".join(
+        ln for ln in body.splitlines() if not ln.lstrip().startswith("#")).strip()
+    if not alias or "(일기 생성 실패" in body or len(core) < 20:
+        return ""
+    try:
+        r = llm.call(alias,
+                     f"[오늘의 일기]\n{body}\n\n이 하루를 3줄로 요약하세요.",
+                     system=DAY_SUMMARY3_SYSTEM)
+        lines = [ln.strip(" -·•\t0123456789.")
+                 for ln in (r.get("text") or "").splitlines() if ln.strip()]
+        return "\n".join([ln for ln in lines if ln][:3])
+    except Exception:
+        return ""
+
+
 def write_daily_digest_file(target: date, text: str) -> str:
     """일 저널을 vault digest/{date}.md 로 (사람용). 반환: 파일 경로."""
     digest_dir = Path(VAULT_DIR).parent / "digest"
@@ -129,11 +159,12 @@ def save_day_journal(
     reactions: Dict[str, int],
     start: datetime,
     end: datetime,
+    summary3: str = "",
 ) -> bool:
     """일 서술 일기를 journals(day)에 upsert + 임베딩 (검색은 day 저널만)."""
     return _upsert_journal(
         f"day-{target.isoformat()}", "day", target.isoformat(),
-        start, end, body_text, record_count, reactions,
+        start, end, body_text, record_count, reactions, summary3=summary3,
     )
 
 
@@ -262,6 +293,7 @@ def _upsert_journal(
     text: str,
     record_count: int,
     reactions: Dict[str, int],
+    summary3: str = "",
 ) -> bool:
     """서술 저널(일/주/월)을 journals 컬렉션에 upsert + 임베딩.
 
@@ -278,6 +310,7 @@ def _upsert_journal(
                 "period_start": start,
                 "period_end": end,
                 "text": text,
+                "summary3": summary3,
                 "record_count": record_count,
                 "reaction_signal": reactions,
                 "updated_at": now,

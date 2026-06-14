@@ -66,7 +66,13 @@ def cover(target: Optional[date] = None) -> Dict[str, Any]:
     for back in (1, 2):
         d = today - timedelta(days=back)
         j = db.journals().find_one({"_id": f"day-{d.isoformat()}"})
-        line = _first_sentence(j.get("text", "")) if j else ""
+        if not j:
+            continue
+        text = j.get("text", "")
+        if "(일기 생성 실패" in text:
+            continue  # 생성 실패한 날은 건너뜀 — 그 전날로 폴백
+        # 세 줄 요약(자정 생성) 우선, 과거 일기(요약 없음)는 첫 문장 폴백
+        line = (j.get("summary3") or "").strip() or _first_sentence(text)
         if line:
             yesterday_line = {"date": d.isoformat(), "text": line}
             break

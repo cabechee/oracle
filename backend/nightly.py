@@ -136,8 +136,10 @@ def _run_daily_inner(target_date: Optional[date] = None) -> Dict[str, Any]:
     digest_text = journal.make_daily_journal(records, target, silent, reactions, day_signals)
     result["digest_path"] = journal.write_daily_digest_file(target, digest_text)
     result["digest_preview"] = digest_text[:200]
+    summary3 = journal.make_day_summary3(digest_text)
+    result["day_summary3"] = summary3
     result["journal_embedded"] = journal.save_day_journal(
-        target, digest_text, len(records), reactions, start, end)
+        target, digest_text, len(records), reactions, start, end, summary3=summary3)
 
     # 6) 상위 인덱스 갱신 (코드 aggregate, vault master.md + MongoDB index_meta)
     result["index"] = index_mod.update_master_index(target)
