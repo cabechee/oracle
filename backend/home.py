@@ -42,12 +42,17 @@ def _thumb(r: Dict[str, Any]) -> Optional[str]:
     return corpus.to_vault_rel(paths[0]) if paths else None
 
 
-def cover() -> Dict[str, Any]:
-    now = datetime.now()
-    today = now.date()
+def cover(target: Optional[date] = None) -> Dict[str, Any]:
+    """홈 표지 — target(없으면 오늘) 날짜 기준. 과거 날짜도 같은 구조로 재현.
 
-    # 오늘 지금까지
+    달력에서 지난 날을 고르면 그날의 표지(기록·조간/석간·그날의 그날·신호)를 보여준다.
+    """
+    now = datetime.now()
+    today = target or now.date()
+    is_today = today == now.date()
     t0, t1 = _day_range(today)
+
+    # 그날 기록 (오늘이면 '지금까지')
     todays = list(
         db.records().find(
             {"ts": {"$gte": t0, "$lte": t1}},
@@ -56,7 +61,7 @@ def cover() -> Dict[str, Any]:
     thumbs = [t for t in (_thumb(r) for r in todays) if t][:4]
     last_ts = todays[0]["ts"].isoformat() if todays else None
 
-    # 오늘의 한 줄 — 어제 일기에서 (없으면 그제까지 폴백)
+    # 그 전날로부터 한 줄 — 전날(없으면 그 전) 일기에서
     yesterday_line: Optional[Dict[str, str]] = None
     for back in (1, 2):
         d = today - timedelta(days=back)
@@ -66,8 +71,12 @@ def cover() -> Dict[str, Any]:
             yesterday_line = {"date": d.isoformat(), "text": line}
             break
 
-    # 대신 읽어드림 — 최신 신호 brief (요약 성공분만 저장돼 있음)
-    brief = db.signal_briefs().find_one(sort=[("ts", -1)])
+    # 대신 읽어드림 — 오늘이면 최신 brief, 과거면 그날 brief
+    if is_today:
+        brief = db.signal_briefs().find_one(sort=[("ts", -1)])
+    else:
+        brief = db.signal_briefs().find_one(
+            {"ts": {"$gte": t0, "$lte": t1}}, sort=[("ts", -1)])
     latest_brief = None
     if brief and (brief.get("summary") or "").strip():
         latest_brief = {
@@ -77,10 +86,10 @@ def cover() -> Dict[str, Any]:
             "call_count": brief.get("call_count", 0),
         }
 
-    # 그날의 오늘 — 1주 전·1달 전 같은 날 (사진 있는 기록 우선)
+    # 그날의 오늘 — target 기준 1주 전·1달 전 (사진 있는 기록 우선)
     on_this_day: List[Dict[str, Any]] = []
-    for label, d in (("일주일 전 오늘", today - timedelta(days=7)),
-                     ("한 달 전 오늘", today - timedelta(days=30))):
+    for label, d in (("일주일 전", today - timedelta(days=7)),
+                     ("한 달 전", today - timedelta(days=30))):
         r0, r1 = _day_range(d)
         rec = db.records().find_one(
             {"ts": {"$gte": r0, "$lte": r1}, "image_paths": {"$nin": [None, []]}},
@@ -96,22 +105,26 @@ def cover() -> Dict[str, Any]:
                 "line": _record_line(rec),
             })
 
-    # 오늘 지표 — 걸음(오늘 누적) + 어젯밤 수면(오늘 date에 저장)
+    # 그날 지표 — 걸음 + 수면
     m = db.metrics().find_one({"_id": today.isoformat()})
     health = None
     if m and (m.get("steps") is not None or m.get("sleep_min") is not None):
         health = {"steps": m.get("steps"), "sleep_min": m.get("sleep_min")}
 
-    # 오늘 발행물 — 조간/석간 중 최신 (어제 것은 안 보임)
-    b = db.briefings().find_one({"date": today.isoformat()}, sort=[("ts", -1)])
-    briefing = None
-    if b and (b.get("text") or "").strip():
-        briefing = {"kind": b.get("kind"), "text": b["text"],
-                    "ts": b["ts"].isoformat() if isinstance(b.get("ts"), datetime) else None}
+    # 발행물 — 그날 조간/석간 전부 (시간순). 과거 회고 시 둘 다 보인다.
+    briefings = [
+        {"kind": b.get("kind"), "text": b["text"],
+         "ts": b["ts"].isoformat() if isinstance(b.get("ts"), datetime) else None}
+        for b in db.briefings().find({"date": today.isoformat()}).sort("ts", 1)
+        if (b.get("text") or "").strip()
+    ]
 
     return {
+        "date": today.isoformat(),
+        "is_today": is_today,
         "today": {"count": len(todays), "last_ts": last_ts, "thumbs": thumbs},
-        "briefing": briefing,
+        "briefings": briefings,
+        "briefing": briefings[-1] if briefings else None,  # 구앱 호환 (단건)
         "yesterday_line": yesterday_line,
         "health": health,
         "latest_brief": latest_brief,
