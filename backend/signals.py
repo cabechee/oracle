@@ -166,8 +166,12 @@ def sync(sms: List[Dict[str, Any]], calls: List[Dict[str, Any]],
         if not (title or text):
             continue
         otp = _is_otp(text)
+        # 푸시는 수집 시각(ts)이 매번 달라(앱이 DateTime.now로 찍음) 같은 알림이
+        # 중복 저장되던 문제 → id의 ts를 '날짜' 단위로. 같은 앱·제목·본문이면
+        # 같은 날 1건만 (upsert가 이후 재수신을 스킵). 다음 날 같은 알림은 새 건.
+        ts_dt = _to_dt(n.get("ts")) or now
         doc = {
-            "_id": _signal_id("notif", f"{app}|{title}", n.get("ts"), text),
+            "_id": _signal_id("notif", f"{app}|{title}", ts_dt.strftime("%Y%m%d"), text),
             "kind": "notification",
             "app": app,
             "sender": title or app,
