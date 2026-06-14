@@ -19,7 +19,7 @@ _EVENTS = {
     "leave_home":    "아빠가 집에서 나가 어디론가 가고 있어.",
     "leave_office":  "아빠가 작업실에서 나섰어.",
     "deviate":       "아빠가 평소 있던 곳에서 500m 넘게 벗어나 어디론가 이동 중이야.",
-    "checkin":       "지금 아빠가 뭐 하고 있는지 문득 궁금해졌어.",
+    "checkin":       "지금 아빠가 뭐 하고 있을까, 문득 궁금해졌어.",
 }
 
 
@@ -37,15 +37,20 @@ def say(event: str, place: Optional[str] = None,
         system = personas.current("cookie_identity")
         alias = task_alias("quick") or task_alias("insight")
         name = "쿠키"
+        tone = "넌 반말로 짧고 발랄하게, 살짝 장난스럽게 툭 건네 (존댓말·'요' 금지)."
     else:
         system = personas.current("berr_identity")
         alias = task_alias("insight") or task_alias("quick")
         name = "베르"
+        tone = "넌 존댓말로 다정하고 차분하게, 애교 있게 건네."
     if not alias:
         return {"speaker": name, "text": "", "alias": ""}
-    prompt = (f"[지금 상황]\n{ctx}\n\n"
-              f"이 상황에 맞춰 아빠에게 짧게 말 걸어 — 한 문장, 길어도 두 문장. "
-              f"자연스럽고 가볍게, 부담 주지 말고. 인사·이름표 없이 그 한마디만.")
+    prompt = (
+        "지금은 네가 **먼저** 아빠에게 톡 말을 거는 상황이야. 아빠가 너한테 무슨 말을 한 게 "
+        "아니라(아빠는 아직 아무 말도 안 했어), 아빠 생각이 나서 네가 문득 말 거는 거야.\n\n"
+        f"[상황] {ctx}\n\n"
+        "이 상황에 맞춰 아빠에게 짧게 말 걸어 — 한 문장, 길어도 두 문장. 자연스럽고 가볍게, "
+        f"부담 주지 말고. {tone} 인사·이름표 없이 그 한마디만.")
     try:
         r = llm.call(alias, prompt, system=system)
         return {"speaker": name, "text": (r.get("text") or "").strip(), "alias": alias}
