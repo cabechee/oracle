@@ -70,3 +70,23 @@ def test_to_dt_graceful():
     assert signals._to_dt("not-a-number") is None
     assert signals._to_dt(None) is None
     assert signals._to_dt(1718000000000) is not None
+
+
+def test_dedup_signals_collapses_same_sender_body():
+    pending = [
+        {"_id": "s1", "kind": "notification", "sender": "커버링", "body": "쓰레기 수거"},
+        {"_id": "s2", "kind": "notification", "sender": "커버링", "body": "쓰레기 수거"},  # 중복
+        {"_id": "s3", "kind": "notification", "sender": "커버링", "body": "다른 내용"},
+        {"_id": "s4", "kind": "sms", "sender": "커버링", "body": "쓰레기 수거"},  # kind 달라 별개
+    ]
+    out = signals._dedup_signals(pending)
+    assert len(out) == 3                        # s1(=s2 흡수), s3, s4
+    assert out[0]["_id"] == "s1"                # 대표는 먼저 온 것
+
+
+def test_dedup_signals_keeps_distinct_senders():
+    pending = [
+        {"_id": "a", "kind": "sms", "sender": "엄마", "body": "밥 먹었니"},
+        {"_id": "b", "kind": "sms", "sender": "아빠", "body": "밥 먹었니"},  # 발신자 다름
+    ]
+    assert len(signals._dedup_signals(pending)) == 2

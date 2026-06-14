@@ -72,3 +72,29 @@ def test_collect_actions_spans_multiple_briefs():
 def test_collect_actions_handles_empty_and_missing_items():
     assert dashboard._collect_actions([], set()) == []
     assert dashboard._collect_actions([{"_id": "b", "ts": None}], set()) == []
+
+
+def test_collect_actions_dedups_same_signal_across_briefs():
+    # 같은 원본 신호(sig-x)가 두 brief에 '다르게' 요약돼도 — race 잔재 — 1건만.
+    briefs = [
+        _brief("b2", datetime(2026, 6, 13, 21, 41, 33), [
+            {"category": "action_needed", "sender": "커버링",
+             "summary": "봉투 1개 배출", "signal_ids": ["sig-x", "sig-y"]}]),
+        _brief("b1", datetime(2026, 6, 13, 21, 41, 22), [
+            {"category": "action_needed", "sender": "커버링",
+             "summary": "품목 배출", "signal_ids": ["sig-x", "sig-y"]}]),
+    ]
+    out = dashboard._collect_actions(briefs, set())
+    assert len(out) == 1                          # sig-x 겹쳐 중복 제거
+    assert out[0]["summary"] == "봉투 1개 배출"    # 최신(먼저 순회) 유지
+
+
+def test_collect_actions_dedups_textually_when_no_signal_ids():
+    # 구 brief(signal_ids 없음)는 발신자+요약으로 중복 판정
+    briefs = [
+        _brief("b2", datetime(2026, 6, 13, 10, 0), [
+            {"category": "action_needed", "sender": "은행", "summary": "카드 결제"}]),
+        _brief("b1", datetime(2026, 6, 13, 9, 0), [
+            {"category": "action_needed", "sender": "은행", "summary": "카드 결제"}]),
+    ]
+    assert len(dashboard._collect_actions(briefs, set())) == 1

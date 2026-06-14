@@ -38,6 +38,8 @@ def _collect_actions(briefs: List[Dict[str, Any]],
     순수 함수(외부 의존 없음) — 데스크의 핵심 필터 로직을 여기서 검증한다.
     """
     out: List[Dict[str, Any]] = []
+    seen_sids: Set[str] = set()      # 이미 담은 원본 신호 (다른 brief 중복 요약 차단)
+    seen_text: Set[tuple] = set()    # signal_id 없는 구 brief는 발신자+요약으로
     for b in briefs:
         bid = b.get("_id")
         ts = b.get("ts")
@@ -49,11 +51,20 @@ def _collect_actions(briefs: List[Dict[str, Any]],
             key = _action_key(bid, idx)
             if key in dismissed:
                 continue              # 이미 확인 처리됨 → 사라짐
+            sids = [s for s in (it.get("signal_ids") or []) if s]
+            if any(s in seen_sids for s in sids):
+                continue              # 같은 원본 신호 — race로 다른 brief에 중복된 것
+            sender = (it.get("sender") or "").strip()
+            summary = (it.get("summary") or "").strip()
+            if not sids and (sender, summary) in seen_text:
+                continue
+            seen_sids.update(sids)
+            seen_text.add((sender, summary))
             out.append({
                 "key": key,
                 "brief_id": bid,
-                "sender": (it.get("sender") or "").strip(),
-                "summary": (it.get("summary") or "").strip(),
+                "sender": sender,
+                "summary": summary,
                 "ts": ts.isoformat() if isinstance(ts, datetime) else None,
             })
     return out
@@ -85,18 +96,22 @@ def feed() -> Dict[str, Any]:
     ).sort("ts", -1))
     actions = _collect_actions(briefs, dismissed)
 
-    # 2) 대신 읽어드림 — 최신 brief 요약 (정보성 카드, dismiss 대상 아님)
+    # 2) 대신 읽어드림 — 최신 brief 요약. '읽음'(dismiss) 처리 전까지만 보인다.
     latest = db.signal_briefs().find_one(sort=[("ts", -1)])
     brief = None
     if latest and (latest.get("summary") or "").strip():
-        brief = {
-            "id": latest["_id"],
-            "ts": latest["ts"].isoformat()
-            if isinstance(latest.get("ts"), datetime) else None,
-            "summary": latest.get("summary") or "",
-            "sms_count": latest.get("sms_count", 0),
-            "call_count": latest.get("call_count", 0),
-        }
+        bkey = f"brief:{latest['_id']}"
+        if bkey not in dismissed:
+            brief = {
+                "key": bkey,
+                "id": latest["_id"],
+                "ts": latest["ts"].isoformat()
+                if isinstance(latest.get("ts"), datetime) else None,
+                "summary": latest.get("summary") or "",
+                "sms_count": latest.get("sms_count", 0),
+                "call_count": latest.get("call_count", 0),
+                "notif_count": latest.get("notif_count", 0),
+            }
 
     # 3) 오래 못 챙긴 사람 — silent thread (확인 안 한 것만)
     import threads as threads_mod

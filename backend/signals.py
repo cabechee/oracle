@@ -202,11 +202,12 @@ def sync(sms: List[Dict[str, Any]], calls: List[Dict[str, Any]],
             and (now - last_brief["ts"]).total_seconds() < 25):
         return {"new_sms": new_sms, "new_calls": new_calls,
                 "new_notif": new_notif,
-                "sms_count": 0, "call_count": 0, "summary": ""}
+                "sms_count": 0, "call_count": 0, "notif_count": 0, "summary": ""}
 
-    sms_count, call_count, summary = _summarize_pending(pending, now)
+    sms_count, call_count, notif_count, summary = _summarize_pending(pending, now)
     return {"new_sms": new_sms, "new_calls": new_calls, "new_notif": new_notif,
-            "sms_count": sms_count, "call_count": call_count, "summary": summary}
+            "sms_count": sms_count, "call_count": call_count,
+            "notif_count": notif_count, "summary": summary}
 
 
 # 카테고리 → 알림용 한글 라벨·정렬 우선순위
@@ -275,12 +276,27 @@ def _is_excluded(sig: Dict[str, Any], patterns: List[str]) -> bool:
     return any(p.lower() in hay for p in patterns)
 
 
+def _dedup_signals(pending: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """LLM 요약 전 코드 중복 제거 — 같은 (종류·발신자·본문)이면 대표 1건만.
+
+    앱이 같은 알림을 6ms~수초 차이로 거듭 올리거나(중복 수신) 같은 문자가 여러 번
+    잡히는 경우를, 시각 차이와 무관하게 한 신호로 본다. 발신자·본문이 정확히 같으면 중복.
+    (LLM 분류에 같은 걸 두 번 넘기지 않음 — 신호 처리를 LLM에만 맡기지 않는 첫 관문.)
+    """
+    seen: Dict[tuple, Dict[str, Any]] = {}
+    for p in pending:
+        key = (p.get("kind"), (p.get("sender") or "").strip(),
+               (p.get("body") or "").strip())
+        seen.setdefault(key, p)
+    return list(seen.values())
+
+
 def _summarize_pending(pending: List[Dict[str, Any]], now: datetime) -> tuple:
     """pending 신호 → 로컬 LLM 분류·요약 + brief(items) 저장 + briefed 마킹.
 
     요약 성공 시에만 마킹(실패 시 다음 기회 재시도). alias 미설정이면 저장만
     — SMS 본문을 클라우드로 폴백하지 않는다(프라이버시 원칙).
-    반환: (sms_count, call_count, summary).
+    반환: (sms_count, call_count, notif_count, summary).
     """
     # 어드민 지정 제외 패턴 — 매칭 신호는 요약에서 빼고 briefed 마킹(원본은 raw에 남음).
     patterns = _load_excludes()
@@ -292,8 +308,12 @@ def _summarize_pending(pending: List[Dict[str, Any]], now: datetime) -> tuple:
                 {"$set": {"briefed": True, "excluded": True}})
             pending = [p for p in pending if p["_id"] not in ex_ids]
 
+    # 코드 중복 제거 — 같은 발신자·본문은 LLM에 한 번만 넘긴다.
+    pending = _dedup_signals(pending)
+
     sms_count = sum(1 for p in pending if p["kind"] == "sms")
-    call_count = len(pending) - sms_count
+    call_count = sum(1 for p in pending if p["kind"] == "missed_call")  # 부재중만
+    notif_count = sum(1 for p in pending if p["kind"] == "notification")
     summary = ""
     items: List[Dict[str, Any]] = []
     if pending:
@@ -308,19 +328,27 @@ def _summarize_pending(pending: List[Dict[str, Any]], now: datetime) -> tuple:
             except Exception as e:
                 summary = f"(요약 실패: {e})"
         if items and not summary.startswith("(요약 실패"):
-            db.signal_briefs().insert_one({
-                "_id": f"brief-{now.strftime('%Y%m%d-%H%M%S-%f')}",
-                "ts": now,
-                "summary": summary,       # 알림용 짧은 텍스트 (items에서 합성)
-                "items": items,           # 구조화 분류 결과
-                "sms_count": sms_count,
-                "call_count": call_count,
-                "source_ids": [p["_id"] for p in pending],
-            })
+            ids = sorted(p["_id"] for p in pending)
+            # 같은 신호 조합 → 같은 brief_id(멱등). 동시 sync race로 두 번 요약돼도
+            # upsert라 brief는 1건만 남는다(데스크 당장 처리 중복의 근본 차단).
+            brief_id = "brief-" + hashlib.sha1("|".join(ids).encode()).hexdigest()[:16]
+            db.signal_briefs().update_one(
+                {"_id": brief_id},
+                {"$setOnInsert": {
+                    "_id": brief_id,
+                    "ts": now,
+                    "summary": summary,        # 알림용 짧은 텍스트 (items에서 합성)
+                    "items": items,            # 구조화 분류 결과
+                    "sms_count": sms_count,
+                    "call_count": call_count,
+                    "notif_count": notif_count,
+                    "source_ids": ids,
+                }},
+                upsert=True)
             db.signals().update_many(
-                {"_id": {"$in": [p["_id"] for p in pending]}},
+                {"_id": {"$in": ids}},
                 {"$set": {"briefed": True}})
-    return sms_count, call_count, summary
+    return sms_count, call_count, notif_count, summary
 
 
 def _loads(text: Optional[str]) -> Any:
@@ -345,10 +373,11 @@ def rebrief_pending(limit: int = 100) -> Dict[str, Any]:
         .sort("ts", 1).limit(limit))
     if not pending:
         return {"briefed": 0, "summary": "", "sms_count": 0, "call_count": 0}
-    sms_count, call_count, summary = _summarize_pending(pending, now)
+    sms_count, call_count, notif_count, summary = _summarize_pending(pending, now)
     ok = bool(summary) and not summary.startswith("(요약 실패")
     return {"briefed": len(pending) if ok else 0, "summary": summary,
-            "sms_count": sms_count, "call_count": call_count}
+            "sms_count": sms_count, "call_count": call_count,
+            "notif_count": notif_count}
 
 
 # ── 조회 (A: 신호 로그 화면 / C: 자정 일기 재료) ──────────────
@@ -361,6 +390,7 @@ def _brief_view(b: Dict[str, Any]) -> Dict[str, Any]:
         "items": b.get("items") or [],          # 구조화 분류 (구 brief는 빈 리스트)
         "sms_count": b.get("sms_count", 0),
         "call_count": b.get("call_count", 0),
+        "notif_count": b.get("notif_count", 0),
     }
 
 
