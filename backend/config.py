@@ -31,9 +31,9 @@ NEST_TIMEOUT = int(os.getenv("NEST_TIMEOUT", "300"))
 TASK_ALIAS = {
     # Layer 1 (인입 시점, 즉시)
     # 빠른 1차 반응 — 쿠키(오목눈이). 모든 캡처가 메인(베르) 전에 이걸 먼저 거침.
-    # 입력 종류로 모델 분기: 텍스트·사진은 빠른 quick(haiku 3초),
-    # 영상·음성이 끼면 멀티모달 quick_av(gemini flash-lite). 빈 값이면 쿠키 skip.
-    "quick":         os.getenv("ORACLE_QUICK",    "haiku"),
+    # 짧은 첫인상 한마디. 텍스트·사진은 quick, 영상·음성이 끼면 멀티모달 quick_av.
+    # 코멘트 품질이 중요하니 여기에 좋은 모델을 둔다. 빈 값이면 쿠키 skip.
+    "quick":         os.getenv("ORACLE_QUICK",    "gemini"),
     "quick_av":      os.getenv("ORACLE_QUICK_AV", "gemini-flash"),
     "vlm_caption":   os.getenv("ORACLE_VLM",     ""),
     # 텍스트·소리 캡처 즉답 (베르)

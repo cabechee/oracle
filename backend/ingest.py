@@ -346,27 +346,31 @@ def _process_capture(ctx: Dict[str, Any], do_append: bool = True) -> Dict[str, A
     }
 
 
-def _quick_react(ctx: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """쿠키(오목눈이) 빠른 1차 반응 — haiku, 짧게. 미설정/실패면 None.
+def _quick_react(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """쿠키(오목눈이) 빠른 1차 반응 — 한마디. 미설정/실패면 None.
 
     메인 디스커버리(베르) 전에 먼저 호출돼 record.quick에 들어간다.
+    영상·음성이 끼면 멀티모달(quick_av), 아니면 텍스트/사진(quick).
     """
     abs_paths = ctx.get("abs_paths") or []
     audio_abs = ctx.get("audio_abs") or []
     video_abs = ctx.get("video_abs") or []
-    # 입력 분기: 영상·음성이 끼면 멀티모달(gemini), 아니면 빠른 텍스트/사진(haiku).
     has_av = bool(audio_abs or video_abs)
     alias = (task_alias("quick_av") if has_av else task_alias("quick")) or ""
     if not alias:
         return None
     from agent import quick as quick_mod
-    images = nest_client.images_from_paths(abs_paths) if abs_paths else None
-    audio = nest_client.audio_from_paths(audio_abs) if audio_abs else None
-    video = nest_client.video_from_paths(video_abs) if video_abs else None
+    media: List[Dict[str, str]] = []
+    if abs_paths:
+        media += nest_client.images_from_paths(abs_paths)
+    if audio_abs:
+        media += nest_client.audio_from_paths(audio_abs)
+    if video_abs:
+        media += nest_client.video_from_paths(video_abs)
     try:
-        res = quick_mod.react(alias, user_input=ctx.get("user_comment") or "",
-                              images=images, audio=audio, video=video)
-        return {"alias": alias, "text": res["text"], "action": res["action"]}
+        text = quick_mod.say(alias, user_input=ctx.get("user_comment") or "",
+                             media=media or None)
+        return {"alias": alias, "text": text} if text else None
     except Exception as e:
         print(f"[quick] 쿠키 반응 실패: {e}", flush=True)
         return None
