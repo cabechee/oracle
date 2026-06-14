@@ -96,22 +96,17 @@ def feed() -> Dict[str, Any]:
     ).sort("ts", -1))
     actions = _collect_actions(briefs, dismissed)
 
-    # 2) 대신 읽어드림 — 최신 brief 요약. '읽음'(dismiss) 처리 전까지만 보인다.
-    latest = db.signal_briefs().find_one(sort=[("ts", -1)])
-    brief = None
-    if latest and (latest.get("summary") or "").strip():
-        bkey = f"brief:{latest['_id']}"
-        if bkey not in dismissed:
-            brief = {
-                "key": bkey,
-                "id": latest["_id"],
-                "ts": latest["ts"].isoformat()
-                if isinstance(latest.get("ts"), datetime) else None,
-                "summary": latest.get("summary") or "",
-                "sms_count": latest.get("sms_count", 0),
-                "call_count": latest.get("call_count", 0),
-                "notif_count": latest.get("notif_count", 0),
-            }
+    # 2) 대신 읽어드림 — 오늘 받은 알림을 발신자별로 묶어 누적 요약 (실시간, 안 날림)
+    import signals as signals_mod
+    digest = signals_mod.today_digest()
+
+    # 2b) 가계부 — 오늘 결제(스마트 액션)
+    import ledger as ledger_mod
+    today_ledger = ledger_mod.today()
+
+    # 2c) 리마인더 — 자체(미완료)
+    import reminders as reminders_mod
+    reminder_list = reminders_mod.list_items()
 
     # 3) 오래 못 챙긴 사람 — silent thread (확인 안 한 것만)
     import threads as threads_mod
@@ -137,10 +132,13 @@ def feed() -> Dict[str, Any]:
 
     return {
         "actions": actions,
-        "brief": brief,
+        "digest": digest,            # 대신 읽어드림 (발신자별 누적 요약)
+        "ledger": today_ledger,      # 가계부 (오늘 결제)
+        "reminders": reminder_list,  # 자체 리마인더
         "pending_people": pending,
         "today": today_stats,
-        "counts": {"actions": len(actions), "pending": len(pending)},
+        "counts": {"actions": len(actions), "pending": len(pending),
+                   "reminders": len(reminder_list)},
     }
 
 

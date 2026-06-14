@@ -82,6 +82,16 @@ def dashboard_state() -> Collection:
     return _conn().dashboard_state
 
 
+def ledger() -> Collection:
+    """가계부 — 결제 알림에서 뽑은 지출 (_id=pay-<signal>, 멱등). 스마트 액션."""
+    return _conn().ledger
+
+
+def reminders() -> Collection:
+    """자체 리마인더 — 외부 연동 없이 앱 내부. 수동 추가 + action_needed 승격."""
+    return _conn().reminders
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:

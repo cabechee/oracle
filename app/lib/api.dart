@@ -410,6 +410,68 @@ class OracleApi {
     return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
   }
 
+  // ── 리마인더 (자체) ────────────────────────────────────────
+  Future<List<Map<String, dynamic>>> listReminders(
+      {bool includeDone = false}) async {
+    final resp = await _req(
+        'GET /reminders',
+        () => http.get(
+            Uri.parse('$baseUrl/reminders?include_done=$includeDone'),
+            headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('reminders 실패: ${resp.statusCode}');
+    }
+    final d = jsonDecode(utf8.decode(resp.bodyBytes));
+    return ((d['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// 리마인더 추가 — 반환 id. signalId 주면 그 신호로 멱등(중복 승격 방지).
+  Future<String> addReminder(String text,
+      {String? due, String source = 'manual', String? signalId}) async {
+    final body = jsonEncode({
+      'text': text,
+      'due': ?due,
+      'source': source,
+      'signal_id': ?signalId,
+    });
+    final resp = await _req(
+        'POST /reminders',
+        () => http.post(Uri.parse('$baseUrl/reminders'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: body),
+        sent: body);
+    if (resp.statusCode != 200) {
+      throw Exception('reminder 추가 실패: ${resp.statusCode}');
+    }
+    return (jsonDecode(utf8.decode(resp.bodyBytes))['id'] as String?) ?? '';
+  }
+
+  Future<void> setReminderDone(String id, bool done) async {
+    await _req(
+        'POST /reminders/$id/done',
+        () => http.post(Uri.parse('$baseUrl/reminders/$id/done'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: jsonEncode({'done': done})));
+  }
+
+  Future<void> removeReminder(String id) async {
+    await _req(
+        'DELETE /reminders/$id',
+        () => http.delete(Uri.parse('$baseUrl/reminders/$id'),
+            headers: authHeaders));
+  }
+
+  /// 가계부 — 오늘(또는 date) 지출 {total, count, items}.
+  Future<Map<String, dynamic>> fetchLedger({String? date}) async {
+    final qp = (date != null && date.isNotEmpty) ? '?date=$date' : '';
+    final resp = await _req('GET /ledger$qp',
+        () => http.get(Uri.parse('$baseUrl/ledger$qp'), headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('ledger 실패: ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
   /// 최신 발행물 (조간/석간) — 알림 폴링용. 없으면 null.
   Future<Map<String, dynamic>?> fetchBriefingLatest() async {
     final resp = await _req('GET /briefing/latest',

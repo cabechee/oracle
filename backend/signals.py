@@ -11,6 +11,7 @@ record(능동 캡처)와 구분되는 수동 스트림. 앱 콜렉터(WorkManage
 - 인증번호/OTP 문자는 본문을 저장·요약 모두에서 제외 (redact).
 """
 
+import collections
 import hashlib
 import json
 import re
@@ -205,6 +206,11 @@ def sync(sms: List[Dict[str, Any]], calls: List[Dict[str, Any]],
                 "sms_count": 0, "call_count": 0, "notif_count": 0, "summary": ""}
 
     sms_count, call_count, notif_count, summary = _summarize_pending(pending, now)
+    try:                                    # 결제 → 가계부 (스마트 액션, 멱등)
+        import ledger
+        ledger.sync_from_briefs(now.date())
+    except Exception as e:
+        print(f"[signals] ledger sync 실패: {e}", flush=True)
     return {"new_sms": new_sms, "new_calls": new_calls, "new_notif": new_notif,
             "sms_count": sms_count, "call_count": call_count,
             "notif_count": notif_count, "summary": summary}
@@ -432,6 +438,60 @@ def recent(brief_limit: int = 40, signal_limit: int = 80) -> Dict[str, Any]:
         for s in db.signals().find().sort("ts", -1).limit(signal_limit)
     ]
     return {"briefs": briefs, "signals": raw}
+
+
+# 카테고리 우선순위 (낮을수록 위·긴급)
+_CAT_ORDER = {"action_needed": 0, "attention": 1, "acquaintance": 2,
+              "low": 3, "spam": 4}
+
+
+def today_digest(target: Optional[date] = None) -> Dict[str, Any]:
+    """오늘 받은 신호를 발신자별로 묶어 요약 — 실시간 누적, 안 날린다.
+
+    대신 읽어드림의 본체. 중구난방 알림을 한 곳에 모아: 발신자별 그룹 + 건수 +
+    요약 줄(중복 제거) + 대표 카테고리. low/spam도 버리지 않고 묶어서 보여준다.
+    30분 brief가 누적될 때마다 '지금까지' 최신 상태를 반영(다음날이 아니라).
+    """
+    target = target or date.today()
+    t0 = datetime.combine(target, dtime.min)
+    t1 = datetime.combine(target, dtime.max)
+    groups: Dict[str, Dict[str, Any]] = {}
+    seen_sids: set = set()
+    cat_count: "collections.Counter" = collections.Counter()
+    for b in db.signal_briefs().find({"ts": {"$gte": t0, "$lte": t1}}).sort("ts", 1):
+        ts = b.get("ts")
+        ts_iso = ts.isoformat() if isinstance(ts, datetime) else None
+        for it in b.get("items", []):
+            cat = it.get("category", "low")
+            if cat == "action_needed":
+                continue                       # 당장 처리(별도 섹션)에서 다룸
+            sids = [s for s in (it.get("signal_ids") or []) if s]
+            if any(s in seen_sids for s in sids):
+                continue                       # 같은 신호 중복 요약 제외
+            seen_sids.update(sids)
+            sender = (it.get("sender") or "(알 수 없음)").strip()
+            cat_count[cat] += 1
+            summary = (it.get("summary") or "").strip()
+            g = groups.get(sender)
+            if not g:
+                g = {"sender": sender, "category": cat, "lines": [],
+                     "count": 0, "last_ts": ts_iso}
+                groups[sender] = g
+            if summary and summary not in g["lines"]:
+                g["lines"].append(summary)
+            g["count"] += 1
+            g["last_ts"] = ts_iso or g["last_ts"]
+            if _CAT_ORDER.get(cat, 3) < _CAT_ORDER.get(g["category"], 3):
+                g["category"] = cat            # 발신자 대표 = 가장 긴급한 것
+    out = sorted(groups.values(),
+                 key=lambda g: (_CAT_ORDER.get(g["category"], 3), -g["count"]))
+    return {
+        "date": target.isoformat(),
+        "groups": out,
+        "totals": {k: cat_count.get(k, 0) for k in _CAT_ORDER},
+        "sender_count": len(groups),
+        "signal_count": len(seen_sids),
+    }
 
 
 def signals_for_day(target: date) -> List[Dict[str, Any]]:
