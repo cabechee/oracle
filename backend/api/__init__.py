@@ -5,7 +5,7 @@
 
 from fastapi import APIRouter
 
-from . import ingest, records, journal, threads, query, chat, index, nest, signals, home, admin, metrics, briefing
+from . import ingest, records, journal, threads, query, chat, index, nest, signals, home, admin, metrics, briefing, companion
 
 router = APIRouter()
 router.include_router(ingest.router)
@@ -21,3 +21,4 @@ router.include_router(home.router)
 router.include_router(admin.router)
 router.include_router(metrics.router)
 router.include_router(briefing.router)
+router.include_router(companion.router)
