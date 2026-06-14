@@ -52,13 +52,22 @@ Future<void> initNotificationListener() async {
 }
 
 /// 알림 1건 — 의미있는 것만 prefs 버퍼에 누적 (sync 때 flush).
+///
+/// "놓치는 알림" 진단을 위해 필터 분기마다 로그를 남긴다(타이틀 long-press 로그뷰).
+/// 제거·지속(onGoing) 이벤트는 음악 위젯 등으로 매우 잦아 로깅 생략(노이즈).
 Future<void> _onNotif(ServiceNotificationEvent e) async {
   if (e.hasRemoved == true || e.onGoing == true) return; // 제거·지속(음악 등) 제외
   final pkg = e.packageName ?? '';
-  if (_notifBlocklist.any((b) => pkg.startsWith(b))) return;
+  if (_notifBlocklist.any((b) => pkg.startsWith(b))) {
+    AppLog.info('알림 거름: 블랙리스트 $pkg');
+    return;
+  }
   final title = (e.title ?? '').trim();
   final content = (e.content ?? '').trim();
-  if (title.isEmpty && content.isEmpty) return;
+  if (title.isEmpty && content.isEmpty) {
+    AppLog.info('알림 거름: 빈 제목·본문 ($pkg)');
+    return;
+  }
   final prefs = await SharedPreferences.getInstance();
   final buf = prefs.getStringList(_kNotifBufKey) ?? [];
   // 같은 알림이 posted+updated 두 이벤트로 중복 적재되는 것 방지 — 버퍼에 동일한
@@ -71,7 +80,10 @@ Future<void> _onNotif(ServiceNotificationEvent e) async {
       return false;
     }
   });
-  if (dupe) return;
+  if (dupe) {
+    AppLog.info('알림 거름: 중복 $pkg / $title');
+    return;
+  }
   buf.add(jsonEncode({
     'app': pkg,
     'title': title,
@@ -80,6 +92,7 @@ Future<void> _onNotif(ServiceNotificationEvent e) async {
   }));
   if (buf.length > 200) buf.removeRange(0, buf.length - 200); // 상한
   await prefs.setStringList(_kNotifBufKey, buf);
+  AppLog.info('알림 수집: $pkg / ${title.isEmpty ? content : title} (버퍼 ${buf.length})');
 }
 
 /// main()에서 1회 — 디스패처 등록 + 30분 주기 작업 예약 (idempotent).
@@ -194,9 +207,53 @@ Future<void> runSignalsSync() async {
   }
 
   await _maybeBriefingNotify(prefs); // 새 조간/석간이면 알림 (같은 주기 편승)
+  await _maybeCheckin(prefs);        // 활동 시간대면 동반자 '뭐해' (2시간 간격)
 }
 
 const _kBriefingSeen = 'briefing_last_seen';
+const _kLastCheckinMs = 'companion_last_checkin_ms';
+
+// 동반자 말걸기 — 활동 시간대(09~22시)·정시·이벤트 없이 가볍게.
+const _checkinStartHour = 9;
+const _checkinEndHour = 22;
+const _checkinMinGap = Duration(hours: 2);
+
+/// 동반자 정시 체크인 — 위치 없이 쿠키/베르가 '뭐해' 한마디.
+///
+/// 30분 주기에 편승해, 활동 시간대에 2시간 간격으로 1회 백엔드 companion에 묻고
+/// 응답이 있으면 알림으로 표시. (위치 기능 없이 companion을 폰에서 처음 확인하는 길)
+Future<void> _maybeCheckin(SharedPreferences prefs) async {
+  final now = DateTime.now();
+  if (now.hour < _checkinStartHour || now.hour >= _checkinEndHour) return;
+  final last = prefs.getInt(_kLastCheckinMs) ?? 0;
+  if (now.millisecondsSinceEpoch - last < _checkinMinGap.inMilliseconds) return;
+  try {
+    final r = await OracleApi().companionSay('checkin');
+    final text = (r['text'] as String?)?.trim() ?? '';
+    if (text.isEmpty) return;        // alias 미설정·실패 — 다음 기회에
+    await prefs.setInt(_kLastCheckinMs, now.millisecondsSinceEpoch);
+    await _notifyCompanion((r['speaker'] as String?) ?? '', text);
+    AppLog.info('동반자 체크인: ${r['speaker']} — $text');
+  } catch (e) {
+    AppLog.info('동반자 체크인 실패: $e');
+  }
+}
+
+/// 동반자 한마디 알림 — 백그라운드 isolate라 plugin 직접 생성(_notify와 같은 패턴).
+Future<void> _notifyCompanion(String speaker, String text) async {
+  final plugin = FlutterLocalNotificationsPlugin();
+  await plugin.initialize(const InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+  ));
+  final icon = speaker == '쿠키' ? '🐦' : (speaker == '베르' ? '🐶' : '🐾');
+  await plugin.show(9, '$icon ${speaker.isEmpty ? '동반자' : speaker}', text,
+      const NotificationDetails(
+        android: AndroidNotificationDetails('companion', '동반자',
+            channelDescription: '쿠키·베르의 말 걸기',
+            importance: Importance.defaultImportance,
+            styleInformation: BigTextStyleInformation('')),
+      ));
+}
 
 /// 새 발행물(조간/석간) 도착 시 1회 알림.
 Future<void> _maybeBriefingNotify(SharedPreferences prefs) async {
