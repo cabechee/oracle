@@ -109,7 +109,7 @@ class RecordBubble extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(
                 top: OracleSpace.inBlock, left: OracleSpace.gutter),
-            child: quickNote(record.quickText!),
+            child: quickNote(record.quickText!, seed: record.id),
           ),
         // 쿠키가 사진/메모에서 감지한 액션 — 원탭 제안 (불확실하니 자동 X)
         if (record.quickAction != null)
@@ -334,36 +334,28 @@ class _ExpandableCaptionState extends State<_ExpandableCaption> {
 }
 
 /// 쿠키(오목눈이) 한마디 — 발랄·짧음. 베르(고운바탕 방주)와 화자 구분:
-/// 산세리프 + 작은 아바타 마커. ⚠️ 마커는 임시 placeholder — 캐릭터 이미지 받으면 교체.
-/// record/대화 공용.
-Widget quickNote(String text) {
+/// 산세리프 + 캐릭터 아바타. seed(기록·메시지 id)로 12종 중 하나를 고정 배정
+/// — 새 메시지마다 다른 새, 스크롤·리빌드해도 같은 메시지는 같은 새. record/대화 공용.
+Widget quickNote(String text, {String seed = ''}) {
+  final n = (seed.hashCode.abs() % 12) + 1;
+  final asset = 'assets/cookies/cookie_${n.toString().padLeft(2, '0')}.png';
   return Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Container(
-        width: 17,
-        height: 17,
-        margin: const EdgeInsets.only(top: 1),
-        decoration: const BoxDecoration(
-          color: OracleColors.hairlineSoft,
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: const Text('쿠',
-            style: TextStyle(
-                fontFamily: OracleType.sans,
-                fontSize: 8.5,
-                color: OracleColors.gray)),
-      ),
-      const SizedBox(width: 8),
+      Image.asset(asset,
+          width: 26, height: 26, filterQuality: FilterQuality.medium),
+      const SizedBox(width: 7),
       Expanded(
-        child: Text(text,
-            style: const TextStyle(
-                fontFamily: OracleType.sans,
-                fontSize: 13,
-                height: 20 / 13,
-                letterSpacing: -0.1,
-                color: OracleColors.gray)),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(text,
+              style: const TextStyle(
+                  fontFamily: OracleType.sans,
+                  fontSize: 13,
+                  height: 20 / 13,
+                  letterSpacing: -0.1,
+                  color: OracleColors.gray)),
+        ),
       ),
     ],
   );

@@ -29,7 +29,7 @@ class ChatMessageBubble extends StatelessWidget {
         // 쿠키 첨언 — 베르 답 아래 짧게 거듦
         if ((message.quickText ?? '').isNotEmpty) ...[
           const SizedBox(height: OracleSpace.inBlock),
-          quickNote(message.quickText!),
+          quickNote(message.quickText!, seed: message.id),
         ],
         if (message.referenced.isNotEmpty) ...[
           const SizedBox(height: OracleSpace.inBlock),
