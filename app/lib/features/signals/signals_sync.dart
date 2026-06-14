@@ -18,6 +18,7 @@ import 'package:workmanager/workmanager.dart';
 
 import '../../api.dart';
 import '../../applog.dart';
+import '../../home_widget_service.dart';
 
 const kSignalsTask = 'signals-sync';
 const _kLastSyncKey = 'signals_last_sync_ms';
@@ -207,7 +208,12 @@ Future<void> runSignalsSync() async {
   }
 
   await _maybeBriefingNotify(prefs); // 새 조간/석간이면 알림 (같은 주기 편승)
-  await _maybeCheckin(prefs);        // 활동 시간대면 동반자 '뭐해' (2시간 간격)
+  await _maybeCheckin(prefs);        // 활동 시간대면 동반자 '뭐해' (정시 1회)
+  try {
+    await refreshWidget(OracleApi()); // 홈 위젯 갱신 (오늘 알림·리마인더)
+  } catch (e) {
+    AppLog.info('위젯 갱신 실패: $e');
+  }
 }
 
 const _kBriefingSeen = 'briefing_last_seen';

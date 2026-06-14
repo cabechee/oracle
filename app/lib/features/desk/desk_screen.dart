@@ -1,9 +1,12 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../api.dart';
 import '../../applog.dart';
 import '../../core/design.dart';
+import '../../home_widget_service.dart';
+import '../location/location_screen.dart';
 import '../signals/signals_screen.dart';
 
 /// 데스크 — 온라인 오라클. 처리할 것 + 오늘 받은 알림 종합.
@@ -50,6 +53,10 @@ class _DeskScreenState extends State<DeskScreen>
           _error = null;
           _dismissing.clear();
         });
+      }
+      if (!kIsWeb) {
+        final (n, r) = widgetTextsFromDashboard(d);
+        await updateOracleWidget(notifText: n, reminderText: r);
       }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -208,6 +215,11 @@ class _DeskScreenState extends State<DeskScreen>
             ],
             // 6) 오늘 정리
             ..._todayCard(_data?['today'] as Map<String, dynamic>?),
+            // 위치 동반자 진입 (폰 전용)
+            if (!kIsWeb) ...[
+              const SizedBox(height: 28),
+              _locationLink(),
+            ],
           ],
         ],
       ),
@@ -591,6 +603,23 @@ class _DeskScreenState extends State<DeskScreen>
                 style: OracleType.display.copyWith(fontSize: 26, height: 30 / 26)),
             const SizedBox(height: 2),
             Text(label, style: OracleType.label),
+          ],
+        ),
+      );
+
+  Widget _locationLink() => InkWell(
+        onTap: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const LocationScreen())),
+        child: Row(
+          children: [
+            const Icon(Icons.place_outlined,
+                size: 15, color: OracleColors.faint),
+            const SizedBox(width: 6),
+            Text('위치 동반자 설정',
+                style: OracleType.label.copyWith(color: OracleColors.gray)),
+            const Spacer(),
+            const Icon(Icons.chevron_right,
+                size: 16, color: OracleColors.faint),
           ],
         ),
       );
