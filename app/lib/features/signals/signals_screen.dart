@@ -138,6 +138,7 @@ class _SignalsScreenState extends State<SignalsScreen> {
     final parts = <String>[
       if ((b['sms_count'] as num? ?? 0) > 0) '문자 ${b['sms_count']}',
       if ((b['call_count'] as num? ?? 0) > 0) '부재중 ${b['call_count']}',
+      if ((b['notif_count'] as num? ?? 0) > 0) '알림 ${b['notif_count']}',
     ];
     final items =
         (b['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];

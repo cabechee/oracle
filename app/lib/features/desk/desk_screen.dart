@@ -73,6 +73,7 @@ class _DeskScreenState extends State<DeskScreen>
     final actions = _visible('actions');
     final pending = _visible('pending_people');
     final brief = _data?['brief'] as Map<String, dynamic>?;
+    final briefShown = brief != null && !_dismissing.contains(brief['key']);
     final today = _data?['today'] as Map<String, dynamic>?;
     final allClear = _data != null && actions.isEmpty && pending.isEmpty;
 
@@ -106,8 +107,8 @@ class _DeskScreenState extends State<DeskScreen>
               for (final a in actions) _actionRow(a),
               const SizedBox(height: OracleSpace.section),
             ],
-            // 2) 대신 읽어드림 — 정보 카드 (전체보기 → 신호 로그)
-            ..._briefCard(brief),
+            // 2) 대신 읽어드림 — 읽으면 사라짐, 전체보기 → 신호 로그
+            ..._briefCard(briefShown ? brief : null),
             // 3) 오래 못 챙긴 사람 — 확인하면 사라짐
             if (pending.isNotEmpty) ...[
               _sectionLabel('오래 못 챙긴 사람', count: pending.length),
@@ -236,41 +237,62 @@ class _DeskScreenState extends State<DeskScreen>
     final parts = <String>[
       if ((b['sms_count'] as num? ?? 0) > 0) '문자 ${b['sms_count']}',
       if ((b['call_count'] as num? ?? 0) > 0) '부재중 ${b['call_count']}',
+      if ((b['notif_count'] as num? ?? 0) > 0) '알림 ${b['notif_count']}',
     ];
     return [
-      InkWell(
-        onTap: goFull,
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: OracleColors.mat,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: OracleColors.matBorder, width: 0.5),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+      Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: OracleColors.mat,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: OracleColors.matBorder, width: 0.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _sectionLabel(
+                      '대신 읽어드림${ts != null ? ' · ${DateFormat('HH:mm').format(ts.toLocal())}' : ''}'
+                      '${parts.isNotEmpty ? ' · ${parts.join(' · ')}' : ''}'),
+                ),
+                // 읽음 — 확인 처리하면 카드가 사라진다
+                InkWell(
+                  onTap: () => _dismiss(b['key'] as String),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Text('읽음',
+                        style: OracleType.label
+                            .copyWith(color: OracleColors.vermilion)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // 본문 탭 = 전체보기(신호 로그)
+            InkWell(
+              onTap: goFull,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: _sectionLabel(
-                        '대신 읽어드림${ts != null ? ' · ${DateFormat('HH:mm').format(ts.toLocal())}' : ''}'
-                        '${parts.isNotEmpty ? ' · ${parts.join(' · ')}' : ''}'),
+                    child: Text(b['summary'] as String? ?? '',
+                        style: OracleType.marginalia,
+                        maxLines: 8,
+                        overflow: TextOverflow.ellipsis),
                   ),
+                  const SizedBox(width: 8),
                   Text('전체보기',
-                      style:
-                          OracleType.label.copyWith(color: OracleColors.gray)),
+                      style: OracleType.label
+                          .copyWith(color: OracleColors.gray)),
                   const Icon(Icons.chevron_right,
                       size: 16, color: OracleColors.faint),
                 ],
               ),
-              const SizedBox(height: 12),
-              Text(b['summary'] as String? ?? '',
-                  style: OracleType.marginalia,
-                  maxLines: 8,
-                  overflow: TextOverflow.ellipsis),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
       const SizedBox(height: OracleSpace.section),

@@ -211,27 +211,26 @@ Future<void> runSignalsSync() async {
 }
 
 const _kBriefingSeen = 'briefing_last_seen';
-const _kLastCheckinMs = 'companion_last_checkin_ms';
+const _kLastCheckinHour = 'companion_last_checkin_hour';
 
-// 동반자 말걸기 — 활동 시간대(09~22시)·정시·이벤트 없이 가볍게.
+// 동반자 말걸기 — 활동 시간대(09~22시) 매 정시 1회. 좀 잦아도 OK(사용자 선택).
 const _checkinStartHour = 9;
 const _checkinEndHour = 22;
-const _checkinMinGap = Duration(hours: 2);
 
-/// 동반자 정시 체크인 — 위치 없이 쿠키/베르가 '뭐해' 한마디.
+/// 동반자 정시 체크인 — 위치 없이 쿠키/베르가 '뭐해' 한마디. 매 시간 1회.
 ///
-/// 30분 주기에 편승해, 활동 시간대에 2시간 간격으로 1회 백엔드 companion에 묻고
-/// 응답이 있으면 알림으로 표시. (위치 기능 없이 companion을 폰에서 처음 확인하는 길)
+/// 30분 주기에 편승해, 같은 '시'엔 한 번만 보낸다(정각 직후 첫 틱에 발사 → 거의 정시).
 Future<void> _maybeCheckin(SharedPreferences prefs) async {
   final now = DateTime.now();
   if (now.hour < _checkinStartHour || now.hour >= _checkinEndHour) return;
-  final last = prefs.getInt(_kLastCheckinMs) ?? 0;
-  if (now.millisecondsSinceEpoch - last < _checkinMinGap.inMilliseconds) return;
+  // 정시 1회 — 이 시간대(연-월-일-시)에 이미 보냈으면 건너뜀.
+  final hourKey = '${now.year}-${now.month}-${now.day}-${now.hour}';
+  if (prefs.getString(_kLastCheckinHour) == hourKey) return;
   try {
     final r = await OracleApi().companionSay('checkin');
     final text = (r['text'] as String?)?.trim() ?? '';
     if (text.isEmpty) return;        // alias 미설정·실패 — 다음 기회에
-    await prefs.setInt(_kLastCheckinMs, now.millisecondsSinceEpoch);
+    await prefs.setString(_kLastCheckinHour, hourKey);
     await _notifyCompanion((r['speaker'] as String?) ?? '', text);
     AppLog.info('동반자 체크인: ${r['speaker']} — $text');
   } catch (e) {
