@@ -57,6 +57,7 @@ def call(
     system: Optional[str] = None,
     effort: Optional[str] = None,
     expect_json: bool = False,
+    timeout: Optional[float] = None,   # per-call override (없으면 전역 NEST_TIMEOUT)
     **extra: Any,
 ) -> Dict[str, Any]:
     """Nest /api/call. 반환: {ok, provider, model, text, duration_ms, ...}.
@@ -77,7 +78,8 @@ def call(
         payload["expect_json"] = True
     payload.update(extra)
 
-    r = _http().post("/api/call", json=payload)
+    r = _http().post("/api/call", json=payload,
+                     timeout=timeout if timeout else NEST_TIMEOUT)
     r.raise_for_status()
     data = r.json()
     if not data.get("ok"):

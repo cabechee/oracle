@@ -25,6 +25,7 @@ def call(
     system: Optional[str] = None,
     effort: Optional[str] = None,
     expect_json: bool = False,
+    timeout: Optional[float] = None,   # per-call (일기·회고처럼 긴 생성용)
     **extra: Any,
 ) -> Dict[str, Any]:
     """Nest 호출. cache_prefix 는 캐싱 대상 고정 prefix (provider별 처리, 미지원이면 무시)."""
@@ -38,6 +39,7 @@ def call(
         system=system,
         effort=effort,
         expect_json=expect_json,
+        timeout=timeout,
         **extra,
     )
 

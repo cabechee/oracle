@@ -15,6 +15,10 @@ from agent import llm
 from config import VAULT_DIR
 from nightly_common import records_brief, resolve_alias
 
+# 일기·회고는 긴 서술 — opus가 thinking+긴 출력으로 전역 NEST_TIMEOUT(300s)을
+# 넘겨 타임아웃나던 것. 이 생성 호출들만 넉넉히(자정 배치라 길어도 무방).
+_DIGEST_TIMEOUT = 900
+
 
 # ── 프롬프트 ────────────────────────────────────────────────
 
@@ -106,7 +110,7 @@ def make_daily_journal(
                      "comment:dislike·analysis:wrong이 보이면 어떤 게 아빠와 안 맞았는지도 한 줄.)")
     prompt = "\n".join(parts) + "\n\n위 기록으로 오늘의 일기를 시간 순서대로 서술하세요(요약 금지)."
     try:
-        r = llm.call(alias, prompt, system=DAILY_JOURNAL_SYSTEM)
+        r = llm.call(alias, prompt, system=DAILY_JOURNAL_SYSTEM, timeout=_DIGEST_TIMEOUT)
         body = (r.get("text") or "").strip()
         return f"# {target.isoformat()}\n\n{body}\n"
     except Exception as e:
@@ -135,7 +139,7 @@ def make_day_summary3(body_text: str) -> str:
     try:
         r = llm.call(alias,
                      f"[오늘의 일기]\n{body}\n\n이 하루를 3줄로 요약하세요.",
-                     system=DAY_SUMMARY3_SYSTEM)
+                     system=DAY_SUMMARY3_SYSTEM, timeout=_DIGEST_TIMEOUT)
         lines = [ln.strip(" -·•\t0123456789.")
                  for ln in (r.get("text") or "").splitlines() if ln.strip()]
         return "\n".join([ln for ln in lines if ln][:3])
@@ -270,7 +274,7 @@ def _make_period_journal(
         parts.append(f"\n## 👍 이 기간 이모지 반응 집계\n{json.dumps(reactions, ensure_ascii=False)}")
     prompt = "\n\n".join(parts) + "\n\n위 저널들로 회고를 서술하세요(압축 요약 금지, 회고+피드백)."
     try:
-        r = llm.call(alias, prompt, system=system)
+        r = llm.call(alias, prompt, system=system, timeout=_DIGEST_TIMEOUT)
         body = (r.get("text") or "").strip()
         return f"{header}\n\n{body}\n"
     except Exception as e:
