@@ -354,11 +354,58 @@ class OracleApi {
   }
 
   /// 홈 표지 — 오늘 요약·어제 한 줄·신호 brief·그날의 오늘 (조회 전용, 빠름).
-  Future<Map<String, dynamic>> fetchHomeCover() async {
-    final resp = await _req('GET /home/cover',
-        () => http.get(Uri.parse('$baseUrl/home/cover'), headers: authHeaders));
+  /// [date]=YYYY-MM-DD 주면 그날 표지(달력으로 지난 날 재현), 없으면 오늘.
+  Future<Map<String, dynamic>> fetchHomeCover({String? date}) async {
+    final qp = (date != null && date.isNotEmpty) ? '?date=$date' : '';
+    final resp = await _req('GET /home/cover$qp',
+        () => http.get(Uri.parse('$baseUrl/home/cover$qp'), headers: authHeaders));
     if (resp.statusCode != 200) {
       throw Exception('home/cover 실패: ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// 데스크 — 처리 대시보드 (당장 처리·대신 읽어드림·오래 못 챙긴 사람·오늘 정리).
+  Future<Map<String, dynamic>> fetchDashboard() async {
+    final resp = await _req('GET /dashboard',
+        () => http.get(Uri.parse('$baseUrl/dashboard'), headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('dashboard 실패: ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// 데스크 항목 확인 처리 — 재조회 시 사라진다. key='action:...' | 'pending:...'.
+  Future<void> dismissDashboard(String key) async {
+    final body = jsonEncode({'key': key});
+    final resp = await _req(
+        'POST /dashboard/dismiss',
+        () => http.post(Uri.parse('$baseUrl/dashboard/dismiss'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: body),
+        sent: body);
+    if (resp.statusCode != 200) {
+      throw Exception('dismiss 실패: ${resp.statusCode}');
+    }
+  }
+
+  /// companion 한마디 — event(checkin/arrive_home 등) → {speaker, text, alias}.
+  Future<Map<String, dynamic>> companionSay(String event,
+      {String? place, String? speaker}) async {
+    final body = jsonEncode({
+      'event': event,
+      'place': ?place,
+      'speaker': ?speaker,
+    });
+    final resp = await _req(
+        'POST /companion/say',
+        () => http.post(Uri.parse('$baseUrl/companion/say'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: body),
+        timeout: _llmTimeout,
+        sent: body);
+    if (resp.statusCode != 200) {
+      throw Exception('companion 실패: ${resp.statusCode}');
     }
     return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
   }

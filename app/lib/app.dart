@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/design.dart';
 import 'features/home/home_page.dart';
@@ -14,6 +15,14 @@ class OracleApp extends StatelessWidget {
     );
     return MaterialApp(
       title: 'Oracle',
+      // 한국어 우선 — showDatePicker 등 머티리얼 위젯 한글화
+      locale: const Locale('ko'),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('ko'), Locale('en')],
       // 종이 디자인은 라이트 단일 — 다크는 추후 "필름 모드"로 별도 설계
       themeMode: ThemeMode.light,
       theme: ThemeData(

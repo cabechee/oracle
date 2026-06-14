@@ -76,6 +76,12 @@ def briefings() -> Collection:
     return _conn().briefings
 
 
+def dashboard_state() -> Collection:
+    """데스크 항목 처리 상태 — _id=항목 키('action:...'|'pending:...'),
+    dismissed_at 채워지면 '확인됨'으로 데스크에서 제외. 데스크=온라인 오라클."""
+    return _conn().dashboard_state
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:

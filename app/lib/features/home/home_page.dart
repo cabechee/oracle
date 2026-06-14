@@ -17,9 +17,9 @@ import '../capture/capture_controller.dart';
 import '../capture/record_tab.dart';
 import '../chat/chat_controller.dart';
 import '../chat/chat_list.dart';
+import '../desk/desk_screen.dart';
 import '../health/health_sync.dart';
 import '../notifications/notif_service.dart';
-import '../signals/signals_screen.dart';
 import '../signals/signals_sync.dart';
 import 'home_tab.dart';
 
@@ -38,7 +38,7 @@ class _HomePageState extends State<HomePage>
   final OracleApi _api = OracleApi();
   late final TabController _tab;
   int _lastTab = 3;
-  static const _tabNames = ['오늘', '흐름', '신호', '기록'];
+  static const _tabNames = ['오늘', '흐름', '데스크', '기록'];
 
   late final RecordStore _store;
   late final CaptureController _capture;
@@ -241,7 +241,7 @@ class _HomePageState extends State<HomePage>
           tabs: const [
             Tab(text: '오늘'),
             Tab(text: '흐름'),
-            Tab(text: '신호'),
+            Tab(text: '데스크'),
             Tab(text: '기록'),
           ],
         ),
@@ -296,7 +296,7 @@ class _HomePageState extends State<HomePage>
                 onBackfill: kIsWeb ? _capture.backfillUpload : null,
               ),
             ),
-            SignalsScreen(api: _api, embedded: true),
+            DeskScreen(api: _api, embedded: true),
             kIsWeb ? const _WebCaptureNotice() : RecordTab(c: _capture),
           ],
         ),
