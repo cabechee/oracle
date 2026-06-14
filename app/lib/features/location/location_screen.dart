@@ -1,3 +1,4 @@
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
@@ -98,9 +99,10 @@ class _LocationScreenState extends State<LocationScreen> {
             style: OracleType.marginalia,
           ),
           const SizedBox(height: 28),
-          _placeRow('집', _hasHome, () => _saveHere(kHomeLat, kHomeLng, '집')),
-          _placeRow(
-              '작업실', _hasOffice, () => _saveHere(kOfficeLat, kOfficeLng, '작업실')),
+          _placeRow('집', _hasHome, kHomeLat, kHomeLng,
+              () => _saveHere(kHomeLat, kHomeLng, '집')),
+          _placeRow('작업실', _hasOffice, kOfficeLat, kOfficeLng,
+              () => _saveHere(kOfficeLat, kOfficeLng, '작업실')),
           const Divider(height: 40),
           Row(
             children: [
@@ -134,7 +136,9 @@ class _LocationScreenState extends State<LocationScreen> {
     );
   }
 
-  Widget _placeRow(String label, bool saved, VoidCallback onSave) => Padding(
+  Widget _placeRow(String label, bool saved, String latKey, String lngKey,
+          VoidCallback onSave) =>
+      Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Row(
           children: [
@@ -142,6 +146,13 @@ class _LocationScreenState extends State<LocationScreen> {
               child: Text('$label${saved ? '  ·  저장됨' : ''}',
                   style: OracleType.userBody),
             ),
+            if (saved)
+              TextButton(
+                onPressed: () => _openInMap(latKey, lngKey, label),
+                child: Text('지도',
+                    style:
+                        OracleType.label.copyWith(color: OracleColors.gray)),
+              ),
             TextButton(
               onPressed: _busy ? null : onSave,
               child: Text(saved ? '여기로 갱신' : '여기를 $label으로',
@@ -151,4 +162,20 @@ class _LocationScreenState extends State<LocationScreen> {
           ],
         ),
       );
+
+  /// 저장한 좌표를 지도앱으로 — geo: 인텐트(설치된 지도앱 선택).
+  Future<void> _openInMap(String latKey, String lngKey, String label) async {
+    final prefs = await SharedPreferences.getInstance();
+    final lat = prefs.getDouble(latKey), lng = prefs.getDouble(lngKey);
+    if (lat == null || lng == null) return;
+    final intent = AndroidIntent(
+      action: 'action_view',
+      data: 'geo:$lat,$lng?q=$lat,$lng(${Uri.encodeComponent(label)})',
+    );
+    try {
+      await intent.launch();
+    } catch (_) {
+      if (mounted) setState(() => _msg = '지도앱을 열 수 없어요');
+    }
+  }
 }
