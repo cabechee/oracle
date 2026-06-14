@@ -82,6 +82,7 @@ class CaptureController extends ChangeNotifier {
 
   // ── 앱 생명주기 (홈이 전달) ────────────────────────────────
   void onAppPause() {
+    AppLog.life('앱 background (pause)');
     _camEpoch++; // 진행 중 init 무효화
     final cam = camera;
     camera = null;
@@ -109,6 +110,7 @@ class CaptureController extends ChangeNotifier {
   }
 
   void onAppResume() {
+    AppLog.life('앱 foreground (resume)');
     if (!cameraReady) initCamera();
   }
 
@@ -188,6 +190,7 @@ class CaptureController extends ChangeNotifier {
         final pic = await cam.takePicture();
         if (_disposed) return false;
         photos.add(File(pic.path));
+        AppLog.media('사진 촬영 — ${photos.length}장째 (recordingVideo=$recordingVideo)');
         _notify();
         return true;
       } catch (e) {
@@ -255,6 +258,7 @@ class CaptureController extends ChangeNotifier {
     try {
       await camera!.startVideoRecording();
       recordingVideo = true;
+      AppLog.media('영상 녹화 시작');
       _notify();
     } catch (e) {
       onToast('영상 녹화 실패: $e');
@@ -275,6 +279,7 @@ class CaptureController extends ChangeNotifier {
       if (_disposed) return;
       recordingVideo = false;
       video = File(f.path);
+      AppLog.media('영상 녹화 정지 — 첨부됨');
       _notify();
     } catch (e) {
       recordingVideo = false;
@@ -337,6 +342,7 @@ class CaptureController extends ChangeNotifier {
           ? joined
           : '${commentCtrl.text}\n$joined';
     }
+    AppLog.media('공유 수신 — 사진 ${sharedImages.length} 영상 ${firstVideo != null ? 1 : 0} 텍스트 ${textParts.length}');
     _notify();
     onToast('공유 받음 — 검토 후 전송');
   }
@@ -363,6 +369,7 @@ class CaptureController extends ChangeNotifier {
       }
       listening = false;
       if (path != null) _audioPath = path;
+      AppLog.media('음성 녹음 정지');
       _notify();
       return;
     }
@@ -376,6 +383,7 @@ class CaptureController extends ChangeNotifier {
           path: fp,
         );
         listening = true;
+        AppLog.media('음성 녹음 시작');
         _notify();
       } else {
         onToast('녹음 사용 불가 (마이크 권한 확인)');
@@ -396,8 +404,10 @@ class CaptureController extends ChangeNotifier {
       } catch (_) {}
       listening = false;
     }
+    final wasRecording = recordingVideo;
     if (recordingVideo) {
       // 녹화 중 전송 = 녹화 종료 후 영상 첨부 (음성과 동일 동작 — 조용한 누락 방지)
+      AppLog.media('전송 시점에 녹화 중이었음 → 영상 정지·첨부');
       await stopVideoRecording();
     }
 
@@ -421,13 +431,27 @@ class CaptureController extends ChangeNotifier {
       audioPath: _audioPath,
       videoPath: video?.path,
     );
+    // 전송 페이로드 — 사진/영상 오전송 진단의 핵심 (사진 의도인데 영상이 첨부된 경우 등)
+    final kinds = <String>[
+      if (pending.photos.isNotEmpty) '사진 ${pending.photos.length}장',
+      if (pending.videoPath != null) '영상',
+      if (pending.audioPath != null) '음성',
+      if ((pending.comment ?? '').isNotEmpty) '코멘트',
+    ];
+    AppLog.media('전송 — ${kinds.isEmpty ? "(빈)" : kinds.join(", ")}'
+        '${wasRecording ? " [녹화중 전송]" : ""}');
     store.addPending(pending);
     photos.clear();
     video = null;
     _audioPath = null;
     commentCtrl.clear();
     _notify();
-    if (action == null) onToast('전송됨 — 흐름 탭에서 결과 확인');
+    // 무엇을 보냈는지 토스트에 명시 — 영상 오전송을 즉시 알아채게.
+    if (action == null) {
+      onToast(kinds.isEmpty
+          ? '전송됨 — 흐름 탭에서 확인'
+          : '${kinds.join(" · ")} 전송됨 — 흐름 탭에서 확인');
+    }
     unawaited(_processIngest(pending));
   }
 
@@ -496,6 +520,8 @@ class CaptureController extends ChangeNotifier {
         model: modelProvider(),
       );
       p.recordId = stub.id; // 취소·삭제 시 이 record(쿠키 반응 포함) 숨김용
+      AppLog.net('ingest 완료 → ${stub.id} '
+          '(img ${p.photos.length} vid ${p.videoPath != null ? 1 : 0} aud ${p.audioPath != null ? 1 : 0})');
       // 폴링 — done까지 기다리지 않는다. 쿠키 한마디가 먼저 도착하면 그 순간
       // pending('현상 중')을 record로 교체해 쿠키를 띄우고(베르는 빈 채로), done이
       // 되면 베르까지 채워 갱신. 초반은 촘촘히(쿠키가 몇 초 내 옴), 이후 4s.

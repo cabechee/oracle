@@ -38,6 +38,12 @@ class AppLog {
   static void warn(String m) => log('WARN', m);
   static void err(String m) => log('ERROR', m);
 
+  // 카테고리 — 사용자 행동·흐름 추적용 (진단 로그 외에 "무엇을 언제 했나").
+  static void life(String m) => log('LIFE', m);   // 앱 생명주기 (foreground/background)
+  static void ui(String m) => log('UI', m);       // 탭·버튼·네비게이션·스크롤
+  static void media(String m) => log('MEDIA', m); // 카메라·영상·음성·갤러리·공유
+  static void net(String m) => log('NET', m);     // 요청/응답 본문 요약
+
   /// 최신순 로그 (인앱 로그뷰용).
   static List<String> recent() => _buf.reversed.toList(growable: false);
 

@@ -37,6 +37,8 @@ class _HomePageState extends State<HomePage>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final OracleApi _api = OracleApi();
   late final TabController _tab;
+  int _lastTab = 3;
+  static const _tabNames = ['오늘', '흐름', '신호', '기록'];
 
   late final RecordStore _store;
   late final CaptureController _capture;
@@ -49,7 +51,14 @@ class _HomePageState extends State<HomePage>
   void initState() {
     super.initState();
     AppLog.init();
+    AppLog.life('앱 시작');
     _tab = TabController(length: 4, vsync: this, initialIndex: 3); // 첫 실행 = 기록 탭
+    _tab.addListener(() {
+      if (_tab.index != _lastTab) {
+        _lastTab = _tab.index;
+        AppLog.ui('탭 → ${_tabNames[_tab.index]}');
+      }
+    });
     WidgetsBinding.instance.addObserver(this);
 
     _store = RecordStore();
@@ -161,6 +170,7 @@ class _HomePageState extends State<HomePage>
     final picked = await showLlmPicker(context, _api, _selectedModel);
     if (picked == null) return;
     await _saveSelectedModel(picked.isEmpty ? null : picked);
+    AppLog.ui('모델 선택 → ${picked.isEmpty ? "자동" : picked}');
   }
 
   Widget _textAction(String label, VoidCallback onTap) {
@@ -186,11 +196,13 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _onRefresh() async {
+    AppLog.ui('당겨서 새로고침');
     await _chat.refresh();
     await _loadLatestDigest();
   }
 
   void _openDigest() {
+    AppLog.ui('화면 열기 — 일기');
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => DigestScreen(api: _api)),
@@ -217,8 +229,11 @@ class _HomePageState extends State<HomePage>
       appBar: AppBar(
         // 타이틀 long-press = 숨은 진단 로그 뷰 (개인용 디버그)
         title: GestureDetector(
-          onLongPress: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const LogScreen())),
+          onLongPress: () {
+            AppLog.ui('화면 열기 — 진단 로그');
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const LogScreen()));
+          },
           child: const Text('Oracle'),
         ),
         bottom: TabBar(
@@ -251,10 +266,16 @@ class _HomePageState extends State<HomePage>
               ),
             ),
           ),
-          _textAction('검색', () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => QueryScreen(api: _api)))),
-          _textAction('색인', () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => IndexScreen(api: _api)))),
+          _textAction('검색', () {
+            AppLog.ui('화면 열기 — 검색');
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => QueryScreen(api: _api)));
+          }),
+          _textAction('색인', () {
+            AppLog.ui('화면 열기 — 색인');
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => IndexScreen(api: _api)));
+          }),
           _textAction('일기', _openDigest),
           const SizedBox(width: 8),
         ],

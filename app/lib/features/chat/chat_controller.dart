@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../../api.dart';
+import '../../applog.dart';
 import '../../core/record_store.dart';
 import '../../models.dart';
 
@@ -52,6 +53,7 @@ class ChatController {
     final gen = _generation;
     store.setLoading(true);
     try {
+      AppLog.ui('페이지 로드 — offset ${store.records.length}');
       final more = await api.listRecent(
         limit: 30,
         offset: store.records.length,
@@ -114,6 +116,7 @@ class ChatController {
   // ── 대화 모드 ──────────────────────────────────────────────
   /// 흐름에서 길게 눌러 과거 기록을 언급 — 입력바에 칩으로 붙는다.
   void mention(Record r) {
+    AppLog.ui('기록 언급 추가 — ${r.id}');
     store.addMention(r);
     onToast('언급에 추가 — 보내면 이 기록 얘기로 답해요');
   }
@@ -123,6 +126,7 @@ class ChatController {
     if (t.isEmpty || store.pendingChatText != null) return;
     final mentionIds = store.chatMentions.map((r) => r.id).toList();
     store.setPendingChat(t);
+    AppLog.ui('대화 전송 — ${t.length}자, 멘션 ${mentionIds.length}');
     try {
       final ms = await api.sendChat(t, mentionIds: mentionIds);
       store.addMessages(ms);
@@ -137,6 +141,7 @@ class ChatController {
   /// 섹션별 리액션 — 같은 값 다시 누르면 해제(토글).
   Future<void> react(Record rec, String section, String value) async {
     final next = rec.reactions[section] == value ? '' : value;
+    AppLog.ui('반응 — $section ${next.isEmpty ? "해제" : next}');
     try {
       await api.setReaction(rec.id, next, section: section);
       store.updateById(rec.id, (r) {
@@ -154,6 +159,7 @@ class ChatController {
   }
 
   Future<void> updateComment(Record rec, String newText) async {
+    AppLog.ui('코멘트 수정 — ${rec.id}');
     try {
       await api.updateComment(rec.id, newText);
       store.updateById(rec.id, (r) => r.copyWith(userComment: newText));
@@ -164,6 +170,7 @@ class ChatController {
 
   /// 숨김 — 실수 업로드 등. 흐름에서 빼고 백엔드 soft delete(어드민엔 남음).
   Future<void> hideRecord(Record rec) async {
+    AppLog.ui('기록 숨김 — ${rec.id}');
     store.removeRecord(rec.id);
     try {
       await api.hideRecord(rec.id);
@@ -175,6 +182,7 @@ class ChatController {
   /// 재처리 — 내용이 이상할 때 같은 사진·코멘트로 다시 돌린다.
   /// part = all|quick|analysis|comment|discovery (부분만).
   Future<void> reprocess(Record rec, {String part = 'all'}) async {
+    AppLog.ui('재처리 — $part (${rec.id})');
     onToast('재처리 중 — 잠시만요');
     try {
       final fresh = await api.reprocess(rec.id, part: part);

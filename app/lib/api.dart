@@ -50,7 +50,9 @@ class OracleApi {
     String label,
     Future<http.Response> Function() send, {
     Duration timeout = _getTimeout,
+    String? sent, // 요청 본문 요약 (있으면 "앱→서버 보낸 데이터"로 기록)
   }) async {
+    if (sent != null && sent.isNotEmpty) AppLog.net('$label ← 보냄 ${_short(sent)}');
     final sw = Stopwatch()..start();
     try {
       final r = await send().timeout(timeout);
@@ -58,7 +60,8 @@ class OracleApi {
       if (r.statusCode >= 400) {
         AppLog.err('$label → HTTP ${r.statusCode} (${ms}ms) ${_short(r.body)}');
       } else {
-        AppLog.info('$label → ${r.statusCode} (${ms}ms)');
+        // 성공 응답도 본문 요약까지 — "서버→폰 넘어온 데이터" 추적.
+        AppLog.net('$label → ${r.statusCode} (${ms}ms) ${_short(utf8.decode(r.bodyBytes, allowMalformed: true))}');
       }
       return r;
     } on TimeoutException {
@@ -175,12 +178,14 @@ class OracleApi {
 
   /// 자연어 질의 — backend query 모듈. 답변 + 참조 record_id.
   Future<QueryResult> query(String question, {int limit = 30}) async {
+    final body = jsonEncode({'question': question, 'limit': limit});
     final resp = await _req(
       'POST /query',
       () => http.post(Uri.parse('$baseUrl/query'),
           headers: {'Content-Type': 'application/json', ...authHeaders},
-          body: jsonEncode({'question': question, 'limit': limit})),
+          body: body),
       timeout: _llmTimeout,
+      sent: body,
     );
     if (resp.statusCode != 200) {
       throw Exception('query 실패: ${resp.statusCode} ${resp.body}');
@@ -290,12 +295,14 @@ class OracleApi {
   /// 대화 한 턴 — user/assistant 메시지 쌍 반환 (서버에 저장됨).
   Future<List<ChatMessage>> sendChat(String message,
       {List<String> mentionIds = const []}) async {
+    final body = jsonEncode({'message': message, 'mention_ids': mentionIds});
     final resp = await _req(
       'POST /chat',
       () => http.post(Uri.parse('$baseUrl/chat'),
           headers: {'Content-Type': 'application/json', ...authHeaders},
-          body: jsonEncode({'message': message, 'mention_ids': mentionIds})),
+          body: body),
       timeout: _llmTimeout,
+      sent: body,
     );
     if (resp.statusCode != 200) {
       throw Exception('chat 실패: ${resp.statusCode} ${resp.body}');
@@ -334,11 +341,13 @@ class OracleApi {
 
   /// record user_comment 수정 (vault 평문은 변경 없음, Mongo만 갱신).
   Future<void> updateComment(String recordId, String newComment) async {
+    final body = jsonEncode({'user_comment': newComment});
     final resp = await _req(
         'PATCH /records/$recordId',
         () => http.patch(Uri.parse('$baseUrl/records/$recordId'),
             headers: {'Content-Type': 'application/json', ...authHeaders},
-            body: jsonEncode({'user_comment': newComment})));
+            body: body),
+        sent: body);
     if (resp.statusCode != 200) {
       throw Exception('record 수정 실패: ${resp.statusCode} ${resp.body}');
     }
@@ -406,12 +415,14 @@ class OracleApi {
   Future<Map<String, dynamic>> syncSignals(
       List<Map<String, dynamic>> sms, List<Map<String, dynamic>> calls,
       {List<Map<String, dynamic>> notifications = const []}) async {
+    final body = jsonEncode(
+        {'sms': sms, 'calls': calls, 'notifications': notifications});
     final resp = await _req(
         'POST /signals/sync',
         () => http.post(Uri.parse('$baseUrl/signals/sync'),
             headers: {'Content-Type': 'application/json', ...authHeaders},
-            body: jsonEncode(
-                {'sms': sms, 'calls': calls, 'notifications': notifications})));
+            body: body),
+        sent: body);
     if (resp.statusCode != 200) {
       throw Exception('signals 실패: ${resp.statusCode} ${resp.body}');
     }
