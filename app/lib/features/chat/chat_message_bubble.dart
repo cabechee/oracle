@@ -4,7 +4,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../api.dart';
 import '../../core/design.dart';
 import '../../models.dart';
-import 'record_bubble.dart' show userBubble, quickNote;
+import 'record_bubble.dart' show userBubble, quickNote, bertAvatar;
 import 'ref_record_card.dart';
 
 /// 대화 메시지 — 유저는 우측 고딕(굵게), 동반자는 명조 본문.
@@ -19,22 +19,35 @@ class ChatMessageBubble extends StatelessWidget {
     if (message.isUser) {
       return userBubble(context, message.text);
     }
-    return Column(
+    // 베르(강아지) 아바타 + 본문 — 동반자의 온전한 목소리. 쿠키 첨언·참조는 옆 컬럼에.
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MarkdownBody(
-          data: message.text,
-          styleSheet: _chatMd(),
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: bertAvatar(26),
         ),
-        // 쿠키 첨언 — 베르 답 아래 짧게 거듦
-        if ((message.quickText ?? '').isNotEmpty) ...[
-          const SizedBox(height: OracleSpace.inBlock),
-          quickNote(message.quickText!, seed: message.id),
-        ],
-        if (message.referenced.isNotEmpty) ...[
-          const SizedBox(height: OracleSpace.inBlock),
-          refRecordRow(context, api, message.referenced),
-        ],
+        const SizedBox(width: 9),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MarkdownBody(
+                data: message.text,
+                styleSheet: _chatMd(),
+              ),
+              // 쿠키 첨언 — 베르 답 아래 짧게 거듦
+              if ((message.quickText ?? '').isNotEmpty) ...[
+                const SizedBox(height: OracleSpace.inBlock),
+                quickNote(message.quickText!, seed: message.id),
+              ],
+              if (message.referenced.isNotEmpty) ...[
+                const SizedBox(height: OracleSpace.inBlock),
+                refRecordRow(context, api, message.referenced),
+              ],
+            ],
+          ),
+        ),
       ],
     );
   }

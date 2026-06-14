@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../api.dart';
 import '../../applog.dart';
 import '../../core/design.dart';
+import '../chat/record_bubble.dart' show bertAvatar;
 
 /// 홈 탭 — 표지(front page). 마스트헤드 날짜를 탭하면 지난 날 표지를 재현한다.
 ///
@@ -215,7 +216,14 @@ class _HomeTabState extends State<HomeTab>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _sectionLabel(_briefTitle(b['kind'] as String?)),
+            Row(
+              children: [
+                bertAvatar(20),
+                const SizedBox(width: 8),
+                Text(_briefTitle(b['kind'] as String?),
+                    style: OracleType.label),
+              ],
+            ),
             const SizedBox(height: 12),
             Text(b['text'] as String? ?? '', style: OracleType.journal),
           ],

@@ -361,17 +361,33 @@ Widget quickNote(String text, {String seed = ''}) {
   );
 }
 
-/// 방주 — 동반자의 여백 메모. ※표 + 고운바탕 회잉크. record/검색/대화 공용.
+/// 베르(강아지) 아바타 — 동반자 메인 화자 표시. 쿠키(quickNote 새 아바타)와 대칭.
+/// 빼꼼 올려다보는 얼굴 — 원형 클립 + 옅은 테두리(사진이라 paper와 경계를 준다).
+Widget bertAvatar(double size) => Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: OracleColors.mat,
+      ),
+      foregroundDecoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: OracleColors.matBorder, width: 0.5),
+      ),
+      child: ClipOval(
+        child: Image.asset('assets/bert/bert.png',
+            width: size, height: size, fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium),
+      ),
+    );
+
+/// 방주 — 동반자(베르)의 여백 메모. 베르 아바타 + 고운바탕 회잉크. record/검색/대화 공용.
 Widget marginaliaNote(String markdown) {
   return Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text('※',
-          style: OracleType.marginalia.copyWith(
-            color: OracleColors.vermilion,
-            fontSize: 11,
-            height: 22 / 11,
-          )),
+      Padding(
+          padding: const EdgeInsets.only(top: 1), child: bertAvatar(22)),
       const SizedBox(width: 8),
       Expanded(child: MarkdownBody(data: markdown, styleSheet: marginaliaMd())),
     ],

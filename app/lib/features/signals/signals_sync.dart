@@ -246,12 +246,17 @@ Future<void> _notifyCompanion(String speaker, String text) async {
     android: AndroidInitializationSettings('@mipmap/ic_launcher'),
   ));
   final icon = speaker == '쿠키' ? '🐦' : (speaker == '베르' ? '🐶' : '🐾');
+  // 베르는 캐릭터 얼굴을 큰 아이콘으로(drawable/bert) — 쿠키·기타는 이모지만.
+  final largeIcon = speaker == '베르'
+      ? const DrawableResourceAndroidBitmap('bert')
+      : null;
   await plugin.show(9, '$icon ${speaker.isEmpty ? '동반자' : speaker}', text,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails('companion', '동반자',
             channelDescription: '쿠키·베르의 말 걸기',
             importance: Importance.defaultImportance,
-            styleInformation: BigTextStyleInformation('')),
+            largeIcon: largeIcon,
+            styleInformation: const BigTextStyleInformation('')),
       ));
 }
 

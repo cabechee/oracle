@@ -39,6 +39,7 @@ flutter:
 
   assets:
     - assets/cookies/
+    - assets/bert/
 
   fonts:
     - family: Pretendard
