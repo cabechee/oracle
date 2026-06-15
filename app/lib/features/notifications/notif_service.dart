@@ -23,6 +23,17 @@ class NotifService {
     } catch (_) {}
   }
 
+  /// 알림 탭으로 앱이 켜졌으면 그 payload (cold start) — 없으면 null.
+  Future<String?> launchPayload() async {
+    try {
+      final d = await _plugin.getNotificationAppLaunchDetails();
+      if (d?.didNotificationLaunchApp ?? false) {
+        return d?.notificationResponse?.payload;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<void> notifyNewDigest(String date) async {
     try {
       const details = NotificationDetails(

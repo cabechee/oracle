@@ -52,6 +52,18 @@ class CaptureController extends ChangeNotifier {
   File? video;
   bool recordingVideo = false;
   final TextEditingController commentCtrl = TextEditingController();
+  // companion 알림에 답하는 중이면 그 질문(멘트) — 전송 시 코멘트 맥락으로 녹임.
+  String? askPrompt;
+  void setAsk(String? text) {
+    askPrompt = (text != null && text.trim().isNotEmpty) ? text.trim() : null;
+    _notify();
+  }
+
+  void clearAsk() {
+    if (askPrompt == null) return;
+    askPrompt = null;
+    _notify();
+  }
 
   // ── 음성: 순수 녹음 ────────────────────────────────────────
   bool listening = false;
@@ -411,10 +423,16 @@ class CaptureController extends ChangeNotifier {
       await stopVideoRecording();
     }
 
-    final comment = commentCtrl.text.trim();
+    final answer = commentCtrl.text.trim();
+    // companion 알림에 답하는 중이면 그 질문을 맥락으로 녹여 보냄.
+    final comment = (askPrompt != null)
+        ? (answer.isEmpty
+            ? '동반자가 "$askPrompt"라고 물어봐서 기록함'
+            : '동반자가 "$askPrompt"라고 물었고, 이렇게 답함: $answer')
+        : answer;
     // 아무것도 없는 상태에서 전송 = 지금 프리뷰를 즉석 촬영해 보냄
     // (앱 켜고 바로 전송 누르는 흐름 — 셔터를 따로 누를 필요 없게).
-    if (photos.isEmpty && comment.isEmpty && _audioPath == null && video == null) {
+    if (photos.isEmpty && answer.isEmpty && _audioPath == null && video == null) {
       await capture();
       if (photos.isEmpty) return; // 촬영 실패(준비 중·권한 등) — capture가 토스트
     }
@@ -445,6 +463,7 @@ class CaptureController extends ChangeNotifier {
     video = null;
     _audioPath = null;
     commentCtrl.clear();
+    askPrompt = null;
     _notify();
     // 무엇을 보냈는지 토스트에 명시 — 영상 오전송을 즉시 알아채게.
     if (action == null) {

@@ -196,6 +196,7 @@ class LocationTaskHandler extends TaskHandler {
               importance: Importance.defaultImportance,
               largeIcon: largeIcon,
               styleInformation: const BigTextStyleInformation('')),
-        ));
+        ),
+        payload: 'ask:$text'); // 탭하면 기록 탭에서 이 질문에 답
   }
 }

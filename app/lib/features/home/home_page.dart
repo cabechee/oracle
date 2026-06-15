@@ -70,7 +70,7 @@ class _HomePageState extends State<HomePage>
     );
     _chat = ChatController(api: _api, store: _store, onToast: _toast);
 
-    _notif.init(onTap: _openDigestFromNotif);
+    _notif.init(onTap: _onNotifTap);
     _loadSelectedModel();
     _chat.load(initial: true);
     _chat.loadMessages();
@@ -83,7 +83,10 @@ class _HomePageState extends State<HomePage>
       initNotificationListener();   // 앱 알림 수집 시작 (권한 있으면 구독)
       syncHealth();                 // 수면·걸음 (Health Connect)
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowOnboarding());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeShowOnboarding();
+      _checkLaunchNotif(); // 알림 탭으로 켜졌으면(cold start) 기록 탭으로
+    });
   }
 
   /// 신호 동기화용 권한 — 1회만 요청, 거부해도 해당 소스만 건너뜀 (graceful).
@@ -207,6 +210,24 @@ class _HomePageState extends State<HomePage>
       context,
       MaterialPageRoute(builder: (_) => DigestScreen(api: _api)),
     );
+  }
+
+  /// 알림 탭 라우팅 — companion 'ask:' 멘트면 기록 탭에서 답, 아니면 다이제스트.
+  void _onNotifTap(String? payload) {
+    if (payload == null || !mounted) return;
+    if (payload.startsWith('ask:')) {
+      AppLog.ui('알림 답하기 → 기록 탭');
+      _tab.animateTo(3); // 기록 탭
+      _capture.setAsk(payload.substring(4));
+    } else {
+      _openDigestFromNotif(payload);
+    }
+  }
+
+  /// 알림 탭으로 앱이 켜졌으면(cold start) 그 payload 처리.
+  Future<void> _checkLaunchNotif() async {
+    final payload = await _notif.launchPayload();
+    if (payload != null) _onNotifTap(payload);
   }
 
   /// 알림 탭 — payload(날짜) 있으면 그 다이제스트 본문으로 바로.

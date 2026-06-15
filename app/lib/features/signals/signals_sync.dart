@@ -262,7 +262,8 @@ Future<void> _notifyCompanion(String speaker, String text) async {
             importance: Importance.defaultImportance,
             largeIcon: largeIcon,
             styleInformation: const BigTextStyleInformation('')),
-      ));
+      ),
+      payload: 'ask:$text'); // 탭하면 기록 탭에서 이 질문에 답
 }
 
 /// 새 발행물(조간/석간) 도착 시 1회 알림.
