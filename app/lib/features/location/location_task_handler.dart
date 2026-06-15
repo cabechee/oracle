@@ -17,8 +17,7 @@ const kHomeLng = 'loc_home_lng';
 const kOfficeLat = 'loc_office_lat';
 const kOfficeLng = 'loc_office_lng';
 const _kLastPlace = 'loc_last_place';
-const _kLastLat = 'loc_last_lat';
-const _kLastLng = 'loc_last_lng';
+const _kWasFar = 'loc_was_far';
 
 const _baseUrl = String.fromEnvironment('ORACLE_API',
     defaultValue: 'http://chocolat.tail575fea.ts.net:8001');
@@ -57,29 +56,33 @@ class LocationTaskHandler extends TaskHandler {
       final officeLat = prefs.getDouble(kOfficeLat),
           officeLng = prefs.getDouble(kOfficeLng);
       final lastPlace = prefs.getString(_kLastPlace) ?? 'unknown';
-      final lastLat = prefs.getDouble(_kLastLat), lastLng = prefs.getDouble(_kLastLng);
 
-      // 현재 어디인가 — 집/작업실 반경 안이면 그곳, 아니면 away
+      // 집/작업실까지 거리 (저장된 것만)
+      double? dHome, dOffice;
+      if (homeLat != null && homeLng != null) {
+        dHome = Geolocator.distanceBetween(lat, lng, homeLat, homeLng);
+      }
+      if (officeLat != null && officeLng != null) {
+        dOffice = Geolocator.distanceBetween(lat, lng, officeLat, officeLng);
+      }
+
+      // 현재 장소 — 집/작업실 반경 안이면 그곳, 아니면 away
       String place = 'away';
-      if (homeLat != null &&
-          homeLng != null &&
-          Geolocator.distanceBetween(lat, lng, homeLat, homeLng) <= _arriveRadius) {
+      if (dHome != null && dHome <= _arriveRadius) {
         place = 'home';
-      } else if (officeLat != null &&
-          officeLng != null &&
-          Geolocator.distanceBetween(lat, lng, officeLat, officeLng) <=
-              _arriveRadius) {
+      } else if (dOffice != null && dOffice <= _arriveRadius) {
         place = 'office';
       }
 
-      // 직전 기록 위치서 500m 이탈?
-      bool deviated = false;
-      if (lastLat != null && lastLng != null) {
-        deviated = Geolocator.distanceBetween(lat, lng, lastLat, lastLng) >=
-            _deviateRadius;
-      }
-      await prefs.setDouble(_kLastLat, lat);
-      await prefs.setDouble(_kLastLng, lng);
+      // 평소 위치(집·작업실)에서 멀리(500m+)인가 — 직전 위치가 아니라 '집/작업실' 기준.
+      // 이동 중에도 직전 위치선 500m가 쉽게 넘어가 반복되던 버그를 이 기준으로 차단.
+      final hasPlace = dHome != null || dOffice != null;
+      double minDist = double.infinity;
+      if (dHome != null && dHome < minDist) minDist = dHome;
+      if (dOffice != null && dOffice < minDist) minDist = dOffice;
+      final far = hasPlace && minDist > _deviateRadius;
+      final wasFar = prefs.getBool(_kWasFar) ?? false;
+      await prefs.setBool(_kWasFar, far);
 
       String? event;
       if (place != lastPlace) {
@@ -93,7 +96,9 @@ class LocationTaskHandler extends TaskHandler {
           event = 'leave_office';
         }
         await prefs.setString(_kLastPlace, place);
-      } else if (place == 'away' && deviated) {
+      }
+      // 집/작업실에서 '막' 500m 벗어나는 순간 한 번만 — 이미 멀면(far→far) 다시 안 물어봄.
+      if (event == null && far && !wasFar) {
         event = 'deviate';
       }
 
