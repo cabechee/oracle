@@ -92,6 +92,11 @@ def reminders() -> Collection:
     return _conn().reminders
 
 
+def visits() -> Collection:
+    """장소 방문 — 체류(stay) 감지로 들어온 방문(_id=visit-, 멱등). 일기 재료."""
+    return _conn().visits
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:

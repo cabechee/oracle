@@ -1,7 +1,11 @@
-/// 위치 추적 백그라운드 — 1분 폴링 포그라운드 서비스의 TaskHandler.
+/// 위치 추적 백그라운드 — 체류(stay) 감지 포그라운드 서비스의 TaskHandler.
 ///
-/// 집/작업실 도착·이탈·평소위치 500m 이탈을 폰에서 판정 → 백엔드 /companion/say
-/// (쿠키/베르 한마디) → 로컬 알림. 별도 isolate라 OracleApi 대신 http 직접 사용.
+/// 1분 폴링하되 '한 곳에 머무름(체류)'을 감지한다:
+/// - 집/작업실 반경 진입 → 즉시 방문 시작(도착 인사)
+/// - 새 장소에 15분+ 머묾 → 방문 시작("여기 뭐 해?")
+/// - 머물던 anchor를 벗어남 → 방문 종료(체류 시간 기록 + "한동안 있다 가네")
+/// 배터리: 체류 확정 중엔 GPS를 2틱(2분)마다만(이탈 감지 약간 지연 허용).
+/// 별도 isolate라 OracleApi 대신 http 직접. 의미 있는 '방문 이벤트'만 서버로.
 library;
 
 import 'dart:convert';
@@ -16,13 +20,20 @@ const kHomeLat = 'loc_home_lat';
 const kHomeLng = 'loc_home_lng';
 const kOfficeLat = 'loc_office_lat';
 const kOfficeLng = 'loc_office_lng';
-const _kLastPlace = 'loc_last_place';
-const _kWasFar = 'loc_was_far';
+
+// 체류 상태 (anchor = 지금 머무는 후보 중심)
+const _kAnchorLat = 'visit_anchor_lat';
+const _kAnchorLng = 'visit_anchor_lng';
+const _kAnchorStart = 'visit_anchor_start'; // epoch ms
+const _kVisitOn = 'visit_on';               // 체류 확정 여부
+const _kVisitPlace = 'visit_place';         // 'home'|'office'|''(새 장소)
+const _kTick = 'visit_tick';
 
 const _baseUrl = String.fromEnvironment('ORACLE_API',
     defaultValue: 'http://chocolat.tail575fea.ts.net:8001');
-const _arriveRadius = 120.0; // 도착 판정 반경(m)
-const _deviateRadius = 500.0; // 평소 위치 이탈 판정(m)
+const _arriveRadius = 120.0; // 집/작업실 도착 반경(m)
+const _stayRadius = 150.0;   // 같은 곳 '머무름' 판정 반경(m)
+const _stayMinutes = 15;     // 새 장소 체류 확정 시간(분)
 
 @pragma('vm:entry-point')
 void startLocationCallback() {
@@ -46,71 +57,93 @@ class LocationTaskHandler extends TaskHandler {
   Future<void> _tick() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+
+      // 배터리: 체류 확정 중엔 2틱(2분)마다만 GPS — 정지 상태에선 위치 거의 안 변함.
+      final visitOn = prefs.getBool(_kVisitOn) ?? false;
+      final tick = (prefs.getInt(_kTick) ?? 0) + 1;
+      await prefs.setInt(_kTick, tick);
+      if (visitOn && tick % 2 != 0) return;
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings:
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
       final lat = pos.latitude, lng = pos.longitude;
+      final now = DateTime.now().millisecondsSinceEpoch;
 
       final homeLat = prefs.getDouble(kHomeLat), homeLng = prefs.getDouble(kHomeLng);
       final officeLat = prefs.getDouble(kOfficeLat),
           officeLng = prefs.getDouble(kOfficeLng);
-      final lastPlace = prefs.getString(_kLastPlace) ?? 'unknown';
 
-      // 집/작업실까지 거리 (저장된 것만)
-      double? dHome, dOffice;
-      if (homeLat != null && homeLng != null) {
-        dHome = Geolocator.distanceBetween(lat, lng, homeLat, homeLng);
-      }
-      if (officeLat != null && officeLng != null) {
-        dOffice = Geolocator.distanceBetween(lat, lng, officeLat, officeLng);
-      }
-
-      // 현재 장소 — 집/작업실 반경 안이면 그곳, 아니면 away
-      String place = 'away';
-      if (dHome != null && dHome <= _arriveRadius) {
+      // 정해진 장소 판정 (반경 안)
+      String? place;
+      if (homeLat != null &&
+          homeLng != null &&
+          Geolocator.distanceBetween(lat, lng, homeLat, homeLng) <=
+              _arriveRadius) {
         place = 'home';
-      } else if (dOffice != null && dOffice <= _arriveRadius) {
+      } else if (officeLat != null &&
+          officeLng != null &&
+          Geolocator.distanceBetween(lat, lng, officeLat, officeLng) <=
+              _arriveRadius) {
         place = 'office';
       }
 
-      // 평소 위치(집·작업실)에서 멀리(500m+)인가 — 직전 위치가 아니라 '집/작업실' 기준.
-      // 이동 중에도 직전 위치선 500m가 쉽게 넘어가 반복되던 버그를 이 기준으로 차단.
-      final hasPlace = dHome != null || dOffice != null;
-      double minDist = double.infinity;
-      if (dHome != null && dHome < minDist) minDist = dHome;
-      if (dOffice != null && dOffice < minDist) minDist = dOffice;
-      final far = hasPlace && minDist > _deviateRadius;
-      final wasFar = prefs.getBool(_kWasFar) ?? false;
-      await prefs.setBool(_kWasFar, far);
+      final anchorLat = prefs.getDouble(_kAnchorLat),
+          anchorLng = prefs.getDouble(_kAnchorLng);
 
-      String? event;
-      if (place != lastPlace) {
-        if (place == 'home') {
-          event = 'arrive_home';
-        } else if (place == 'office') {
-          event = 'arrive_office';
-        } else if (lastPlace == 'home') {
-          event = 'leave_home';
-        } else if (lastPlace == 'office') {
-          event = 'leave_office';
+      if (anchorLat == null || anchorLng == null) {
+        await _setAnchor(prefs, lat, lng, now); // 첫 위치
+        return;
+      }
+
+      final fromAnchor =
+          Geolocator.distanceBetween(lat, lng, anchorLat, anchorLng);
+
+      if (fromAnchor <= _stayRadius) {
+        // 같은 곳에 머무는 중
+        if (visitOn) return; // 이미 체류 확정 — 조용
+        final start = prefs.getInt(_kAnchorStart) ?? now;
+        final stayedMin = (now - start) ~/ 60000;
+        // 집/작업실은 즉시, 새 장소는 15분 머물면 방문 확정
+        if (place != null || stayedMin >= _stayMinutes) {
+          await prefs.setBool(_kVisitOn, true);
+          await prefs.setString(_kVisitPlace, place ?? '');
+          final event = place == 'home'
+              ? 'arrive_home'
+              : place == 'office'
+                  ? 'arrive_office'
+                  : 'arrive_place';
+          await _say(event, place);
         }
-        await prefs.setString(_kLastPlace, place);
-      }
-      // 집/작업실에서 '막' 500m 벗어나는 순간 한 번만 — 이미 멀면(far→far) 다시 안 물어봄.
-      if (event == null && far && !wasFar) {
-        event = 'deviate';
-      }
-
-      if (event != null) {
-        await _sayAndNotify(event, place);
+      } else {
+        // anchor를 벗어남
+        if (visitOn) {
+          // 체류하던 곳을 떠남 → 방문 종료(기록 + '한동안 있다 가네')
+          final start = prefs.getInt(_kAnchorStart) ?? now;
+          final minutes = (now - start) ~/ 60000;
+          final vplace = prefs.getString(_kVisitPlace) ?? '';
+          await _endVisit(anchorLat, anchorLng,
+              vplace.isEmpty ? null : vplace, start, now, minutes);
+        }
+        await _setAnchor(prefs, lat, lng, now); // 새 anchor에서 다시 시작
       }
     } catch (_) {
       // isolate 예외 삼킴 — 서비스 유지
     }
   }
 
-  Future<void> _sayAndNotify(String event, String place) async {
+  Future<void> _setAnchor(
+      SharedPreferences prefs, double lat, double lng, int now) async {
+    await prefs.setDouble(_kAnchorLat, lat);
+    await prefs.setDouble(_kAnchorLng, lng);
+    await prefs.setInt(_kAnchorStart, now);
+    await prefs.setBool(_kVisitOn, false);
+    await prefs.setString(_kVisitPlace, '');
+  }
+
+  // 방문 시작 — companion 멘트만 (도착 인사 / "여기 뭐 해?")
+  Future<void> _say(String event, String? place) async {
     try {
       final resp = await http
           .post(Uri.parse('$_baseUrl/companion/say'),
@@ -118,10 +151,32 @@ class LocationTaskHandler extends TaskHandler {
               body: jsonEncode({'event': event, 'place': place}))
           .timeout(const Duration(seconds: 20));
       if (resp.statusCode != 200) return;
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final text = (data['text'] as String? ?? '').trim();
-      if (text.isEmpty) return;
-      await _notify((data['speaker'] as String?) ?? '', text);
+      final d = jsonDecode(resp.body) as Map<String, dynamic>;
+      final text = (d['text'] as String? ?? '').trim();
+      if (text.isNotEmpty) await _notify((d['speaker'] as String?) ?? '', text);
+    } catch (_) {}
+  }
+
+  // 방문 종료 — 기록 + '떠남' 멘트
+  Future<void> _endVisit(double lat, double lng, String? place, int start,
+      int end, int minutes) async {
+    try {
+      final resp = await http
+          .post(Uri.parse('$_baseUrl/visits'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'place': place,
+                'lat': lat,
+                'lng': lng,
+                'start_ts': start,
+                'end_ts': end,
+                'minutes': minutes,
+              }))
+          .timeout(const Duration(seconds: 20));
+      if (resp.statusCode != 200) return;
+      final d = jsonDecode(resp.body) as Map<String, dynamic>;
+      final text = (d['text'] as String? ?? '').trim();
+      if (text.isNotEmpty) await _notify((d['speaker'] as String?) ?? '', text);
     } catch (_) {}
   }
 

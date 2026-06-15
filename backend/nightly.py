@@ -132,8 +132,14 @@ def _run_daily_inner(target_date: Optional[date] = None) -> Dict[str, Any]:
     day_signals = signals_mod.signals_for_day(target)
     result["signal_count"] = len(day_signals)
 
-    # 5) 일 저널 (LLM, silent + reactions + signals 포함된 풍부한 prompt) → vault digest + journals
-    digest_text = journal.make_daily_journal(records, target, silent, reactions, day_signals)
+    # 4.6) 그날 다닌 곳 (체류 감지된 방문) — 일기 동선 재료
+    import visits as visits_mod
+    day_visits = visits_mod.day_lines(target)
+    result["visit_count"] = len(day_visits)
+
+    # 5) 일 저널 (LLM, silent + reactions + signals + visits 포함된 풍부한 prompt) → vault digest + journals
+    digest_text = journal.make_daily_journal(
+        records, target, silent, reactions, day_signals, day_visits)
     result["digest_path"] = journal.write_daily_digest_file(target, digest_text)
     result["digest_preview"] = digest_text[:200]
     summary3 = journal.make_day_summary3(digest_text)

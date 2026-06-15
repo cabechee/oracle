@@ -20,11 +20,14 @@ _EVENTS = {
     "leave_office":  "아빠가 작업실에서 나섰어.",
     "deviate":       "아빠가 평소 있던 곳에서 500m 넘게 벗어나 어디론가 이동 중이야.",
     "checkin":       "지금 아빠가 뭐 하고 있을까, 문득 궁금해졌어.",
+    "arrive_place":  "아빠가 어딘가 새로운 곳에 도착해서 좀 머무르기 시작했어. 여기가 어딘지·뭐 하는지 궁금해.",
+    "leave_visit":   "아빠가 한동안 머물던 곳을 막 떠나서 다시 움직이기 시작했어.",
 }
 
 
 def say(event: str, place: Optional[str] = None,
-        speaker: Optional[str] = None) -> Dict[str, Any]:
+        speaker: Optional[str] = None,
+        minutes: Optional[int] = None) -> Dict[str, Any]:
     """이벤트에 맞춰 쿠키/베르 중 하나가 거는 한마디. speaker 미지정이면 랜덤.
 
     반환: {speaker: "쿠키"|"베르", text, alias}. 미설정/실패면 text="".
@@ -32,6 +35,8 @@ def say(event: str, place: Optional[str] = None,
     ctx = _EVENTS.get(event) or "아빠한테 가볍게 말 걸고 싶어."
     if place:
         ctx += f" (장소: {place})"
+    if minutes:
+        ctx += f" (그곳에 약 {minutes}분 있었어)"
     who = speaker if speaker in ("cookie", "berr") else random.choice(["cookie", "berr"])
     if who == "cookie":
         system = personas.current("cookie_identity")

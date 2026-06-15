@@ -88,6 +88,7 @@ def make_daily_journal(
     silent_threads: Optional[List[Dict[str, Any]]] = None,
     reactions: Optional[Dict[str, int]] = None,
     signals: Optional[List[Dict[str, Any]]] = None,
+    visits: Optional[List[str]] = None,
 ) -> str:
     """그날 기록 → 시간순 서술 일기 본문(# 날짜 헤더 포함)."""
     alias = resolve_alias("daily_digest")
@@ -97,6 +98,9 @@ def make_daily_journal(
         f"## 오늘({target.isoformat()}) 기록 ({len(records)}건, 시간순)",
         json.dumps(records_brief(records), ensure_ascii=False, indent=2),
     ]
+    if visits:
+        parts.append("\n## 📍 오늘 다닌 곳 (체류 감지 — 동선·머문 시간. 하루 흐름의 뼈대로 자연스럽게 녹이되 나열하듯 늘어놓지 말 것)")
+        parts.append("\n".join(f"- {ln}" for ln in visits))
     if signals:
         parts.append("\n## 📨 오늘 받은 연락 (문자·부재중 — 일상의 배경. 의미 있는 것만 자연스럽게 녹이고 광고·스팸은 무시)")
         parts.append(json.dumps(signals, ensure_ascii=False, indent=1))
