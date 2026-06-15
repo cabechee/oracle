@@ -14,12 +14,15 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:network_info_plus/network_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const kHomeLat = 'loc_home_lat';
 const kHomeLng = 'loc_home_lng';
 const kOfficeLat = 'loc_office_lat';
 const kOfficeLng = 'loc_office_lng';
+const kHomeWifi = 'loc_home_wifi';     // 집 WiFi 이름(SSID) — 붙어 있으면 GPS 없이 집
+const kOfficeWifi = 'loc_office_wifi';
 
 // 체류 상태 (anchor = 지금 머무는 후보 중심)
 const _kAnchorLat = 'visit_anchor_lat';
@@ -57,11 +60,19 @@ class LocationTaskHandler extends TaskHandler {
   Future<void> _tick() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-
-      // 배터리: 체류 확정 중엔 2틱(2분)마다만 GPS — 정지 상태에선 위치 거의 안 변함.
-      final visitOn = prefs.getBool(_kVisitOn) ?? false;
       final tick = (prefs.getInt(_kTick) ?? 0) + 1;
       await prefs.setInt(_kTick, tick);
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      // 1) WiFi 우선 — 저장된 집/작업실 WiFi에 붙어 있으면 GPS 없이 즉시 그 장소.
+      final wifiPlace = await _wifiPlace(prefs);
+      if (wifiPlace != null) {
+        await _onWifiPlace(prefs, wifiPlace, now);
+        return; // GPS 안 켬 (배터리 절감)
+      }
+
+      // 2) WiFi 안 맞음 → GPS (체류 확정 중엔 2틱=2분마다만)
+      final visitOn = prefs.getBool(_kVisitOn) ?? false;
       if (visitOn && tick % 2 != 0) return;
 
       final pos = await Geolocator.getCurrentPosition(
@@ -69,13 +80,10 @@ class LocationTaskHandler extends TaskHandler {
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
       final lat = pos.latitude, lng = pos.longitude;
-      final now = DateTime.now().millisecondsSinceEpoch;
 
       final homeLat = prefs.getDouble(kHomeLat), homeLng = prefs.getDouble(kHomeLng);
       final officeLat = prefs.getDouble(kOfficeLat),
           officeLng = prefs.getDouble(kOfficeLng);
-
-      // 정해진 장소 판정 (반경 안)
       String? place;
       if (homeLat != null &&
           homeLng != null &&
@@ -91,21 +99,17 @@ class LocationTaskHandler extends TaskHandler {
 
       final anchorLat = prefs.getDouble(_kAnchorLat),
           anchorLng = prefs.getDouble(_kAnchorLng);
-
       if (anchorLat == null || anchorLng == null) {
         await _setAnchor(prefs, lat, lng, now); // 첫 위치
         return;
       }
-
       final fromAnchor =
           Geolocator.distanceBetween(lat, lng, anchorLat, anchorLng);
 
       if (fromAnchor <= _stayRadius) {
-        // 같은 곳에 머무는 중
         if (visitOn) return; // 이미 체류 확정 — 조용
         final start = prefs.getInt(_kAnchorStart) ?? now;
         final stayedMin = (now - start) ~/ 60000;
-        // 집/작업실은 즉시, 새 장소는 15분 머물면 방문 확정
         if (place != null || stayedMin >= _stayMinutes) {
           await prefs.setBool(_kVisitOn, true);
           await prefs.setString(_kVisitPlace, place ?? '');
@@ -117,9 +121,7 @@ class LocationTaskHandler extends TaskHandler {
           await _say(event, place);
         }
       } else {
-        // anchor를 벗어남
         if (visitOn) {
-          // 체류하던 곳을 떠남 → 방문 종료(기록 + '한동안 있다 가네')
           final start = prefs.getInt(_kAnchorStart) ?? now;
           final minutes = (now - start) ~/ 60000;
           final vplace = prefs.getString(_kVisitPlace) ?? '';
@@ -131,6 +133,44 @@ class LocationTaskHandler extends TaskHandler {
     } catch (_) {
       // isolate 예외 삼킴 — 서비스 유지
     }
+  }
+
+  /// 저장된 집/작업실 WiFi에 붙어 있으면 그 장소, 아니면 null.
+  Future<String?> _wifiPlace(SharedPreferences prefs) async {
+    try {
+      final raw = await NetworkInfo().getWifiName();
+      if (raw == null) return null;
+      final ssid = raw.replaceAll('"', '').trim();
+      if (ssid.isEmpty || ssid == '<unknown ssid>') return null;
+      if (ssid == prefs.getString(kHomeWifi)) return 'home';
+      if (ssid == prefs.getString(kOfficeWifi)) return 'office';
+    } catch (_) {}
+    return null;
+  }
+
+  /// WiFi로 확정된 집/작업실 — GPS·anchor 무관 즉시 도착/유지. (다른 곳서 왔으면 이전 방문 종료)
+  Future<void> _onWifiPlace(
+      SharedPreferences prefs, String place, int now) async {
+    final visitOn = prefs.getBool(_kVisitOn) ?? false;
+    final lastPlace = prefs.getString(_kVisitPlace) ?? '';
+    if (visitOn && lastPlace == place) return; // 이미 그곳 체류 중
+
+    if (visitOn) {
+      final start = prefs.getInt(_kAnchorStart) ?? now;
+      final minutes = (now - start) ~/ 60000;
+      final aLat = prefs.getDouble(_kAnchorLat) ?? 0;
+      final aLng = prefs.getDouble(_kAnchorLng) ?? 0;
+      await _endVisit(aLat, aLng, lastPlace.isEmpty ? null : lastPlace,
+          start, now, minutes);
+    }
+    final pLat = prefs.getDouble(place == 'home' ? kHomeLat : kOfficeLat) ?? 0;
+    final pLng = prefs.getDouble(place == 'home' ? kHomeLng : kOfficeLng) ?? 0;
+    await prefs.setDouble(_kAnchorLat, pLat);
+    await prefs.setDouble(_kAnchorLng, pLng);
+    await prefs.setInt(_kAnchorStart, now);
+    await prefs.setBool(_kVisitOn, true);
+    await prefs.setString(_kVisitPlace, place);
+    await _say(place == 'home' ? 'arrive_home' : 'arrive_office', place);
   }
 
   Future<void> _setAnchor(

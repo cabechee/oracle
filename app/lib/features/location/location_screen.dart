@@ -2,6 +2,7 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:network_info_plus/network_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/design.dart';
@@ -57,7 +58,17 @@ class _LocationScreenState extends State<LocationScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble(latKey, pos.latitude);
       await prefs.setDouble(lngKey, pos.longitude);
-      setState(() => _msg = '$label 위치를 저장했어요');
+      // 지금 붙어 있는 WiFi도 기억 — 다음부터 이 WiFi면 GPS 없이 즉시 이곳으로.
+      String wifiNote = '';
+      try {
+        final raw = await NetworkInfo().getWifiName();
+        final ssid = (raw ?? '').replaceAll('"', '').trim();
+        if (ssid.isNotEmpty && ssid != '<unknown ssid>') {
+          await prefs.setString(label == '집' ? kHomeWifi : kOfficeWifi, ssid);
+          wifiNote = ' · WiFi “$ssid” 기억함';
+        }
+      } catch (_) {}
+      setState(() => _msg = '$label 위치를 저장했어요$wifiNote');
       await _refresh();
     } catch (e) {
       setState(() => _msg = '실패: $e');
