@@ -97,6 +97,11 @@ def visits() -> Collection:
     return _conn().visits
 
 
+def places() -> Collection:
+    """장소 레지스트리 — 집·작업실·자주 가는 곳(이름·좌표·WiFi·설명). 동반자 맥락 SoT."""
+    return _conn().places
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:

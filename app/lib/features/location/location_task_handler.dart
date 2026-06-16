@@ -23,6 +23,12 @@ const kOfficeLat = 'loc_office_lat';
 const kOfficeLng = 'loc_office_lng';
 const kHomeWifi = 'loc_home_wifi';     // 집 WiFi 이름(SSID) — 붙어 있으면 GPS 없이 집
 const kOfficeWifi = 'loc_office_wifi';
+const kKnownWifi = 'loc_known_wifi';   // 등록된 모든 장소 WiFi 집합 — '새 WiFi 저장 제안' 판단용
+const kPollIntervalMs = 'loc_poll_interval_ms'; // 위치 확인 주기(ms) — 어드민 센싱 설정 동기화
+const kSkipOnWifi = 'loc_skip_on_wifi';         // 등록 WiFi에 물리면 GPS 스킵할지(어드민 센싱 설정)
+const kBtConnected = 'loc_bt_connected'; // 지금 연결된 BT 기기명 — 네이티브 리시버(MainActivity)가 적음
+const kBtMap = 'loc_bt_map';             // {BT기기명: 장소이름} JSON — 등록 장소(places.bt) 동기화
+const _kBtPlace = 'loc_bt_place';        // 현재 BT로 인식된 장소(전환 감지용 상태)
 
 // 체류 상태 (anchor = 지금 머무는 후보 중심)
 const _kAnchorLat = 'visit_anchor_lat';
@@ -64,11 +70,25 @@ class LocationTaskHandler extends TaskHandler {
       await prefs.setInt(_kTick, tick);
       final now = DateTime.now().millisecondsSinceEpoch;
 
-      // 1) WiFi 우선 — 저장된 집/작업실 WiFi에 붙어 있으면 GPS 없이 즉시 그 장소.
-      final wifiPlace = await _wifiPlace(prefs);
-      if (wifiPlace != null) {
-        await _onWifiPlace(prefs, wifiPlace, now);
-        return; // GPS 안 켬 (배터리 절감)
+      // 0) BT 우선 — 등록된 BT 기기(차 오디오 등)에 연결돼 있으면 그 장소 도착/이탈.
+      //    네이티브 리시버가 적어둔 연결 기기명을 places.bt와 매칭. 지오펜스·GPS와 별개 레이어.
+      final btPlace = await _btPlace(prefs);
+      final lastBt = prefs.getString(_kBtPlace) ?? '';
+      if ((btPlace ?? '') != lastBt) {
+        if (lastBt.isNotEmpty) await _say('leave_place', lastBt);
+        if (btPlace != null) await _say('arrive_place', btPlace);
+        await prefs.setString(_kBtPlace, btPlace ?? '');
+      }
+      if (btPlace != null) return; // 차 등 BT 장소에 있으면 GPS 스킵(이동 중)
+
+      // 1) WiFi 우선 — 저장된 집/작업실 WiFi면 GPS 없이 즉시 그 장소. (어드민 센싱 설정에서 끌 수 있음)
+      final skipOnWifi = prefs.getBool(kSkipOnWifi) ?? true;
+      if (skipOnWifi) {
+        final wifiPlace = await _wifiPlace(prefs);
+        if (wifiPlace != null) {
+          await _onWifiPlace(prefs, wifiPlace, now);
+          return; // GPS 안 켬 (배터리 절감)
+        }
       }
 
       // 2) WiFi 안 맞음 → GPS (체류 확정 중엔 2틱=2분마다만)
@@ -132,6 +152,22 @@ class LocationTaskHandler extends TaskHandler {
       }
     } catch (_) {
       // isolate 예외 삼킴 — 서비스 유지
+    }
+  }
+
+  /// 지금 연결된 BT 기기(네이티브 리시버가 prefs에 적음)가 등록 장소(places.bt)와
+  /// 매칭되면 그 장소 이름, 아니면 null. (차 오디오 연결 = "차에 탔다")
+  Future<String?> _btPlace(SharedPreferences prefs) async {
+    final dev = (prefs.getString(kBtConnected) ?? '').trim();
+    if (dev.isEmpty) return null;
+    final raw = prefs.getString(kBtMap);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final name = map[dev];
+      return (name is String && name.trim().isNotEmpty) ? name.trim() : null;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -237,6 +273,6 @@ class LocationTaskHandler extends TaskHandler {
               largeIcon: largeIcon,
               styleInformation: const BigTextStyleInformation('')),
         ),
-        payload: 'ask:$text'); // 탭하면 기록 탭에서 이 질문에 답
+        payload: 'ask:${jsonEncode({'s': speaker, 't': text})}'); // 탭→기록 탭에서 답(화자 동봉)
   }
 }

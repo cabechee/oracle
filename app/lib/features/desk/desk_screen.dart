@@ -609,7 +609,7 @@ class _DeskScreenState extends State<DeskScreen>
 
   Widget _locationLink() => InkWell(
         onTap: () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => const LocationScreen())),
+            MaterialPageRoute(builder: (_) => LocationScreen(api: widget.api))),
         child: Row(
           children: [
             const Icon(Icons.place_outlined,

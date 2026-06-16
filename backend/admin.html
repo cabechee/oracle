@@ -102,6 +102,10 @@ async function loadStats(){
     <span>🔕 신호 제외</span></a>`;
   $('#nav').innerHTML += `<a data-c="__models__" class="${CUR==='__models__'?'active':''}">
     <span>🧠 모델 설정</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__companion__" class="${CUR==='__companion__'?'active':''}">
+    <span>🐾 말 걸기</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__places__" class="${CUR==='__places__'?'active':''}">
+    <span>📍 장소</span></a>`;
   document.querySelectorAll('nav a').forEach(a =>
     a.onclick = () => { CUR=a.dataset.c; SKIP=0; Q=''; render(); });
 }
@@ -133,6 +137,8 @@ async function render(){
   if(CUR==='__personas__') return renderPersonas();
   if(CUR==='__excludes__') return renderExcludes();
   if(CUR==='__models__') return renderModels();
+  if(CUR==='__companion__') return renderCompanion();
+  if(CUR==='__places__') return renderPlaces();
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
   let data;
@@ -277,6 +283,187 @@ async function saveTaskAlias(key, value){
       body: JSON.stringify({key, value})});
     renderModels();
   }catch(e){ alert('저장 실패: '+e.message); }
+}
+
+// ── 동반자 말 걸기 설정 ───────────────────────────────────────
+function numField(key, val, label, suffix){
+  return `<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0">
+    <span style="min-width:96px">${label}</span>
+    <input type="number" min="0" data-k="${key}" value="${val}"
+      style="width:74px;padding:6px 8px;border:1px solid var(--hair);border-radius:6px;font:inherit">
+    <span class="hint" style="margin:0">${suffix||''}</span></label>`;
+}
+function chkField(key, on, label){
+  return `<label style="display:inline-flex;align-items:center;gap:6px;font-weight:400;margin:0 14px 8px 0">
+    <input type="checkbox" data-k="${key}" ${on?'checked':''}> ${label}</label>`;
+}
+
+async function renderCompanion(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let d;
+  try{ d = await api('/companion-config'); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  const c = d.config, ev = c.location_events||{}, labels = d.event_labels||{}, st = d.state||{};
+  const evRows = Object.keys(labels).map(k =>
+    chkField('ev:'+k, ev[k]!==false, esc(labels[k]))).join('');
+  const ago = (v) => v==null ? '아직 없음' : (v+'분 전');
+  m.innerHTML = `<div class="bar"><h2>말 걸기</h2>
+      <span class="total">쿠키·베르가 먼저 거는 한마디 — 텀·시간대·새벽 정지·위치 조건 · 저장 후 5초 내 반영</span></div>
+    <div class="pf">
+      ${chkField('enabled', c.enabled!==false, '<b>전체 켜기</b> (끄면 일절 안 걺)')}
+    </div>
+    <div class="pf">
+      <label>새벽 조용 구간 — 이 시간엔 정기·위치 모두 침묵</label>
+      <div class="row" style="gap:6px">
+        ${numField('quiet_start_hour', c.quiet_start_hour, '시작', '시')}
+        ${numField('quiet_end_hour', c.quiet_end_hour, '끝', '시 (예: 23~8)')}
+      </div>
+    </div>
+    <div class="pf">
+      <label>정기 말 걸기 — '뭐해?' (쌓인 신호·오늘 기록을 곁들임)</label>
+      ${chkField('checkin_enabled', c.checkin_enabled!==false, '켜기')}
+      <div class="row" style="flex-direction:column;align-items:flex-start;gap:8px;margin-top:4px">
+        ${numField('checkin_interval_min', c.checkin_interval_min, '최소 텀', '분')}
+        <div style="display:flex;gap:6px">
+          ${numField('checkin_start_hour', c.checkin_start_hour, '활동 시작', '시')}
+          ${numField('checkin_end_hour', c.checkin_end_hour, '활동 끝', '시')}
+        </div>
+      </div>
+      <div class="hint" style="margin-top:6px">마지막 정기: ${ago(st.checkin_ago_min)}</div>
+    </div>
+    <div class="pf">
+      <label>위치 이벤트에 말 걸기 — 저장된 장소 도착/나섬
+        <span class="hint">위치를 어떻게 확인할지는 📍 장소 탭에서</span></label>
+      ${chkField('location_enabled', c.location_enabled!==false, '켜기')}
+      <div class="row" style="margin-top:4px">${numField('location_cooldown_min', c.location_cooldown_min, '최소 간격', '분')}</div>
+      <div style="margin-top:10px">${evRows}</div>
+      <div class="hint" style="margin-top:6px">마지막 위치: ${ago(st.location_ago_min)}</div>
+    </div>
+    <div class="pf" style="border:none;background:none;padding:0">
+      <button class="accent" onclick="saveCompanion(this)">저장</button>
+    </div>`;
+}
+
+async function saveCompanion(btn){
+  const patch = {location_events:{}};
+  document.querySelectorAll('[data-k]').forEach(el => {
+    const k = el.dataset.k;
+    if(k.startsWith('ev:')){ patch.location_events[k.slice(3)] = el.checked; return; }
+    if(el.type==='checkbox') patch[k] = el.checked;
+    else patch[k] = Number(el.value);
+  });
+  btn.disabled = true;
+  try{
+    await api('/companion-config', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(patch)});
+    btn.textContent = '저장됨 ✓';
+    setTimeout(() => { btn.textContent='저장'; btn.disabled=false; }, 1200);
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
+}
+
+// ── 장소 (집·작업실·자주 가는 곳) ─ /places 직접 호출(폰과 공용 API) ──
+const KIND_LABEL = {home:'집', office:'작업실', place:'장소'};
+async function places(path, opts){
+  const r = await fetch('/places' + (path||''), opts);
+  if(!r.ok) throw new Error(r.status + ' ' + await r.text());
+  return r.json();
+}
+async function locCfg(opts){
+  const r = await fetch('/location-config', opts);
+  if(!r.ok) throw new Error(r.status + ' ' + await r.text());
+  return r.json();
+}
+const inStyle = 'width:100%;padding:8px 10px;border:1px solid var(--hair);border-radius:7px;font:inherit;background:#FCFBF9;margin-bottom:8px';
+
+async function renderPlaces(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let d, lc;
+  try{ d = await places(); lc = (await locCfg()).config; }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  const items = d.items || [];
+  // 위치 확인(센싱) 설정 — 말 걸기와 분리. '어떻게 위치를 확인할지'.
+  const sensing = `<div class="pf">
+    <label>위치 확인 <span class="hint">폰이 어떻게 위치를 알아낼지 (말 걸기와 별개)</span></label>
+    ${numField('poll_interval_sec', lc.poll_interval_sec, '확인 주기', '초')}
+    ${chkField('skip_on_known_wifi', lc.skip_on_known_wifi!==false, '등록된 WiFi에 물려 있으면 GPS 스킵(배터리 절약)')}
+    <div class="row" style="margin-top:6px"><button class="accent" onclick="saveSensing(this)">위치 확인 저장</button></div>
+  </div>`;
+  const coords = p => (p.lat!=null && p.lng!=null) ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '좌표 없음(폰에서 추가)';
+  const add = `<div class="pf">
+    <label>장소 추가 <span class="hint">좌표·WiFi는 폰에서 자동 등록 — 여기선 이름·설명 위주(맥락용)</span></label>
+    <input id="npName" placeholder="이름 (예: 단골 카페)" style="${inStyle}">
+    <input id="npWifi" placeholder="WiFi 이름(SSID) — 선택" style="${inStyle}">
+    <input id="npBt" placeholder="블루투스 기기명 (예: 차량오디오) — 연결되면 그 장소로 · 선택" style="${inStyle}">
+    <textarea id="npDesc" placeholder="설명 — 동반자가 맥락으로 씀 (예: 주말마다 작업하는 조용한 곳)"
+      style="${inStyle};min-height:56px;font-family:inherit"></textarea>
+    <div class="row"><button class="accent" onclick="addPlace(this)">추가</button></div>
+  </div>`;
+  const rows = items.length ? items.map(p => `
+    <div class="pf" data-id="${p.id}" data-name="${esc(p.name)}">
+      <label>${KIND_LABEL[p.kind]||p.kind} · ${esc(p.name)}</label>
+      <div class="hint" style="margin-bottom:8px">
+        ${p.wifi?('WiFi “'+esc(p.wifi)+'” · '):''}${p.bt?('BT “'+esc(p.bt)+'” · '):''}${coords(p)}</div>
+      <textarea data-desc placeholder="설명 (동반자 맥락)"
+        style="${inStyle};min-height:52px;font-family:inherit">${esc(p.description||'')}</textarea>
+      <div class="row">
+        <button class="accent" onclick="savePlace('${p.id}', this)">설명 저장</button>
+        <button class="danger" onclick="delPlace('${p.id}')">삭제</button>
+      </div>
+    </div>`).join('')
+    : '<div class="empty">아직 등록된 장소가 없어요 — 폰에서 WiFi 감지·수동 추가로 등록돼요</div>';
+  m.innerHTML = `<div class="bar"><h2>장소</h2>
+    <span class="total">위치 확인 설정 + 등록된 장소(이름·설명은 동반자 도착 멘트 맥락에 쓰임)</span></div>`
+    + sensing + add + rows;
+}
+
+async function saveSensing(btn){
+  const patch = {};
+  document.querySelectorAll('[data-k]').forEach(el => {
+    const k = el.dataset.k;
+    if(!['poll_interval_sec','skip_on_known_wifi'].includes(k)) return;
+    patch[k] = el.type==='checkbox' ? el.checked : Number(el.value);
+  });
+  btn.disabled = true;
+  try{
+    await locCfg({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)});
+    btn.textContent = '저장됨 ✓';
+    setTimeout(() => { btn.textContent='위치 확인 저장'; btn.disabled=false; }, 1200);
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
+}
+
+async function addPlace(btn){
+  const name = document.getElementById('npName').value.trim();
+  if(!name){ alert('이름을 적어주세요'); return; }
+  const wifi = document.getElementById('npWifi').value.trim();
+  const bt = document.getElementById('npBt').value.trim();
+  const description = document.getElementById('npDesc').value;
+  btn.disabled = true;
+  try{
+    await places('', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, wifi: wifi||null, bt: bt||null, description, kind:'place'})});
+    renderPlaces();
+  }catch(e){ alert('추가 실패: '+e.message); btn.disabled=false; }
+}
+
+async function savePlace(id, btn){
+  const pf = btn.closest('.pf');
+  const name = pf.dataset.name;
+  const description = pf.querySelector('[data-desc]').value;
+  btn.disabled = true;
+  try{
+    await places('', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id, name, description})});
+    btn.textContent = '저장됨 ✓';
+    setTimeout(() => { btn.textContent='설명 저장'; btn.disabled=false; }, 1200);
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
+}
+
+async function delPlace(id){
+  if(!confirm('이 장소를 삭제할까요?')) return;
+  try{ await places('/'+encodeURIComponent(id), {method:'DELETE'}); renderPlaces(); }
+  catch(e){ alert('삭제 실패: '+e.message); }
 }
 
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }

@@ -52,16 +52,24 @@ class CaptureController extends ChangeNotifier {
   File? video;
   bool recordingVideo = false;
   final TextEditingController commentCtrl = TextEditingController();
-  // companion 알림에 답하는 중이면 그 질문(멘트) — 전송 시 코멘트 맥락으로 녹임.
+  // companion 알림에 답하는 중이면 그 질문(멘트) — 흐름엔 별도 버블, ingest엔 맥락으로 전달.
   String? askPrompt;
-  void setAsk(String? text) {
+  String? askSpeaker;       // 베르 | 쿠키 (멘트 화자) — 오버레이·흐름 버블 표시
+  DateTime? askTappedAt;    // 알림 탭해 들어온 순간 — 흐름 질문 버블의 시각(보낸 시각 아님)
+  void setAsk(String? text, {String? speaker}) {
     askPrompt = (text != null && text.trim().isNotEmpty) ? text.trim() : null;
+    askSpeaker = (askPrompt != null && speaker != null && speaker.trim().isNotEmpty)
+        ? speaker.trim()
+        : null;
+    askTappedAt = askPrompt != null ? DateTime.now() : null;
     _notify();
   }
 
   void clearAsk() {
     if (askPrompt == null) return;
     askPrompt = null;
+    askSpeaker = null;
+    askTappedAt = null;
     _notify();
   }
 
@@ -424,12 +432,12 @@ class CaptureController extends ChangeNotifier {
     }
 
     final answer = commentCtrl.text.trim();
-    // companion 알림에 답하는 중이면 그 질문을 맥락으로 녹여 보냄.
-    final comment = (askPrompt != null)
-        ? (answer.isEmpty
-            ? '동반자가 "$askPrompt"라고 물어봐서 기록함'
-            : '동반자가 "$askPrompt"라고 물었고, 이렇게 답함: $answer')
-        : answer;
+    // companion 알림에 답하는 중 — 질문은 흐름에 별도 버블로 남기고(맥락은 ingest로 전달),
+    // 코멘트엔 내가 친 답만 깨끗이 둔다(예전엔 질문을 코멘트에 녹여 지저분했음).
+    final comment = answer;
+    final compPrompt = askPrompt;
+    final compSpeaker = askSpeaker;
+    final compTappedAt = askTappedAt;
     // 아무것도 없는 상태에서 전송 = 지금 프리뷰를 즉석 촬영해 보냄
     // (앱 켜고 바로 전송 누르는 흐름 — 셔터를 따로 누를 필요 없게).
     if (photos.isEmpty && answer.isEmpty && _audioPath == null && video == null) {
@@ -464,14 +472,33 @@ class CaptureController extends ChangeNotifier {
     _audioPath = null;
     commentCtrl.clear();
     askPrompt = null;
+    askSpeaker = null;
+    askTappedAt = null;
     _notify();
+    // companion 멘트에 답한 거면 그 질문을 흐름에 별도 버블로 — 탭해 들어온 시각으로,
+    // 방금 보낸 기록 바로 위에. (실패해도 기록 전송은 정상)
+    if (compPrompt != null && compTappedAt != null) {
+      unawaited(_persistCompanionAsk(compSpeaker, compPrompt, compTappedAt));
+    }
     // 무엇을 보냈는지 토스트에 명시 — 영상 오전송을 즉시 알아채게.
     if (action == null) {
       onToast(kinds.isEmpty
           ? '전송됨 — 흐름 탭에서 확인'
           : '${kinds.join(" · ")} 전송됨 — 흐름 탭에서 확인');
     }
-    unawaited(_processIngest(pending));
+    unawaited(_processIngest(pending,
+        companionPrompt: compPrompt, companionSpeaker: compSpeaker));
+  }
+
+  /// 동반자 선제 멘트를 흐름에 남긴다 — 답한 기록 바로 위에 뜨도록(탭 시각).
+  Future<void> _persistCompanionAsk(
+      String? speaker, String prompt, DateTime tappedAt) async {
+    try {
+      final msg = await api.companionAsked(speaker ?? '', prompt, tappedAt);
+      store.addMessages([msg]);
+    } catch (e) {
+      AppLog.info('companion 질문 흐름 기록 실패: $e'); // graceful
+    }
   }
 
   // ── 지나간 사진 백필 (웹 흐름 탭) ──────────────────────────
@@ -527,7 +554,8 @@ class CaptureController extends ChangeNotifier {
     }
   }
 
-  Future<void> _processIngest(PendingCapture p) async {
+  Future<void> _processIngest(PendingCapture p,
+      {String? companionPrompt, String? companionSpeaker}) async {
     try {
       // 비동기 인입 — 업로드 직후 stub(status=processing)이 오고, LLM 처리는
       // 백엔드에서 계속된다. 백엔드는 쿠키(quick)를 먼저 채우고 베르(insight)는 나중.
@@ -537,6 +565,8 @@ class CaptureController extends ChangeNotifier {
         audioFile: p.audioPath != null ? File(p.audioPath!) : null,
         videoFile: p.videoPath != null ? File(p.videoPath!) : null,
         model: modelProvider(),
+        companionPrompt: companionPrompt,
+        companionSpeaker: companionSpeaker,
       );
       p.recordId = stub.id; // 취소·삭제 시 이 record(쿠키 반응 포함) 숨김용
       AppLog.net('ingest 완료 → ${stub.id} '

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/design.dart';
 import '../../core/phosphor_thin.dart';
+import '../chat/record_bubble.dart' show bertAvatar, cookieAvatar;
 import 'capture_controller.dart';
 
 /// 기록 탭 — 전체화면 뷰파인더(필름) 위에 컨트롤을 띄운다.
@@ -48,14 +49,14 @@ class RecordTab extends StatelessWidget {
               ),
             ),
 
-            // 3) companion 질문 배너 (알림에 답하는 중)
+            // 3) companion 질문 오버레이 (알림에 답하는 중) — 캐릭터 얼굴+이름과 함께
             if (c.askPrompt != null)
               SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.only(top: 60, left: 16, right: 16),
                   child: Align(
                       alignment: Alignment.topCenter,
-                      child: _askBanner(c.askPrompt!)),
+                      child: _askBanner(c.askPrompt!, c.askSpeaker)),
                 ),
               ),
 
@@ -216,31 +217,43 @@ class RecordTab extends StatelessWidget {
     );
   }
 
-  // companion 질문 배너 — 어두운 반투명 카드 + 닫기.
-  Widget _askBanner(String prompt) {
+  // companion 질문 오버레이 — 어두운 반투명 카드 위에 캐릭터 얼굴+이름과 멘트.
+  // "베르 — 아빠 뭐해요?"처럼 누가 말 걸었는지 분명히 보이게(기록으로 답하는 맥락).
+  Widget _askBanner(String prompt, String? speaker) {
+    final name = (speaker != null && speaker.isNotEmpty) ? speaker : '동반자';
+    final isCookie = speaker == '쿠키';
+    final hasFace = speaker == '베르' || isCookie;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
       decoration: BoxDecoration(
         color: const Color(0xE6201E19),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: OracleColors.vermilion.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: OracleColors.vermilion.withValues(alpha: 0.55)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 1),
-            child: Text('🐾', style: TextStyle(fontSize: 15)),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: hasFace
+                ? (isCookie ? cookieAvatar(30, seed: prompt) : bertAvatar(30))
+                : const Text('🐾', style: TextStyle(fontSize: 18)),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(name,
+                    style: OracleType.label.copyWith(
+                        color: OracleColors.vermilion,
+                        fontSize: 12,
+                        letterSpacing: 0.3)),
+                const SizedBox(height: 3),
                 Text(prompt,
                     style: OracleType.userBody.copyWith(
-                        color: OracleColors.paper, fontSize: 14.5)),
-                const SizedBox(height: 2),
+                        color: OracleColors.paper, fontSize: 15, height: 1.35)),
+                const SizedBox(height: 4),
                 Text('기록으로 답해보세요',
                     style: OracleType.label.copyWith(color: Colors.white54)),
               ],

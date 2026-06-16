@@ -381,6 +381,15 @@ Widget bertAvatar(double size) => Container(
       ),
     );
 
+/// 쿠키(오목눈이) 아바타 — quickNote와 같은 12종 중 seed로 고정. 베르(bertAvatar)와 대칭.
+/// 동반자 화자가 쿠키일 때(흐름의 선제 멘트 등)에 쓴다.
+Widget cookieAvatar(double size, {String seed = ''}) {
+  final n = (seed.hashCode.abs() % 12) + 1;
+  final asset = 'assets/cookies/cookie_${n.toString().padLeft(2, '0')}.png';
+  return Image.asset(asset,
+      width: size, height: size, filterQuality: FilterQuality.medium);
+}
+
 /// 방주 — 동반자(베르)의 여백 메모. 베르 아바타 + 고운바탕 회잉크. record/검색/대화 공용.
 Widget marginaliaNote(String markdown) {
   return Row(

@@ -21,10 +21,13 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- 블루투스 — 차 오디오 등 연결 감지로 '그 장소에 있다' 신호 (Android 12+는 런타임 권한) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
 
     <application
         android:label="Oracle"
-        android:name="${applicationName}"
+        android:name=".OracleApplication"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
         <activity

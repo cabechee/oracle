@@ -21,6 +21,8 @@ def ep_ingest(
     model: Optional[str] = Form(None),    # Nest alias — 폰 UI에서 선택
     async_mode: Optional[str] = Form(None),   # "1"이면 비동기 — stub 즉시 반환+백그라운드 처리
     backfill: Optional[str] = Form(None),     # "1"이면 지나간 사진 — EXIF 촬영시각을 ts로
+    companion_prompt: Optional[str] = Form(None),   # 동반자 선제 멘트의 답이면 그 멘트
+    companion_speaker: Optional[str] = Form(None),  # 베르 | 쿠키 (멘트 화자)
 ):
     """캡처 인입 — 사진(file, 여러 장 가능)·오디오·코멘트 중 하나 이상.
 
@@ -68,7 +70,8 @@ def ep_ingest(
             result, ctx = ingest_mod.ingest_async_start(
                 comment, images, model=model,
                 audio_bytes=audio_bytes, audio_ext=audio_ext,
-                video_bytes=video_bytes, video_ext=video_ext, backfill=is_backfill)
+                video_bytes=video_bytes, video_ext=video_ext, backfill=is_backfill,
+                companion_prompt=companion_prompt, companion_speaker=companion_speaker)
         except Exception as e:
             raise HTTPException(500, str(e))
         background_tasks.add_task(ingest_mod.ingest_async_finish, ctx)
@@ -78,7 +81,9 @@ def ep_ingest(
         result = ingest_mod.ingest(comment, images, model=model,
                                    audio_bytes=audio_bytes, audio_ext=audio_ext,
                                    video_bytes=video_bytes, video_ext=video_ext,
-                                   backfill=is_backfill)
+                                   backfill=is_backfill,
+                                   companion_prompt=companion_prompt,
+                                   companion_speaker=companion_speaker)
     except Exception as e:
         raise HTTPException(500, str(e))
     # 검색용 임베딩은 응답 후 백그라운드 — 즉답 지연 방지, graceful(미설정/실패 무해)

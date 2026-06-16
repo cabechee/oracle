@@ -85,6 +85,8 @@ class OracleApi {
     String? model,
     bool asyncMode = true,
     bool backfill = false,
+    String? companionPrompt,   // 동반자 선제 멘트의 답이면 그 멘트 (즉답이 맥락 알게)
+    String? companionSpeaker,  // 베르 | 쿠키
   }) async {
     final uri = Uri.parse('$baseUrl/ingest');
     final req = http.MultipartRequest('POST', uri);
@@ -94,6 +96,12 @@ class OracleApi {
     // 비동기 인입 — 백엔드가 stub(status=processing)을 즉시 반환, 완료는 폴링으로
     if (asyncMode) req.fields['async_mode'] = '1';
     if (backfill) req.fields['backfill'] = '1'; // 지나간 사진 — EXIF 촬영시각을 ts로
+    if (companionPrompt != null && companionPrompt.isNotEmpty) {
+      req.fields['companion_prompt'] = companionPrompt;
+    }
+    if (companionSpeaker != null && companionSpeaker.isNotEmpty) {
+      req.fields['companion_speaker'] = companionSpeaker;
+    }
     // 사진은 'file' 필드를 여러 번 — 백엔드가 한 record로 묶음(구앱은 1개 → 호환)
     for (final f in imageFiles) {
       req.files.add(await http.MultipartFile.fromPath('file', f.path));
@@ -408,6 +416,91 @@ class OracleApi {
       throw Exception('companion 실패: ${resp.statusCode}');
     }
     return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// 동반자 선제 멘트를 흐름에 남긴다 — 아빠가 그 멘트에 '기록'으로 답할 때.
+  /// tappedAt = 알림을 탭해 들어온 순간(흐름에서 답한 기록 바로 위에 얹힘). 반환=흐름 메시지.
+  Future<ChatMessage> companionAsked(String speaker, String text,
+      DateTime tappedAt) async {
+    final body = jsonEncode({
+      'speaker': speaker,
+      'text': text,
+      'ts': tappedAt.millisecondsSinceEpoch,
+    });
+    final resp = await _req(
+        'POST /companion/asked',
+        () => http.post(Uri.parse('$baseUrl/companion/asked'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: body),
+        sent: body);
+    if (resp.statusCode != 200) {
+      throw Exception('companion/asked 실패: ${resp.statusCode}');
+    }
+    return ChatMessage.fromJson(
+        jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  // ── 장소 레지스트리 (집·작업실·자주 가는 곳) ────────────────
+  /// 등록된 장소 목록 — 폰 지오펜스 동기화 + 설정 화면 표시.
+  Future<List<Map<String, dynamic>>> listPlaces() async {
+    final resp = await _req('GET /places',
+        () => http.get(Uri.parse('$baseUrl/places'), headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('places 실패: ${resp.statusCode}');
+    }
+    final d = jsonDecode(utf8.decode(resp.bodyBytes));
+    return ((d['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// 장소 등록/수정 — WiFi 감지·수동 추가(폰) 또는 설명 편집. id 주면 그 문서 갱신.
+  Future<Map<String, dynamic>> upsertPlace({
+    required String name,
+    String? kind,
+    double? lat,
+    double? lng,
+    String? wifi,
+    String? bt,
+    String? description,
+    String? id,
+  }) async {
+    final body = jsonEncode({
+      'name': name,
+      'kind': ?kind,
+      'lat': ?lat,
+      'lng': ?lng,
+      'wifi': ?wifi,
+      'bt': ?bt,
+      'description': ?description,
+      'id': ?id,
+    });
+    final resp = await _req(
+        'POST /places',
+        () => http.post(Uri.parse('$baseUrl/places'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: body),
+        sent: body);
+    if (resp.statusCode != 200) {
+      throw Exception('place 추가 실패: ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  Future<void> deletePlace(String id) async {
+    await _req(
+        'DELETE /places/$id',
+        () => http.delete(Uri.parse('$baseUrl/places/${Uri.encodeComponent(id)}'),
+            headers: authHeaders));
+  }
+
+  /// 위치 확인(센싱) 설정 — {poll_interval_sec, skip_on_known_wifi}. 어드민(📍 장소)에서 조정.
+  Future<Map<String, dynamic>> getLocationConfig() async {
+    final resp = await _req('GET /location-config',
+        () => http.get(Uri.parse('$baseUrl/location-config'), headers: authHeaders));
+    if (resp.statusCode != 200) {
+      throw Exception('location-config 실패: ${resp.statusCode}');
+    }
+    final d = jsonDecode(utf8.decode(resp.bodyBytes));
+    return (d['config'] as Map?)?.cast<String, dynamic>() ?? const {};
   }
 
   // ── 리마인더 (자체) ────────────────────────────────────────

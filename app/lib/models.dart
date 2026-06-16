@@ -215,6 +215,8 @@ class ChatMessage {
   final DateTime ts;
   final List<String> referenced;   // 근거 record_id (assistant)
   final String? quickText;         // 쿠키 첨언 (assistant)
+  final String? speaker;           // 동반자 화자 (베르|쿠키) — companion 선제 멘트
+  final bool isCompanion;          // 동반자가 먼저 건 말 (대화 응답과 구분)
 
   ChatMessage({
     required this.id,
@@ -223,6 +225,8 @@ class ChatMessage {
     required this.ts,
     this.referenced = const [],
     this.quickText,
+    this.speaker,
+    this.isCompanion = false,
   });
 
   bool get isUser => role == 'user';
@@ -235,6 +239,10 @@ class ChatMessage {
         referenced:
             (j['referenced'] as List?)?.cast<String>() ?? const <String>[],
         quickText: Record._quickText(j['quick']),
+        speaker: (j['speaker'] as String?)?.trim().isNotEmpty == true
+            ? (j['speaker'] as String).trim()
+            : null,
+        isCompanion: j['companion'] == true,
       );
 }
 

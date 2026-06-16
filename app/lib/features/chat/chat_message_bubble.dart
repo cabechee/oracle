@@ -4,7 +4,8 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../api.dart';
 import '../../core/design.dart';
 import '../../models.dart';
-import 'record_bubble.dart' show userBubble, quickNote, bertAvatar;
+import 'record_bubble.dart'
+    show userBubble, quickNote, bertAvatar, cookieAvatar;
 import 'ref_record_card.dart';
 
 /// 대화 메시지 — 유저는 우측 고딕(굵게), 동반자는 명조 본문.
@@ -19,19 +20,30 @@ class ChatMessageBubble extends StatelessWidget {
     if (message.isUser) {
       return userBubble(context, message.text);
     }
-    // 베르(강아지) 아바타 + 본문 — 동반자의 온전한 목소리. 쿠키 첨언·참조는 옆 컬럼에.
+    // 동반자 아바타 + 본문. 화자가 쿠키면 쿠키 아바타, 아니면 베르.
+    // companion(선제 멘트)은 화자명을 작은 라벨로 얹어 "베르: …" 느낌을 준다.
+    final isCookie = message.speaker == '쿠키';
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 2),
-          child: bertAvatar(26),
+          child: isCookie
+              ? cookieAvatar(26, seed: message.id)
+              : bertAvatar(26),
         ),
         const SizedBox(width: 9),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (message.isCompanion && (message.speaker ?? '').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(message.speaker!,
+                      style: OracleType.label
+                          .copyWith(color: OracleColors.vermilion)),
+                ),
               MarkdownBody(
                 data: message.text,
                 styleSheet: _chatMd(),

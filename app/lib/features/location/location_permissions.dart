@@ -7,5 +7,9 @@ Future<bool> requestLocationPermissions() async {
   if (!whenInUse.isGranted) return false;
   final always = await Permission.locationAlways.request();
   await Permission.notification.request();
+  // 차 BT 등 연결 감지 — 있으면 (없거나 거부해도 위치는 정상). Android 12+ 런타임 권한.
+  try {
+    await Permission.bluetoothConnect.request();
+  } catch (_) {}
   return always.isGranted;
 }

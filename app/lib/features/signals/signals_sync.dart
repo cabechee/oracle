@@ -208,7 +208,7 @@ Future<void> runSignalsSync() async {
   }
 
   await _maybeBriefingNotify(prefs); // 새 조간/석간이면 알림 (같은 주기 편승)
-  await _maybeCheckin(prefs);        // 활동 시간대면 동반자 '뭐해' (정시 1회)
+  await _maybeCheckin();             // 동반자 '뭐해' (보낼지는 백엔드가 텀·시간대로 판단)
   try {
     await refreshWidget(OracleApi()); // 홈 위젯 갱신 (오늘 알림·리마인더)
   } catch (e) {
@@ -217,26 +217,16 @@ Future<void> runSignalsSync() async {
 }
 
 const _kBriefingSeen = 'briefing_last_seen';
-const _kLastCheckinHour = 'companion_last_checkin_hour';
 
-// 동반자 말걸기 — 활동 시간대(09~22시) 매 정시 1회. 좀 잦아도 OK(사용자 선택).
-const _checkinStartHour = 9;
-const _checkinEndHour = 22;
-
-/// 동반자 정시 체크인 — 위치 없이 쿠키/베르가 '뭐해' 한마디. 매 시간 1회.
+/// 동반자 정기 체크인 — 쿠키/베르가 '뭐해' 한마디(쌓인 신호·오늘 기록을 곁들임).
 ///
-/// 30분 주기에 편승해, 같은 '시'엔 한 번만 보낸다(정각 직후 첫 틱에 발사 → 거의 정시).
-Future<void> _maybeCheckin(SharedPreferences prefs) async {
-  final now = DateTime.now();
-  if (now.hour < _checkinStartHour || now.hour >= _checkinEndHour) return;
-  // 정시 1회 — 이 시간대(연-월-일-시)에 이미 보냈으면 건너뜀.
-  final hourKey = '${now.year}-${now.month}-${now.day}-${now.hour}';
-  if (prefs.getString(_kLastCheckinHour) == hourKey) return;
+/// 보낼지 말지(텀·활동 시간대·새벽 정지)는 백엔드(어드민 설정)가 판단한다 — 폰은 신호
+/// 동기화(30분)에 편승해 호출만 하고, 빈 응답(게이팅·미설정)이면 조용히 넘어간다.
+Future<void> _maybeCheckin() async {
   try {
     final r = await OracleApi().companionSay('checkin');
     final text = (r['text'] as String?)?.trim() ?? '';
-    if (text.isEmpty) return;        // alias 미설정·실패 — 다음 기회에
-    await prefs.setString(_kLastCheckinHour, hourKey);
+    if (text.isEmpty) return;        // 게이팅·미설정·실패 — 다음 기회에
     await _notifyCompanion((r['speaker'] as String?) ?? '', text);
     AppLog.info('동반자 체크인: ${r['speaker']} — $text');
   } catch (e) {
@@ -263,7 +253,7 @@ Future<void> _notifyCompanion(String speaker, String text) async {
             largeIcon: largeIcon,
             styleInformation: const BigTextStyleInformation('')),
       ),
-      payload: 'ask:$text'); // 탭하면 기록 탭에서 이 질문에 답
+      payload: 'ask:${jsonEncode({'s': speaker, 't': text})}'); // 탭→기록 탭에서 이 질문에 답(화자 동봉)
 }
 
 /// 새 발행물(조간/석간) 도착 시 1회 알림.

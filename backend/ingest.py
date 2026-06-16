@@ -164,6 +164,8 @@ def _prepare(
     video_bytes: Optional[bytes],
     video_ext: str,
     backfill: bool = False,        # 지나간 사진 — EXIF 촬영시각을 캡처 ts로
+    companion_prompt: Optional[str] = None,   # 동반자 선제 멘트 — 이 기록이 그 답일 때
+    companion_speaker: Optional[str] = None,  # 베르 | 쿠키 (멘트 화자)
 ) -> Dict[str, Any]:
     """검증 + 미디어 저장 + EXIF — LLM 없이 빠르게 끝나는 부분. ctx 반환."""
     images = images or []
@@ -205,6 +207,8 @@ def _prepare(
         "video_paths": [corpus.to_vault_rel(p) for p in video_abs],
         "exif": exif,
         "location": exif.get("gps"),   # 하위호환 — 기존 record.location
+        "companion_prompt": (companion_prompt or "").strip() or None,
+        "companion_speaker": (companion_speaker or "").strip() or None,
     }
 
 
@@ -270,6 +274,15 @@ def _process_capture(ctx: Dict[str, Any], do_append: bool = True) -> Dict[str, A
         insight_text = "(insight alias 미설정 — Nest에 enabled 모델 없음)"
         insight_alias = ""
 
+    # 동반자 선제 멘트의 '답'인 기록 — 그 맥락을 LLM에만 전달(user_comment는 깨끗이 둠).
+    # 흐름엔 그 멘트가 별도 버블로 이미 떠 있으니, 여기선 답에 자연스럽게 반응만 하게.
+    _comp = (ctx.get("companion_prompt") or "").strip()
+    _comp_who = (ctx.get("companion_speaker") or "").strip() or "동반자"
+    companion_note = (
+        f"[방금 {_comp_who}가 아빠에게 먼저 \"{_comp}\"라고 말을 걸었고, 지금 이 기록은 "
+        f"아빠가 그 말에 답하는 거야. 그 흐름을 알고 자연스럽게 이어 반응해줘.]"
+        if _comp else "")
+
     # 이번 입력(코멘트 + 소리 + GPS) 한 덩어리
     _ui: List[str] = []
     if user_comment:
@@ -280,6 +293,8 @@ def _process_capture(ctx: Dict[str, Any], do_append: bool = True) -> Dict[str, A
     if backfill:
         user_input = ("[지난 사진을 뒤늦게 올린 것 — 지금 흐름·맥락과 무관하니 과거 기록을 "
                       "끌어오지 말고, 보이는 것만 간결히 한두 마디로.]\n" + user_input)
+    elif companion_note:
+        user_input = companion_note + "\n" + user_input
 
     if abs_paths and insight_alias:
         # 사진 3단계 (describe-then-reason): 분석 JSON → 맥락 코멘트 + 디스커버리 제안
@@ -301,6 +316,8 @@ def _process_capture(ctx: Dict[str, Any], do_append: bool = True) -> Dict[str, A
     elif insight_alias:
         # 텍스트/오디오만 — 단일 인사이트
         prompt_parts: List[str] = []
+        if companion_note:
+            prompt_parts.append(companion_note)
         if user_comment:
             prompt_parts.append(f"[유저 코멘트]\n{user_comment}")
         if audio_caption:
@@ -397,6 +414,10 @@ def _record_doc(ctx: Dict[str, Any], body: Dict[str, Any], status: str) -> Dict[
         "audio": body.get("audio"),
         "insight": body.get("insight") or {"alias": "", "text": ""},
         "suggestion": body.get("suggestion"),   # 디스커버리 제안 (베르)
+        # 동반자 선제 멘트의 답이면 그 멘트 — 흐름엔 별도 버블, 여긴 연결 기록(맥락)
+        "companion": ({"speaker": ctx.get("companion_speaker"),
+                       "prompt": ctx.get("companion_prompt")}
+                      if ctx.get("companion_prompt") else None),
         "reaction": None,                       # legacy 단일 (구앱 호환)
         "reactions": {},                        # 섹션별: analysis|comment|discovery
         # 자정 배치가 부착할 것들 — 시작은 null/빈리스트
@@ -436,15 +457,19 @@ def ingest(
     video_bytes: Optional[bytes] = None,
     video_ext: str = "mp4",
     backfill: bool = False,
+    companion_prompt: Optional[str] = None,
+    companion_speaker: Optional[str] = None,
 ) -> Dict[str, Any]:
     """캡처 한 건 동기 인입 — LLM까지 완료 후 완성 Record 반환 (구버전 앱 호환).
 
     model: Nest alias(예: 'claude', 'codex', 'gemini', 'qwen-vlm', 'trio').
            None이면 TASK_ALIAS 디폴트 사용. 사용자가 폰 UI에서 선택한 값이 들어옴.
     backfill: 지나간 사진 — EXIF 촬영시각을 ts로, 즉답은 맥락 없이 간결.
+    companion_prompt: 동반자 선제 멘트의 답이면 그 멘트 — 즉답이 맥락을 알고 반응하게.
     """
     ctx = _prepare(user_comment, images, model,
-                   audio_bytes, audio_ext, video_bytes, video_ext, backfill=backfill)
+                   audio_bytes, audio_ext, video_bytes, video_ext, backfill=backfill,
+                   companion_prompt=companion_prompt, companion_speaker=companion_speaker)
     body = _process_capture(ctx)
     body["quick"] = _quick_react(ctx)        # 쿠키 한마디 (동기 경로 — 구앱 호환)
     db.records().insert_one(_record_doc(ctx, body, "done"))
@@ -460,15 +485,19 @@ def ingest_async_start(
     video_bytes: Optional[bytes] = None,
     video_ext: str = "mp4",
     backfill: bool = False,
+    companion_prompt: Optional[str] = None,
+    companion_speaker: Optional[str] = None,
 ):
     """비동기 인입 1단계 — 미디어 저장 + stub record 즉시 생성.
 
     반환: (응답 dict, finish용 ctx). 라우터가 ctx로 ingest_async_finish를
     BackgroundTasks에 건다. stub은 목록/단건 조회에 바로 보인다(status=processing).
     backfill: 지나간 사진 — EXIF 촬영시각을 ts로, 즉답은 맥락 없이 간결.
+    companion_prompt: 동반자 선제 멘트의 답이면 그 멘트 — 즉답이 맥락을 알고 반응하게.
     """
     ctx = _prepare(user_comment, images, model,
-                   audio_bytes, audio_ext, video_bytes, video_ext, backfill=backfill)
+                   audio_bytes, audio_ext, video_bytes, video_ext, backfill=backfill,
+                   companion_prompt=companion_prompt, companion_speaker=companion_speaker)
     db.records().insert_one(_record_doc(ctx, {}, "processing"))
     return _response(ctx, {}, "processing"), ctx
 

@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,12 +22,16 @@ import '../chat/chat_controller.dart';
 import '../chat/chat_list.dart';
 import '../desk/desk_screen.dart';
 import '../health/health_sync.dart';
+import '../location/location_screen.dart';
+import '../location/location_task_handler.dart'
+    show kHomeWifi, kOfficeWifi, kKnownWifi, kPollIntervalMs, kSkipOnWifi, kBtMap;
 import '../notifications/notif_service.dart';
 import '../signals/signals_sync.dart';
 import 'home_tab.dart';
 
 const _kModelKey = 'selected_model';
 const _kLastSeenDigestKey = 'last_seen_digest_date';
+const _kAskedWifi = 'loc_asked_wifi'; // 저장 제안 이미 띄운 SSID — 다시 안 묻게
 
 /// 앱 셸 — 3탭 스캐폴드 + 생명주기 + 모델 선택 + 스토어·컨트롤러 생성·주입.
 class HomePage extends StatefulWidget {
@@ -82,6 +89,7 @@ class _HomePageState extends State<HomePage>
       maybeForegroundSync();
       initNotificationListener();   // 앱 알림 수집 시작 (권한 있으면 구독)
       syncHealth();                 // 수면·걸음 (Health Connect)
+      _syncLocationConfig();        // 위치 확인 설정(주기·WiFi 스킵)을 백그라운드 isolate용 prefs로
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeShowOnboarding();
@@ -118,6 +126,71 @@ class _HomePageState extends State<HomePage>
       _loadLatestDigest();
       _chat.refresh(); // 복귀 시 최신 record 반영 (백그라운드 중 완료분)
       maybeForegroundSync(); // 신호 동기화 — 배터리 최적화로 주기 밀려도 복귀 시 보장
+      _maybeWifiSavePrompt(); // 새 WiFi에 붙어 있으면 '여기 장소로 저장?' 제안 (1회)
+    }
+  }
+
+  /// 위치 확인(센싱) 설정을 백엔드(어드민 📍 장소)에서 받아 prefs로 — 백그라운드 isolate가
+  /// 읽어 주기·WiFi 스킵에 반영(주기는 다음 추적 start 때). 실패해도 디폴트로 동작.
+  Future<void> _syncLocationConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final lc = await _api.getLocationConfig();
+      final sec = (lc['poll_interval_sec'] as num?)?.toInt() ?? 60;
+      await prefs.setInt(kPollIntervalMs, sec * 1000);
+      await prefs.setBool(kSkipOnWifi, lc['skip_on_known_wifi'] != false);
+    } catch (_) {}
+    // 등록 장소를 isolate용 prefs로 — WiFi 집합(저장 제안·스킵) + BT맵(차 등 연결 감지).
+    try {
+      final places = await _api.listPlaces();
+      final knownWifi = <String>{
+        for (final k in [kHomeWifi, kOfficeWifi])
+          if ((prefs.getString(k) ?? '').isNotEmpty) prefs.getString(k)!,
+        for (final p in places)
+          if (((p['wifi'] as String?) ?? '').isNotEmpty) p['wifi'] as String,
+      };
+      await prefs.setStringList(kKnownWifi, knownWifi.toList());
+      final btMap = <String, String>{
+        for (final p in places)
+          if (((p['bt'] as String?) ?? '').trim().isNotEmpty)
+            (p['bt'] as String).trim(): ((p['name'] as String?) ?? '').trim(),
+      };
+      await prefs.setString(kBtMap, jsonEncode(btMap));
+    } catch (_) {}
+  }
+
+  /// 새 WiFi 저장 제안 — 지금 붙은 SSID가 미등록(집·작업실·등록장소 아님)이고 아직
+  /// 안 물어본 거면, 장소로 저장할지 한 번 제안한다(스낵바). 등록 WiFi 집합은
+  /// 위치 화면이 prefs[kKnownWifi]에 동기화해 둠 → 오프라인에서도 판단.
+  Future<void> _maybeWifiSavePrompt() async {
+    if (kIsWeb) return;
+    try {
+      final raw = await NetworkInfo().getWifiName();
+      final ssid = (raw ?? '').replaceAll('"', '').trim();
+      if (ssid.isEmpty || ssid == '<unknown ssid>') return;
+      final prefs = await SharedPreferences.getInstance();
+      final known = <String>{
+        ...(prefs.getStringList(kKnownWifi) ?? const []),
+        if ((prefs.getString(kHomeWifi) ?? '').isNotEmpty) prefs.getString(kHomeWifi)!,
+        if ((prefs.getString(kOfficeWifi) ?? '').isNotEmpty)
+          prefs.getString(kOfficeWifi)!,
+      };
+      if (known.contains(ssid)) return; // 이미 등록된 장소의 WiFi
+      final asked = prefs.getStringList(_kAskedWifi) ?? const [];
+      if (asked.contains(ssid)) return; // 이미 한 번 물어봄 — 안 나감
+      await prefs.setStringList(_kAskedWifi, [...asked, ssid]);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('새 WiFi “$ssid” — 여기를 장소로 저장할까요?'),
+        duration: const Duration(seconds: 6),
+        action: SnackBarAction(
+          label: '저장',
+          onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => LocationScreen(api: _api))),
+        ),
+      ));
+    } catch (_) {
+      // 권한 없거나(getWifiName은 위치 권한 필요) WiFi 미연결 — 조용히 넘어감
     }
   }
 
@@ -213,12 +286,23 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 알림 탭 라우팅 — companion 'ask:' 멘트면 기록 탭에서 답, 아니면 다이제스트.
+  /// payload = 'ask:{"s":화자,"t":멘트}' (구 알림은 'ask:<멘트>' 평문 — 화자 없이 호환).
   void _onNotifTap(String? payload) {
     if (payload == null || !mounted) return;
     if (payload.startsWith('ask:')) {
       AppLog.ui('알림 답하기 → 기록 탭');
+      final raw = payload.substring(4);
+      var speaker = '';
+      var text = raw;
+      try {
+        final m = jsonDecode(raw) as Map<String, dynamic>;
+        speaker = (m['s'] as String?) ?? '';
+        text = (m['t'] as String?) ?? raw;
+      } catch (_) {
+        // 구 알림(평문 멘트) 호환 — raw 자체가 멘트, 화자 없음
+      }
       _tab.animateTo(3); // 기록 탭
-      _capture.setAsk(payload.substring(4));
+      _capture.setAsk(text, speaker: speaker);
     } else {
       _openDigestFromNotif(payload);
     }

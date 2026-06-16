@@ -1,8 +1,8 @@
 """어드민 라우터 — 데이터 조회·삭제·신호 강제 요약 (개인 운영툴)."""
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
 
 import admin as admin_mod
@@ -121,3 +121,20 @@ def ep_set_task_alias(body: TaskAliasBody):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
+
+
+@router.get("/companion-config")
+def ep_get_companion_config():
+    try:
+        return admin_mod.get_companion_config()
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/companion-config")
+def ep_set_companion_config(patch: Dict[str, Any] = Body(...)):
+    """말 걸기 설정 부분 갱신 — 보낸 키만 반영(알려진 키만 정규화)."""
+    try:
+        return admin_mod.set_companion_config(patch)
+    except Exception as e:
+        raise HTTPException(500, str(e))

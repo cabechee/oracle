@@ -199,3 +199,20 @@ def set_task_alias(key: str, value: str) -> None:
     else:
         db.settings().update_one({"_id": "task_aliases"}, {"$unset": {key: ""}})
     return True
+
+
+# ── 동반자 말 걸기 설정 (텀·시간대·새벽 정지·위치 조건) ───────────
+def get_companion_config() -> Dict[str, Any]:
+    """현재 말 걸기 설정 + 마지막 발화 시각(분 전) + 이벤트 라벨."""
+    import companion_config as cc
+    return {
+        "config": cc.get_config(),
+        "state": cc.state_view(),
+        "event_labels": cc.EVENT_LABELS,
+    }
+
+
+def set_companion_config(patch: Dict[str, Any]) -> Dict[str, Any]:
+    """말 걸기 설정 저장(알려진 키만 정규화). 반환=병합된 설정."""
+    import companion_config as cc
+    return {"config": cc.set_config(patch or {})}
