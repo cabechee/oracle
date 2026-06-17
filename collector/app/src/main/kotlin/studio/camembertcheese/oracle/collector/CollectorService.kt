@@ -93,6 +93,8 @@ class CollectorService : Service() {
                     } else {
                         sleepMs = syncMin * 60_000L
                     }
+                    // 정시 체크인 — 위치와 완전 별개. 서버가 '이 시에 안 보냈으면' 게이팅.
+                    tryCheckin(applicationContext)
                 } else {
                     sleepMs = syncMin * 60_000L
                 }
@@ -154,5 +156,14 @@ class CollectorService : Service() {
             Prefs.setLastSync(ctx, System.currentTimeMillis())
             return true
         }
+
+        /// 정시 체크인 시도 — 매 루프 호출, 서버가 '이 시(정시)에 안 보냈으면'만 발화(게이팅).
+        /// 위치와 완전 별개 — GPS 안 봄.
+        fun tryCheckin(ctx: Context) {
+            val r = Backend.companionSay(ctx, "checkin", null) ?: return
+            val text = r.optString("text").trim()
+            if (text.isNotEmpty()) Notify.companion(ctx, r.optString("speaker"), text)
+        }
     }
 }
+

@@ -108,6 +108,10 @@ object Prefs {
 
     fun btPlace(ctx: Context): String = sp(ctx).getString(K_BTPLACE, "") ?: ""
     fun setBtPlace(ctx: Context, v: String) = sp(ctx).edit().putString(K_BTPLACE, v).apply()
+    /// 차 등 BT 장소 탑승 시각(ms) — 하차 시 이동 구간 방문으로 기록(여정).
+    fun btBoardTime(ctx: Context): Long = sp(ctx).getLong("bt_board_time", 0L)
+    fun setBtBoardTime(ctx: Context, v: Long) =
+        sp(ctx).edit().putLong("bt_board_time", v).apply()
     /// BT 리시버가 적는 현재 연결된 기기명(연결 시 기기명, 끊기면 "").
     fun btConnected(ctx: Context): String = sp(ctx).getString(K_BTCONN, "") ?: ""
     fun setBtConnected(ctx: Context, v: String) = sp(ctx).edit().putString(K_BTCONN, v).apply()

@@ -37,9 +37,8 @@ DEFAULTS: Dict[str, Any] = {
     # 조용한 새벽 — 정기·위치 모두 침묵 (start~end 시, 자정 넘어가면 wrap)
     "quiet_start_hour": 23,
     "quiet_end_hour": 8,
-    # 정기 체크인 ('뭐해?' — 맥락 곁들임)
+    # 정기 체크인 ('뭐해?' — 정시(매시 0분)에 1회, 위치와 완전 별개)
     "checkin_enabled": True,
-    "checkin_interval_min": 90,     # 최소 텀 (이 안엔 또 안 걺)
     "checkin_start_hour": 9,        # 활동 시간대 (이 밖엔 정기 안 함)
     "checkin_end_hour": 22,
     # 위치 말 걸기
@@ -50,7 +49,7 @@ DEFAULTS: Dict[str, Any] = {
 
 _HOUR_KEYS = ("quiet_start_hour", "quiet_end_hour",
               "checkin_start_hour", "checkin_end_hour")
-_MIN_KEYS = ("checkin_interval_min", "location_cooldown_min")
+_MIN_KEYS = ("location_cooldown_min",)
 _BOOL_KEYS = ("enabled", "checkin_enabled", "location_enabled")
 
 
@@ -148,8 +147,13 @@ def should_speak(kind: str, now: Optional[datetime] = None,
         if not _in_window(now.hour, int(cfg["checkin_start_hour"]),
                           int(cfg["checkin_end_hour"])):
             return False
-        return _minutes_since(st.get("last_checkin"), now) >= int(
-            cfg["checkin_interval_min"])
+        # 정시 1회 — 이 시(연-월-일-시)에 아직 안 보냈으면 OK. 위치와 완전 별개.
+        last = st.get("last_checkin")
+        if isinstance(last, datetime) and (
+                (last.year, last.month, last.day, last.hour)
+                == (now.year, now.month, now.day, now.hour)):
+            return False
+        return True
     # location
     if not cfg.get("location_enabled", True):
         return False

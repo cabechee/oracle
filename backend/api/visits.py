@@ -13,20 +13,26 @@ router = APIRouter()
 
 
 class VisitEnd(BaseModel):
-    place: Optional[str] = None    # 'home' | 'office' | None(새 장소)
+    place: Optional[str] = None    # 'home' | 'office' | 장소 이름 | None(새 장소)
     lat: float
     lng: float
     start_ts: Any                  # epoch ms 또는 ISO
     end_ts: Any
     minutes: int
     speaker: Optional[str] = None
+    silent: bool = False           # 여정 기록 전용(말 걸기 생략) — 수집기 단독화 후 기본 흐름
 
 
 @router.post("/visits")
 def ep_visit_end(body: VisitEnd):
-    """완결된 방문 기록 + 쿠키/베르 '한동안 있다 가네' 한마디."""
+    """완결된 방문 기록 + (silent 아니면) 쿠키/베르 '한동안 있다 가네' 한마디.
+
+    수집기는 여정(집→차→사무실→…)을 silent로 기록하고, 말 걸기는 도착 시 별도로 한다.
+    """
     visits_mod.record_visit(body.place, body.lat, body.lng,
                             body.start_ts, body.end_ts, body.minutes)
+    if body.silent:
+        return {"ok": True, "text": ""}
     from agent import companion
     msg = companion.say("leave_visit", place=body.place,
                         speaker=body.speaker, minutes=body.minutes)

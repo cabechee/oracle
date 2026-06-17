@@ -324,16 +324,13 @@ async function renderCompanion(){
       </div>
     </div>
     <div class="pf">
-      <label>정기 말 걸기 — '뭐해?' (쌓인 신호·오늘 기록을 곁들임)</label>
+      <label>정시 체크인 — '뭐해?' (매시 0분에 1회, 위치와 완전 별개·GPS 안 봄)</label>
       ${chkField('checkin_enabled', c.checkin_enabled!==false, '켜기')}
-      <div class="row" style="flex-direction:column;align-items:flex-start;gap:8px;margin-top:4px">
-        ${numField('checkin_interval_min', c.checkin_interval_min, '최소 텀', '분')}
-        <div style="display:flex;gap:6px">
-          ${numField('checkin_start_hour', c.checkin_start_hour, '활동 시작', '시')}
-          ${numField('checkin_end_hour', c.checkin_end_hour, '활동 끝', '시')}
-        </div>
+      <div class="row" style="margin-top:4px;gap:6px">
+        ${numField('checkin_start_hour', c.checkin_start_hour, '활동 시작', '시')}
+        ${numField('checkin_end_hour', c.checkin_end_hour, '활동 끝', '시')}
       </div>
-      <div class="hint" style="margin-top:6px">마지막 정기: ${ago(st.checkin_ago_min)}</div>
+      <div class="hint" style="margin-top:6px">활동 시간대의 매 정시에 한 번 · 마지막: ${ago(st.checkin_ago_min)}</div>
     </div>
     <div class="pf">
       <label>위치 이벤트에 말 걸기 — 저장된 장소 도착/나섬

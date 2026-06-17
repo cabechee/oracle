@@ -39,13 +39,15 @@ object Backend {
         return post(Prefs.baseUrl(ctx) + "/companion/say", body)
     }
 
-    /// 방문 기록(체류 종료) — + '떠남' 멘트 반환.
+    /// 방문 기록(체류·이동 구간). silent=true면 여정 기록만(말 걸기 생략).
     fun recordVisit(ctx: Context, place: String?, lat: Double, lng: Double,
-                    startMs: Long, endMs: Long, minutes: Int): JSONObject? {
+                    startMs: Long, endMs: Long, minutes: Int,
+                    silent: Boolean = false): JSONObject? {
         val body = JSONObject()
             .put("place", place ?: JSONObject.NULL)
             .put("lat", lat).put("lng", lng)
             .put("start_ts", startMs).put("end_ts", endMs).put("minutes", minutes)
+            .put("silent", silent)
         return post(Prefs.baseUrl(ctx) + "/visits", body)
     }
 

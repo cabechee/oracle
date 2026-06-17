@@ -66,14 +66,16 @@ def test_checkin_active_window(monkeypatch):
     assert cc.should_speak("checkin", datetime(2026, 6, 16, 22, 30)) is False  # 끝 후
 
 
-def test_checkin_interval(monkeypatch):
-    now = datetime(2026, 6, 16, 12, 0)
+def test_checkin_hourly(monkeypatch):
+    now = datetime(2026, 6, 16, 12, 30)
+    # 이미 이 시(12시)에 보냄 → 정시 1회라 억제
     _use(monkeypatch, [{"_id": "companion_state",
-                        "last_checkin": now - timedelta(minutes=30)}])
-    assert cc.should_speak("checkin", now) is False   # 30 < 90
+                        "last_checkin": datetime(2026, 6, 16, 12, 5)}])
+    assert cc.should_speak("checkin", now) is False
+    # 지난 시(11시)에 보냄 → 12시엔 OK (정시마다 1회)
     _use(monkeypatch, [{"_id": "companion_state",
-                        "last_checkin": now - timedelta(minutes=120)}])
-    assert cc.should_speak("checkin", now) is True    # 120 >= 90
+                        "last_checkin": datetime(2026, 6, 16, 11, 50)}])
+    assert cc.should_speak("checkin", now) is True
 
 
 def test_location_cooldown(monkeypatch):
@@ -101,12 +103,12 @@ def test_event_enabled_with_legacy_mapping(monkeypatch):
 def test_set_config_normalizes(monkeypatch):
     _use(monkeypatch)
     out = cc.set_config({
-        "checkin_interval_min": "45",   # 문자열 → int
+        "location_cooldown_min": "0",   # 문자열 → int, 하한 1로 클램프
         "quiet_start_hour": 99,         # 23으로 클램프
         "enabled": 0,                   # bool
         "location_events": {"arrive_place": False, "bogus": True},  # 미지정 키 무시
     })
-    assert out["checkin_interval_min"] == 45
+    assert out["location_cooldown_min"] == 1
     assert out["quiet_start_hour"] == 23
     assert out["enabled"] is False
     assert out["location_events"]["arrive_place"] is False
