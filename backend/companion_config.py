@@ -147,6 +147,8 @@ def should_speak(kind: str, now: Optional[datetime] = None,
         if not _in_window(now.hour, int(cfg["checkin_start_hour"]),
                           int(cfg["checkin_end_hour"])):
             return False
+        if now.minute >= 5:   # 정각(매시 0~4분)에만 — 중간 시작 시 catch-up 방지
+            return False
         # 정시 1회 — 이 시(연-월-일-시)에 아직 안 보냈으면 OK. 위치와 완전 별개.
         last = st.get("last_checkin")
         if isinstance(last, datetime) and (

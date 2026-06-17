@@ -67,15 +67,18 @@ def test_checkin_active_window(monkeypatch):
 
 
 def test_checkin_hourly(monkeypatch):
-    now = datetime(2026, 6, 16, 12, 30)
-    # 이미 이 시(12시)에 보냄 → 정시 1회라 억제
+    # 정각(0~4분)에만 + 시마다 1회.
     _use(monkeypatch, [{"_id": "companion_state",
-                        "last_checkin": datetime(2026, 6, 16, 12, 5)}])
-    assert cc.should_speak("checkin", now) is False
-    # 지난 시(11시)에 보냄 → 12시엔 OK (정시마다 1회)
+                        "last_checkin": datetime(2026, 6, 16, 11, 1)}])
+    assert cc.should_speak("checkin", datetime(2026, 6, 16, 12, 1)) is True   # 새 시 정각
+    # 이미 이 시(12시)에 보냄 → 억제
     _use(monkeypatch, [{"_id": "companion_state",
-                        "last_checkin": datetime(2026, 6, 16, 11, 50)}])
-    assert cc.should_speak("checkin", now) is True
+                        "last_checkin": datetime(2026, 6, 16, 12, 1)}])
+    assert cc.should_speak("checkin", datetime(2026, 6, 16, 12, 3)) is False
+    # 정각 지남(12:30) → 억제(정각 아님)
+    _use(monkeypatch, [{"_id": "companion_state",
+                        "last_checkin": datetime(2026, 6, 16, 11, 1)}])
+    assert cc.should_speak("checkin", datetime(2026, 6, 16, 12, 30)) is False
 
 
 def test_location_cooldown(monkeypatch):
