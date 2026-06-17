@@ -106,6 +106,8 @@ async function loadStats(){
     <span>🐾 말 걸기</span></a>`;
   $('#nav').innerHTML += `<a data-c="__places__" class="${CUR==='__places__'?'active':''}">
     <span>📍 장소</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__collector__" class="${CUR==='__collector__'?'active':''}">
+    <span>📡 수집기</span></a>`;
   document.querySelectorAll('nav a').forEach(a =>
     a.onclick = () => { CUR=a.dataset.c; SKIP=0; Q=''; render(); });
 }
@@ -139,6 +141,7 @@ async function render(){
   if(CUR==='__models__') return renderModels();
   if(CUR==='__companion__') return renderCompanion();
   if(CUR==='__places__') return renderPlaces();
+  if(CUR==='__collector__') return renderCollector();
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
   let data;
@@ -464,6 +467,54 @@ async function delPlace(id){
   if(!confirm('이 장소를 삭제할까요?')) return;
   try{ await places('/'+encodeURIComponent(id), {method:'DELETE'}); renderPlaces(); }
   catch(e){ alert('삭제 실패: '+e.message); }
+}
+
+// ── 수집기 설정 (Android 네이티브 수집기가 매 사이클 fetch해 적용) ──
+async function collCfg(opts){
+  const r = await fetch('/collector-config', opts);
+  if(!r.ok) throw new Error(r.status + ' ' + await r.text());
+  return r.json();
+}
+async function renderCollector(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let c;
+  try{ c = (await collCfg()).config; }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  m.innerHTML = `<div class="bar"><h2>수집기</h2>
+      <span class="total">Android 네이티브 수집기 — 매 사이클 이 설정을 받아 적용 · 앱 알림·문자·통화</span></div>
+    <div class="pf">
+      ${chkField('enabled', c.enabled!==false, '<b>전체 켜기</b> (끄면 수집기가 전송 안 함)')}
+    </div>
+    <div class="pf">
+      <label>수집 텀</label>
+      ${numField('sync_interval_min', c.sync_interval_min, '주기', '분')}
+    </div>
+    <div class="pf">
+      <label>무엇을 수집할지</label>
+      ${chkField('collect_notifications', c.collect_notifications!==false, '앱 알림')}
+      ${chkField('collect_sms', c.collect_sms!==false, '문자(SMS)')}
+      ${chkField('collect_calls', c.collect_calls!==false, '부재중 통화')}
+      ${chkField('collect_location', c.collect_location!==false, '위치(GPS/WiFi/BT 체류·방문·도착말걸기)')}
+    </div>
+    <div class="pf" style="border:none;background:none;padding:0">
+      <button class="accent" onclick="saveCollector(this)">저장</button>
+    </div>`;
+}
+async function saveCollector(btn){
+  const keys = ['enabled','sync_interval_min','collect_sms','collect_calls','collect_notifications','collect_location'];
+  const patch = {};
+  document.querySelectorAll('[data-k]').forEach(el => {
+    const k = el.dataset.k;
+    if(!keys.includes(k)) return;
+    patch[k] = el.type==='checkbox' ? el.checked : Number(el.value);
+  });
+  btn.disabled = true;
+  try{
+    await collCfg({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)});
+    btn.textContent='저장됨 ✓';
+    setTimeout(()=>{ btn.textContent='저장'; btn.disabled=false; }, 1200);
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
 }
 
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }

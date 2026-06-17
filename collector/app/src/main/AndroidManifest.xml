@@ -6,9 +6,16 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- 위치(GPS/WiFi 체류 감지) — 백그라운드 위치는 '항상 허용' 필요 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <!-- BT 연결 기기명 읽기(차 오디오 등) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
 
     <application
         android:label="Oracle 수집기"
@@ -25,10 +32,10 @@
             </intent-filter>
         </activity>
 
-        <!-- 수집 포그라운드 서비스 — 주기 동기화(문자·통화·알림 버퍼 → 백엔드) -->
+        <!-- 수집 포그라운드 서비스 — 신호 동기화 + 위치 체류 감지 -->
         <service
             android:name=".CollectorService"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="location|dataSync"
             android:exported="false"/>
 
         <!-- 앱 알림 수집 — 시스템 바인드(알림 접근 권한). 서비스와 독립적으로 상시. -->

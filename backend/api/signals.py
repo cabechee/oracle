@@ -1,11 +1,12 @@
-"""신호 라우터 — 앱 콜렉터의 30분 주기 동기화 (SMS·부재중)."""
+"""신호 라우터 — 수집기(앱·네이티브)의 주기 동기화 (SMS·부재중·알림) + 수집기 설정."""
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
 
 import signals as signals_mod
+import collector_config as coll_cfg
 
 router = APIRouter()
 
@@ -25,6 +26,18 @@ def ep_signals_sync(body: SignalsSyncBody):
                                 source=body.source)
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# ── 수집기 설정 (어드민 조정 → 수집기가 fetch해 적용) ──────────────
+@router.get("/collector-config")
+def ep_get_collector_config():
+    return {"config": coll_cfg.get_config()}
+
+
+@router.post("/collector-config")
+def ep_set_collector_config(patch: Dict[str, Any] = Body(...)):
+    """수집기 설정 부분 갱신 (sync_interval_min·수집 항목 on/off·enabled)."""
+    return {"config": coll_cfg.set_config(patch)}
 
 
 @router.get("/signals/recent")

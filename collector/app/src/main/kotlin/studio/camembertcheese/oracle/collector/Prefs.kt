@@ -24,9 +24,9 @@ object Prefs {
     fun setBaseUrl(ctx: Context, v: String) =
         sp(ctx).edit().putString(K_BASE, v.trim().trimEnd('/')).apply()
 
-    fun intervalMin(ctx: Context): Int = sp(ctx).getInt(K_INTERVAL, 30)
+    fun intervalMin(ctx: Context): Int = sp(ctx).getInt(K_INTERVAL, 1)
     fun setIntervalMin(ctx: Context, v: Int) =
-        sp(ctx).edit().putInt(K_INTERVAL, v.coerceIn(5, 720)).apply()
+        sp(ctx).edit().putInt(K_INTERVAL, v.coerceIn(1, 1440)).apply()
 
     fun lastSync(ctx: Context): Long = sp(ctx).getLong(K_LAST_SYNC, 0L)
     fun setLastSync(ctx: Context, v: Long) =
@@ -72,4 +72,48 @@ object Prefs {
         for (i in 0 until cur.length()) drained.put(cur.get(i))
         sp(ctx).edit().putString(K_NOTIF_BUF, drained.toString()).apply()
     }
+
+    // ── 위치 상태(체류 머신) — 좌표는 정밀도 위해 String ──
+    private const val K_ALAT = "anchor_lat"
+    private const val K_ALNG = "anchor_lng"
+    private const val K_ASTART = "anchor_start"
+    private const val K_VISITON = "visit_on"
+    private const val K_VPLACE = "visit_place"
+    private const val K_TICK = "loc_tick"
+    private const val K_BTPLACE = "bt_place"
+    private const val K_BTCONN = "bt_connected"
+    private const val K_PLACES = "places_cache"
+    private const val K_PLACES_AT = "places_at"
+
+    private fun getD(ctx: Context, k: String): Double? =
+        sp(ctx).getString(k, null)?.toDoubleOrNull()
+
+    fun anchorLat(ctx: Context) = getD(ctx, K_ALAT)
+    fun anchorLng(ctx: Context) = getD(ctx, K_ALNG)
+    fun anchorStart(ctx: Context): Long = sp(ctx).getLong(K_ASTART, 0L)
+    fun setAnchor(ctx: Context, lat: Double, lng: Double, start: Long) =
+        sp(ctx).edit().putString(K_ALAT, lat.toString()).putString(K_ALNG, lng.toString())
+            .putLong(K_ASTART, start).apply()
+
+    fun visitOn(ctx: Context): Boolean = sp(ctx).getBoolean(K_VISITON, false)
+    fun setVisitOn(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean(K_VISITON, v).apply()
+    fun visitPlace(ctx: Context): String = sp(ctx).getString(K_VPLACE, "") ?: ""
+    fun setVisitPlace(ctx: Context, v: String) = sp(ctx).edit().putString(K_VPLACE, v).apply()
+
+    fun bumpTick(ctx: Context): Int {
+        val n = sp(ctx).getInt(K_TICK, 0) + 1
+        sp(ctx).edit().putInt(K_TICK, n).apply()
+        return n
+    }
+
+    fun btPlace(ctx: Context): String = sp(ctx).getString(K_BTPLACE, "") ?: ""
+    fun setBtPlace(ctx: Context, v: String) = sp(ctx).edit().putString(K_BTPLACE, v).apply()
+    /// BT 리시버가 적는 현재 연결된 기기명(연결 시 기기명, 끊기면 "").
+    fun btConnected(ctx: Context): String = sp(ctx).getString(K_BTCONN, "") ?: ""
+    fun setBtConnected(ctx: Context, v: String) = sp(ctx).edit().putString(K_BTCONN, v).apply()
+
+    fun places(ctx: Context): String = sp(ctx).getString(K_PLACES, "[]") ?: "[]"
+    fun placesFetchedAt(ctx: Context): Long = sp(ctx).getLong(K_PLACES_AT, 0L)
+    fun setPlaces(ctx: Context, json: String, at: Long) =
+        sp(ctx).edit().putString(K_PLACES, json).putLong(K_PLACES_AT, at).apply()
 }

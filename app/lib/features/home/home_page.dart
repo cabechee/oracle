@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -98,6 +99,7 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeShowOnboarding();
       _checkLaunchNotif(); // 알림 탭으로 켜졌으면(cold start) 기록 탭으로
+      _checkLaunchAsk();   // 수집기 동반자 알림 탭으로 켜졌으면 기록 탭으로
     });
   }
 
@@ -134,6 +136,7 @@ class _HomePageState extends State<HomePage>
         maybeForegroundSync(); // 신호 동기화 — 배터리 최적화로 주기 밀려도 복귀 시 보장
         _maybeWifiSavePrompt(); // 새 WiFi에 붙어 있으면 '여기 장소로 저장?' 제안 (1회)
       }
+      _checkLaunchAsk(); // 수집기 동반자 알림 탭(웜 복귀) → 기록 탭
     }
   }
 
@@ -319,6 +322,18 @@ class _HomePageState extends State<HomePage>
   Future<void> _checkLaunchNotif() async {
     final payload = await _notif.launchPayload();
     if (payload != null) _onNotifTap(payload);
+  }
+
+  /// 수집기(별도 앱) 동반자 알림 탭으로 들어왔으면 그 ask를 기록 탭으로 라우팅(req1).
+  /// 네이티브 MainActivity가 extra "oracle_ask"({s,t})를 채널로 넘긴다.
+  static const _launchChannel = MethodChannel('oracle/launch');
+  Future<void> _checkLaunchAsk() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final raw = await _launchChannel.invokeMethod<String>('consumeAsk');
+      if (raw == null || raw.isEmpty || !mounted) return;
+      _onNotifTap('ask:$raw'); // 'ask:{json}' 형식 — 기존 라우팅 재사용
+    } catch (_) {}
   }
 
   /// 알림 탭 — payload(날짜) 있으면 그 다이제스트 본문으로 바로.

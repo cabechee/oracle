@@ -55,6 +55,10 @@ class MainActivity : Activity() {
         root.addView(button("배터리 최적화 제외") {
             safeStart(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         })
+        root.addView(button("위치 ‘항상 허용’ 설정 (백그라운드 위치)") {
+            safeStart(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:$packageName")))
+        })
 
         root.addView(spacer(pad))
         root.addView(button("수집 시작") { CollectorService.start(this); toast("수집 시작"); refresh() })
@@ -84,8 +88,12 @@ class MainActivity : Activity() {
     }
 
     private fun requestPerms() {
-        val perms = mutableListOf(Manifest.permission.READ_SMS, Manifest.permission.READ_CALL_LOG)
+        val perms = mutableListOf(
+            Manifest.permission.READ_SMS,
+            Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= 31) perms.add(Manifest.permission.BLUETOOTH_CONNECT)
         requestPermissions(perms.toTypedArray(), 1)
     }
 
