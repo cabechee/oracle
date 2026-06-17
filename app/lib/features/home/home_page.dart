@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../api.dart';
 import '../../applog.dart';
 import '../../core/design.dart';
+import '../../core/flags.dart';
 import '../../core/record_store.dart';
 import '../../digest_screen.dart';
 import '../../index_screen.dart';
@@ -25,6 +26,7 @@ import '../chat/chat_list.dart';
 import '../desk/desk_screen.dart';
 import '../health/health_sync.dart';
 import '../location/location_screen.dart';
+import '../location/location_service.dart';
 import '../location/location_task_handler.dart'
     show kHomeWifi, kOfficeWifi, kKnownWifi, kPollIntervalMs, kSkipOnWifi, kBtMap;
 import '../notifications/notif_service.dart';
@@ -88,12 +90,17 @@ class _HomePageState extends State<HomePage>
     if (!kIsWeb) {
       _capture.init();              // 카메라·녹음·공유 — 크로스플랫폼(iOS도)
       syncHealth();                 // 수면·걸음 — Health Connect(Android)/HealthKit(iOS)
-      // 수동 수집(문자·통화·앱 알림·위치)은 Android 전담(별도 수집기 앱). iOS는 능동 인터페이스만.
+      // 수집(문자·통화·앱 알림·위치)은 별도 네이티브 수집기 앱이 전담 — Flutter는 인터페이스만.
+      // (flutterCollects=true면 옛 동작) 단독화 시엔 Flutter 위치 포그라운드가 돌고 있으면 정리.
       if (defaultTargetPlatform == TargetPlatform.android) {
-        _ensureSignalsPermissions();
-        maybeForegroundSync();
-        initNotificationListener(); // 앱 알림 수집 시작 (권한 있으면 구독)
-        _syncLocationConfig();      // 위치 확인 설정(주기·WiFi 스킵)을 백그라운드 isolate용 prefs로
+        if (flutterCollects) {
+          _ensureSignalsPermissions();
+          maybeForegroundSync();
+          initNotificationListener(); // 앱 알림 수집 시작 (권한 있으면 구독)
+          _syncLocationConfig();      // 위치 확인 설정을 백그라운드 isolate용 prefs로
+        } else {
+          LocationService.stop();     // 수집기 단독화 — 옛 Flutter 위치 FGS 종료
+        }
       }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -131,9 +138,9 @@ class _HomePageState extends State<HomePage>
       _capture.onAppResume();
       _loadLatestDigest();
       _chat.refresh(); // 복귀 시 최신 record 반영 (백그라운드 중 완료분)
-      // 수동 수집(신호 동기화·WiFi 저장제안)은 Android만 — iOS는 능동 인터페이스.
+      // WiFi 저장제안은 장소 등록 인터페이스 기능 — 유지. 신호 동기화는 단독화 시 수집기 전담.
       if (defaultTargetPlatform == TargetPlatform.android) {
-        maybeForegroundSync(); // 신호 동기화 — 배터리 최적화로 주기 밀려도 복귀 시 보장
+        if (flutterCollects) maybeForegroundSync();
         _maybeWifiSavePrompt(); // 새 WiFi에 붙어 있으면 '여기 장소로 저장?' 제안 (1회)
       }
       _checkLaunchAsk(); // 수집기 동반자 알림 탭(웜 복귀) → 기록 탭

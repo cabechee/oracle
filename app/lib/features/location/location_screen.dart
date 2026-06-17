@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../api.dart';
 import '../../core/design.dart';
+import '../../core/flags.dart';
 import 'location_permissions.dart';
 import 'location_service.dart';
 import 'location_task_handler.dart';
@@ -394,8 +395,11 @@ class _LocationScreenState extends State<LocationScreen> {
         padding: const EdgeInsets.all(OracleSpace.screenH),
         children: [
           Text(
-            '집·작업실을 저장하면, 도착하거나 나설 때 쿠키·베르가 말을 걸어요. '
-            '켜면 1분마다 위치를 확인하는 지속 알림이 떠요(배터리를 좀 씁니다).',
+            flutterCollects
+                ? '집·작업실을 저장하면, 도착하거나 나설 때 쿠키·베르가 말을 걸어요. '
+                    '켜면 1분마다 위치를 확인하는 지속 알림이 떠요(배터리를 좀 씁니다).'
+                : '집·작업실·자주 가는 곳을 등록하면, 수집기 앱이 도착·이탈을 감지해 '
+                    '동반자가 말을 걸어요. (위치 추적은 수집기가 전담 — 차는 블루투스로 인식)',
             style: OracleType.marginalia,
           ),
           const SizedBox(height: 28),
@@ -441,28 +445,30 @@ class _LocationScreenState extends State<LocationScreen> {
             )
           else
             for (final p in extraPlaces) _placeCard(p),
-          const SizedBox(height: 28),
-          // ── 추적 토글 ──
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_running ? '감지 중' : '꺼짐', style: OracleType.userBody),
-                    Text('포그라운드 위치 추적',
-                        style: OracleType.marginalia
-                            .copyWith(color: OracleColors.gray)),
-                  ],
+          // 추적 토글 — Flutter가 직접 수집할 때만(단독화 시엔 수집기 전담이라 숨김).
+          if (flutterCollects) ...[
+            const SizedBox(height: 28),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_running ? '감지 중' : '꺼짐', style: OracleType.userBody),
+                      Text('포그라운드 위치 추적',
+                          style: OracleType.marginalia
+                              .copyWith(color: OracleColors.gray)),
+                    ],
+                  ),
                 ),
-              ),
-              Switch(
-                value: _running,
-                activeThumbColor: OracleColors.vermilion,
-                onChanged: _busy ? null : (_) => _toggle(),
-              ),
-            ],
-          ),
+                Switch(
+                  value: _running,
+                  activeThumbColor: OracleColors.vermilion,
+                  onChanged: _busy ? null : (_) => _toggle(),
+                ),
+              ],
+            ),
+          ],
           if (_msg != null)
             Padding(
               padding: const EdgeInsets.only(top: 20),

@@ -18,6 +18,7 @@ import 'package:workmanager/workmanager.dart';
 
 import '../../api.dart';
 import '../../applog.dart';
+import '../../core/flags.dart';
 import '../../home_widget_service.dart';
 
 const kSignalsTask = 'signals-sync';
@@ -109,6 +110,13 @@ Future<void> initSignalsSync() async {
   );
 }
 
+/// 신호 동기화 중단 — 수집기 단독화(flutterCollects=false) 시 기존 주기 작업 취소.
+Future<void> cancelSignalsSync() async {
+  try {
+    await Workmanager().cancelByUniqueName(kSignalsTask);
+  } catch (_) {}
+}
+
 @pragma('vm:entry-point')
 void signalsDispatcher() {
   Workmanager().executeTask((task, inputData) async {
@@ -148,6 +156,7 @@ Future<void> maybeForegroundSync(
 
 /// 동기화 1회 — 권한 없으면 해당 소스만 조용히 건너뜀.
 Future<void> runSignalsSync() async {
+  if (!flutterCollects) return; // 수집기 단독화 — Flutter는 수집 안 함(WorkManager 잔여 대비)
   final prefs = await SharedPreferences.getInstance();
   final nowMs = DateTime.now().millisecondsSinceEpoch;
   final sinceMs = prefs.getInt(_kLastSyncKey) ??

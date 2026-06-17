@@ -17,6 +17,8 @@ import 'package:http/http.dart' as http;
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/flags.dart';
+
 const kHomeLat = 'loc_home_lat';
 const kHomeLng = 'loc_home_lng';
 const kOfficeLat = 'loc_office_lat';
@@ -52,11 +54,17 @@ void startLocationCallback() {
 class LocationTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // 수집기 단독화 — Flutter 수집 비활성이면 서비스 스스로 종료(패키지 교체 자동재시작 대비).
+    if (!flutterCollects) {
+      await FlutterForegroundTask.stopService();
+      return;
+    }
     await _tick();
   }
 
   @override
   void onRepeatEvent(DateTime timestamp) {
+    if (!flutterCollects) return;
     _tick(); // void — async는 fire-and-forget
   }
 
