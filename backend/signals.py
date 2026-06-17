@@ -111,11 +111,13 @@ def _feedback_hints() -> List[str]:
 
 
 def sync(sms: List[Dict[str, Any]], calls: List[Dict[str, Any]],
-         notifications: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+         notifications: Optional[List[Dict[str, Any]]] = None,
+         source: Optional[str] = None) -> Dict[str, Any]:
     """동기화 1회 — 저장(dedupe) + 미요약분 일괄 요약.
 
     요약 성공 시에만 briefed 마킹 → 로컬 LLM이 꺼져 있던 동안 온 신호도
     다음 주기에 자연 재시도 (48h 지나면 age-out). OTP는 요약 대상에서 제외.
+    source: 보낸 기기/클라이언트(수집기·폰 등) — 신호에 provenance로 기록(graceful).
     반환: {new_sms, new_calls, sms_count, call_count, summary}
     (*_count = 이번 brief에 실제 포함된 건수 — 알림 표기용).
     """
@@ -136,6 +138,7 @@ def sync(sms: List[Dict[str, Any]], calls: List[Dict[str, Any]],
             "otp": otp,
             "briefed": otp,            # OTP는 요약 안 함 — 시작부터 처리됨 취급
             "ts": _to_dt(m.get("ts")) or now,
+            "source": source,
             "synced_at": now,
         }
         res = db.signals().update_one(
@@ -153,6 +156,7 @@ def sync(sms: List[Dict[str, Any]], calls: List[Dict[str, Any]],
             "otp": False,
             "briefed": False,
             "ts": _to_dt(c.get("ts")) or now,
+            "source": source,
             "synced_at": now,
         }
         res = db.signals().update_one(
@@ -180,6 +184,7 @@ def sync(sms: List[Dict[str, Any]], calls: List[Dict[str, Any]],
             "otp": otp,
             "briefed": otp,
             "ts": _to_dt(n.get("ts")) or now,
+            "source": source,
             "synced_at": now,
         }
         res = db.signals().update_one(

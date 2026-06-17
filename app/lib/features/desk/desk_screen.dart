@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -215,8 +216,8 @@ class _DeskScreenState extends State<DeskScreen>
             ],
             // 6) 오늘 정리
             ..._todayCard(_data?['today'] as Map<String, dynamic>?),
-            // 위치 동반자 진입 (폰 전용)
-            if (!kIsWeb) ...[
+            // 위치 동반자 진입 — 위치 추적은 Android 수집 영역(별도 수집기). iOS·웹은 숨김.
+            if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ...[
               const SizedBox(height: 28),
               _locationLink(),
             ],

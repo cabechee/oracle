@@ -14,13 +14,15 @@ class SignalsSyncBody(BaseModel):
     sms: List[Dict[str, Any]] = []            # [{from, body, ts(epoch ms)}]
     calls: List[Dict[str, Any]] = []          # [{from, ts(epoch ms)}]
     notifications: List[Dict[str, Any]] = []  # [{app, title, text, ts(epoch ms)}]
+    source: Optional[str] = None              # 보낸 클라이언트/기기 (provenance) — 수집기 vs 폰
 
 
 @router.post("/signals/sync")
 def ep_signals_sync(body: SignalsSyncBody):
     """저장(dedupe) + 새 신호만 로컬 LLM 요약. 새 게 없으면 summary 빈 문자열."""
     try:
-        return signals_mod.sync(body.sms, body.calls, body.notifications)
+        return signals_mod.sync(body.sms, body.calls, body.notifications,
+                                source=body.source)
     except Exception as e:
         raise HTTPException(500, str(e))
 

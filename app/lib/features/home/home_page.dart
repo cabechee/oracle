@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -84,12 +85,15 @@ class _HomePageState extends State<HomePage>
     _loadLatestDigest();
     // 카메라·SMS·통화·알림·WorkManager는 폰 전용 — 웹에선 조회/검색/대화만.
     if (!kIsWeb) {
-      _capture.init();
-      _ensureSignalsPermissions();
-      maybeForegroundSync();
-      initNotificationListener();   // 앱 알림 수집 시작 (권한 있으면 구독)
-      syncHealth();                 // 수면·걸음 (Health Connect)
-      _syncLocationConfig();        // 위치 확인 설정(주기·WiFi 스킵)을 백그라운드 isolate용 prefs로
+      _capture.init();              // 카메라·녹음·공유 — 크로스플랫폼(iOS도)
+      syncHealth();                 // 수면·걸음 — Health Connect(Android)/HealthKit(iOS)
+      // 수동 수집(문자·통화·앱 알림·위치)은 Android 전담(별도 수집기 앱). iOS는 능동 인터페이스만.
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        _ensureSignalsPermissions();
+        maybeForegroundSync();
+        initNotificationListener(); // 앱 알림 수집 시작 (권한 있으면 구독)
+        _syncLocationConfig();      // 위치 확인 설정(주기·WiFi 스킵)을 백그라운드 isolate용 prefs로
+      }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeShowOnboarding();
@@ -125,8 +129,11 @@ class _HomePageState extends State<HomePage>
       _capture.onAppResume();
       _loadLatestDigest();
       _chat.refresh(); // 복귀 시 최신 record 반영 (백그라운드 중 완료분)
-      maybeForegroundSync(); // 신호 동기화 — 배터리 최적화로 주기 밀려도 복귀 시 보장
-      _maybeWifiSavePrompt(); // 새 WiFi에 붙어 있으면 '여기 장소로 저장?' 제안 (1회)
+      // 수동 수집(신호 동기화·WiFi 저장제안)은 Android만 — iOS는 능동 인터페이스.
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        maybeForegroundSync(); // 신호 동기화 — 배터리 최적화로 주기 밀려도 복귀 시 보장
+        _maybeWifiSavePrompt(); // 새 WiFi에 붙어 있으면 '여기 장소로 저장?' 제안 (1회)
+      }
     }
   }
 
