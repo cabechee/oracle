@@ -318,6 +318,9 @@ class _HomePageState extends State<HomePage>
       } catch (_) {
         // 구 알림(평문 멘트) 호환 — raw 자체가 멘트, 화자 없음
       }
+      // 위에 떠 있는 화면(일기·검색·색인·로그·다이얼로그)을 닫는다 — 안 그러면 기록 탭으로
+      // 바꿔도 그 화면에 가려 오버레이가 안 보인다("앱만 열리고 창은 안 뜸"의 원인).
+      Navigator.of(context).popUntil((r) => r.isFirst);
       _tab.animateTo(3); // 기록 탭
       _capture.setAsk(text, speaker: speaker);
     } else {
