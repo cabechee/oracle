@@ -27,16 +27,30 @@ def test_signal_id_deterministic_and_distinct():
 
 
 def test_brief_prompt_shape():
+    now = datetime(2026, 6, 11, 12, 0)
     items = [
         {"_id": "sig-a", "kind": "sms", "sender": "010-2222",
          "body": "내일 회의 10시로 변경", "ts": datetime(2026, 6, 11, 9, 30)},
         {"_id": "sig-b", "kind": "missed_call", "sender": "엄마", "body": "",
          "ts": datetime(2026, 6, 11, 9, 50)},
     ]
-    p = signals._brief_prompt(items)
+    p = signals._brief_prompt(items, now)
     assert "2건" in p and "내일 회의 10시로 변경" in p
     assert "부재중 전화" in p and "09:50" in p
     assert "sig-a" in p          # id가 프롬프트에 포함돼야 LLM이 signal_ids 매칭
+
+
+def test_brief_prompt_dates_past_signals():
+    # 오늘(6/18) 요약인데 신호가 지난 날이면 '6/7 08:02'처럼 날짜가 붙어야 한다
+    # (오래된 부재중이 '오늘 08:02'로 둔갑하던 버그 방지).
+    now = datetime(2026, 6, 18, 7, 0)
+    today_item = {"_id": "sig-t", "kind": "missed_call", "sender": "010-1",
+                  "body": "", "ts": datetime(2026, 6, 18, 6, 30)}
+    old_item = {"_id": "sig-o", "kind": "missed_call", "sender": "01081724345",
+                "body": "", "ts": datetime(2026, 6, 7, 8, 2)}
+    p = signals._brief_prompt([today_item, old_item], now)
+    assert "6/7 08:02" in p        # 지난 신호 → 날짜 포함
+    assert "6/18" not in p         # 오늘 신호는 날짜 없이 시각만
 
 
 def test_parse_items_validates_category_and_ids():

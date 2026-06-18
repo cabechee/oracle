@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 import signals as signals_mod
 import collector_config as coll_cfg
+import collector_status as coll_status
 
 router = APIRouter()
 
@@ -40,6 +41,18 @@ def ep_set_collector_config(patch: Dict[str, Any] = Body(...)):
     return {"config": coll_cfg.set_config(patch)}
 
 
+# ── 수집기 라이브 상태 (현재 WiFi·위치·BT·최근 로그 — adb 대체) ──────
+@router.post("/collector-status")
+def ep_report_collector_status(body: Dict[str, Any] = Body(...)):
+    """수집기가 매 사이클 보고하는 현재 상태(어드민이 보고 'WiFi 등록'·로그 확인)."""
+    return coll_status.report(body)
+
+
+@router.get("/collector-status")
+def ep_get_collector_status():
+    return coll_status.view()
+
+
 @router.get("/signals/recent")
 def ep_signals_recent(briefs: int = 40, raw: int = 80):
     """신호 로그 화면 — 과거 요약(brief) 타임라인 + 원본 신호 목록(최신순)."""
@@ -61,3 +74,17 @@ def ep_brief_feedback(brief_id: str, body: FeedbackBody):
     if not ok:
         raise HTTPException(404, "brief or item not found")
     return {"ok": True}
+
+
+class RecatBody(BaseModel):
+    signal_ids: List[str]
+    category: str                    # action_needed|attention|acquaintance|low|spam
+
+
+@router.post("/signals/recategorize")
+def ep_recategorize(body: RecatBody):
+    """데스크에서 카테고리 직접 변경 — 그 신호들의 분류를 바꿔 즉시 섹션 이동."""
+    if body.category not in signals_mod.SIGNAL_CATEGORIES:
+        raise HTTPException(400, "unknown category")
+    n = signals_mod.recategorize(body.signal_ids, body.category)
+    return {"ok": True, "updated_briefs": n}

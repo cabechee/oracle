@@ -32,11 +32,14 @@ def _pending_key(thread_id: Any) -> str:
 # ── 순수 변환 (db 불요 — 테스트 대상) ───────────────────────────
 
 def _collect_actions(briefs: List[Dict[str, Any]],
-                     dismissed: Set[str]) -> List[Dict[str, Any]]:
+                     dismissed: Set[str],
+                     sig_map: Dict[str, Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """brief 목록 → 당장 처리 항목. dismiss·부정확 표시는 제외.
 
-    순수 함수(외부 의존 없음) — 데스크의 핵심 필터 로직을 여기서 검증한다.
+    sig_map(원본 신호) 주면 출처 앱·본문 URL 보강(앱 열기·링크 열기). sids는 재분류용.
     """
+    import signals as signals_mod
+    sig_map = sig_map or {}
     out: List[Dict[str, Any]] = []
     seen_sids: Set[str] = set()      # 이미 담은 원본 신호 (다른 brief 중복 요약 차단)
     seen_text: Set[tuple] = set()    # signal_id 없는 구 brief는 발신자+요약으로
@@ -60,11 +63,24 @@ def _collect_actions(briefs: List[Dict[str, Any]],
                 continue
             seen_sids.update(sids)
             seen_text.add((sender, summary))
+            app, urls = "", []
+            for sid in sids:          # 출처 앱(패키지)·본문 URL 보강
+                sg = sig_map.get(sid)
+                if not sg:
+                    continue
+                if not app and sg.get("kind") == "notification" and sg.get("app"):
+                    app = sg["app"]
+                for u in signals_mod._extract_urls(sg.get("body") or ""):
+                    if u not in urls:
+                        urls.append(u)
             out.append({
                 "key": key,
                 "brief_id": bid,
                 "sender": sender,
                 "summary": summary,
+                "sids": sids,
+                "app": app,
+                "urls": urls,
                 "ts": ts.isoformat() if isinstance(ts, datetime) else None,
             })
     return out
@@ -91,10 +107,11 @@ def feed() -> Dict[str, Any]:
     dismissed = _dismissed_keys()
 
     # 1) 당장 처리 — 최근 N일 brief의 action_needed (확인 안 한 것만)
-    briefs = list(db.signal_briefs().find(
-        {"ts": {"$gte": now - timedelta(days=_ACTION_WINDOW_DAYS)}}
-    ).sort("ts", -1))
-    actions = _collect_actions(briefs, dismissed)
+    win = now - timedelta(days=_ACTION_WINDOW_DAYS)
+    briefs = list(db.signal_briefs().find({"ts": {"$gte": win}}).sort("ts", -1))
+    sig_map = {s["_id"]: s for s in db.signals().find(
+        {"ts": {"$gte": win}}, {"kind": 1, "app": 1, "body": 1})}
+    actions = _collect_actions(briefs, dismissed, sig_map)
 
     # 2) 대신 읽어드림 — 오늘 받은 알림을 발신자별로 묶어 누적 요약 (실시간, 안 날림)
     import signals as signals_mod
@@ -152,3 +169,57 @@ def dismiss(key: str) -> bool:
         upsert=True,
     )
     return True
+
+
+def undismiss(key: str) -> bool:
+    """확인 취소(실행취소) — dismiss 기록 제거 → 다시 데스크에 뜬다. 실수 클릭 복구용."""
+    if not key:
+        return False
+    db.dashboard_state().delete_one({"_id": key})
+    return True
+
+
+def dismissed_view(limit: int = 150) -> List[Dict[str, Any]]:
+    """확인(dismiss)한 항목들 — 어드민 검토·복구용. 최근 확인순으로 본문 복원.
+
+    action:brief#idx 키는 원본 brief 항목(발신자·요약·분류)을, pending:tid는 thread를 푼다.
+    """
+    rows = list(db.dashboard_state().find({"dismissed_at": {"$ne": None}})
+                .sort("dismissed_at", -1).limit(limit))
+    brief_ids = set()
+    for r in rows:
+        k = str(r["_id"])
+        if k.startswith("action:"):
+            bid = k[len("action:"):].rpartition("#")[0]
+            if bid:
+                brief_ids.add(bid)
+    briefs = ({b["_id"]: b for b in
+               db.signal_briefs().find({"_id": {"$in": list(brief_ids)}})}
+              if brief_ids else {})
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        key = str(r["_id"])
+        da = r.get("dismissed_at")
+        item: Dict[str, Any] = {
+            "key": key,
+            "kind": key.split(":")[0],
+            "dismissed_at": da.isoformat() if isinstance(da, datetime) else None,
+            "sender": "", "summary": "", "category": "", "ts": None,
+        }
+        if key.startswith("action:"):
+            bid, _, idx = key[len("action:"):].rpartition("#")
+            b = briefs.get(bid)
+            if b and idx.isdigit() and int(idx) < len(b.get("items") or []):
+                it = b["items"][int(idx)]
+                item["sender"] = (it.get("sender") or "").strip()
+                item["summary"] = (it.get("summary") or "").strip()
+                item["category"] = it.get("category") or ""
+                bt = b.get("ts")
+                item["ts"] = bt.isoformat() if isinstance(bt, datetime) else None
+            else:
+                item["summary"] = "(원본 brief 없음 — 오래되어 정리됨)"
+        elif key.startswith("pending:"):
+            item["sender"] = "오래 못 챙긴 사람"
+            item["summary"] = key[len("pending:"):]
+        out.append(item)
+    return out

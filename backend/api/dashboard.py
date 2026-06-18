@@ -27,3 +27,16 @@ def ep_dashboard_dismiss(body: DismissBody):
     if not dashboard_mod.dismiss(body.key):
         raise HTTPException(400, "key required")
     return {"ok": True}
+
+
+@router.post("/dashboard/undismiss")
+def ep_dashboard_undismiss(body: DismissBody):
+    """확인 취소(실행취소) — 다시 데스크에 뜬다."""
+    dashboard_mod.undismiss(body.key)
+    return {"ok": True}
+
+
+@router.get("/dashboard/dismissed")
+def ep_dashboard_dismissed(limit: int = 150):
+    """확인(dismiss)한 항목 목록 — 어드민 검토·복구."""
+    return {"items": dashboard_mod.dismissed_view(limit)}

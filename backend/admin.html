@@ -108,6 +108,8 @@ async function loadStats(){
     <span>📍 장소</span></a>`;
   $('#nav').innerHTML += `<a data-c="__collector__" class="${CUR==='__collector__'?'active':''}">
     <span>📡 수집기</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__dismissed__" class="${CUR==='__dismissed__'?'active':''}">
+    <span>🗂 확인한 항목</span></a>`;
   document.querySelectorAll('nav a').forEach(a =>
     a.onclick = () => { CUR=a.dataset.c; SKIP=0; Q=''; render(); });
 }
@@ -142,6 +144,7 @@ async function render(){
   if(CUR==='__companion__') return renderCompanion();
   if(CUR==='__places__') return renderPlaces();
   if(CUR==='__collector__') return renderCollector();
+  if(CUR==='__dismissed__') return renderDismissed();
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
   let data;
@@ -374,15 +377,40 @@ async function locCfg(opts){
   if(!r.ok) throw new Error(r.status + ' ' + await r.text());
   return r.json();
 }
+async function collStatus(){
+  const r = await fetch('/collector-status');
+  if(!r.ok) throw new Error(r.status);
+  return r.json();
+}
 const inStyle = 'width:100%;padding:8px 10px;border:1px solid var(--hair);border-radius:7px;font:inherit;background:#FCFBF9;margin-bottom:8px';
 
 async function renderPlaces(){
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
-  let d, lc;
+  let d, lc, st=null;
   try{ d = await places(); lc = (await locCfg()).config; }
   catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  try{ st = await collStatus(); }catch(e){}   // 라이브 상태(graceful — 보고 없으면 패널만 빈 채)
   const items = d.items || [];
+
+  // 📡 수집기 현재 상태 — 현재 WiFi·위치·차 BT + 최근 로그 (운전 중 adb logcat 대체).
+  const curWifi = (st && st.wifi) ? st.wifi : '';
+  const place = st ? (st.visit_on && st.place ? esc(st.place)
+                      : (st.visit_on ? '어딘가 체류 중' : '이동 중 / 미확정')) : '';
+  const logBox = (st && st.logs && st.logs.length)
+    ? `<div style="background:#1c1b19;color:#d8d4cc;font:11px/1.55 ui-monospace,SFMono-Regular,monospace;padding:8px 10px;border-radius:7px;max-height:220px;overflow:auto;white-space:pre-wrap">${st.logs.slice(-50).reverse().map(esc).join('\n')}</div>`
+    : '<div class="hint">최근 로그 없음 — 이동·BT 등 이벤트가 생기면 여기 쌓여요</div>';
+  const fresh = st ? (st.age_sec!=null ? st.age_sec+'초 전 보고' : '보고 시각 미상')
+                   : '아직 보고 없음 — 새 수집기 설치 후 1분 내 뜸';
+  const status = `<div class="pf">
+    <label>📡 수집기 현재 상태 <span class="hint">${fresh}</span></label>
+    ${st ? `<div class="hint" style="margin-bottom:8px;line-height:1.8">
+      현재 WiFi: <b>${curWifi?esc(curWifi):'(연결 없음/미상)'}</b><br>
+      위치: <b>${place}</b> · 차 BT: <b>${st.bt?esc(st.bt)+' 연결됨':'끊김'}</b></div>` : ''}
+    ${logBox}
+    <div class="row" style="margin-top:6px"><button onclick="renderPlaces()">새로고침 ↻</button></div>
+  </div>`;
+
   // 위치 확인(센싱) 설정 — 말 걸기와 분리. '어떻게 위치를 확인할지'.
   const sensing = `<div class="pf">
     <label>위치 확인 <span class="hint">폰이 어떻게 위치를 알아낼지 (말 걸기와 별개)</span></label>
@@ -392,7 +420,7 @@ async function renderPlaces(){
   </div>`;
   const coords = p => (p.lat!=null && p.lng!=null) ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '좌표 없음(폰에서 추가)';
   const add = `<div class="pf">
-    <label>장소 추가 <span class="hint">좌표·WiFi는 폰에서 자동 등록 — 여기선 이름·설명 위주(맥락용)</span></label>
+    <label>장소 추가 <span class="hint">새 장소를 직접 추가 (집·작업실 WiFi는 아래 각 장소에서 바로 수정)</span></label>
     <input id="npName" placeholder="이름 (예: 단골 카페)" style="${inStyle}">
     <input id="npWifi" placeholder="WiFi 이름(SSID) — 선택" style="${inStyle}">
     <input id="npBt" placeholder="블루투스 기기명 (예: 차량오디오) — 연결되면 그 장소로 · 선택" style="${inStyle}">
@@ -402,20 +430,21 @@ async function renderPlaces(){
   </div>`;
   const rows = items.length ? items.map(p => `
     <div class="pf" data-id="${p.id}" data-name="${esc(p.name)}">
-      <label>${KIND_LABEL[p.kind]||p.kind} · ${esc(p.name)}</label>
-      <div class="hint" style="margin-bottom:8px">
-        ${p.wifi?('WiFi “'+esc(p.wifi)+'” · '):''}${p.bt?('BT “'+esc(p.bt)+'” · '):''}${coords(p)}</div>
+      <label>${KIND_LABEL[p.kind]||p.kind} · ${esc(p.name)} <span class="hint">${coords(p)}</span></label>
+      <input data-wifi value="${esc(p.wifi||'')}" placeholder="WiFi 이름(SSID)" style="${inStyle}">
+      <input data-bt value="${esc(p.bt||'')}" placeholder="블루투스 기기명 (차 등) — 선택" style="${inStyle}">
       <textarea data-desc placeholder="설명 (동반자 맥락)"
         style="${inStyle};min-height:52px;font-family:inherit">${esc(p.description||'')}</textarea>
       <div class="row">
-        <button class="accent" onclick="savePlace('${p.id}', this)">설명 저장</button>
+        <button class="accent" onclick="savePlace('${p.id}', this)">저장</button>
+        ${curWifi ? `<button data-wc="${esc(curWifi)}" onclick="registerWifi('${p.id}', this)">현재 WiFi 등록</button>` : ''}
         <button class="danger" onclick="delPlace('${p.id}')">삭제</button>
       </div>
     </div>`).join('')
-    : '<div class="empty">아직 등록된 장소가 없어요 — 폰에서 WiFi 감지·수동 추가로 등록돼요</div>';
+    : '<div class="empty">아직 등록된 장소가 없어요 — 위에서 추가하세요</div>';
   m.innerHTML = `<div class="bar"><h2>장소</h2>
-    <span class="total">위치 확인 설정 + 등록된 장소(이름·설명은 동반자 도착 멘트 맥락에 쓰임)</span></div>`
-    + sensing + add + rows;
+    <span class="total">수집기 상태 + 위치 확인 설정 + 등록된 장소(WiFi·BT·설명 직접 수정)</span></div>`
+    + status + sensing + add + rows;
 }
 
 async function saveSensing(btn){
@@ -451,19 +480,68 @@ async function savePlace(id, btn){
   const pf = btn.closest('.pf');
   const name = pf.dataset.name;
   const description = pf.querySelector('[data-desc]').value;
+  // WiFi·BT는 빈 문자열로 보내면 해제(서버 ''→None), 값 있으면 설정. (입력칸은 현재값 프리필)
+  const wifi = (pf.querySelector('[data-wifi]')||{value:''}).value.trim();
+  const bt = (pf.querySelector('[data-bt]')||{value:''}).value.trim();
   btn.disabled = true;
   try{
     await places('', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, name, description})});
+      body: JSON.stringify({id, name, description, wifi, bt})});
     btn.textContent = '저장됨 ✓';
-    setTimeout(() => { btn.textContent='설명 저장'; btn.disabled=false; }, 1200);
+    setTimeout(() => { btn.textContent='저장'; btn.disabled=false; }, 1200);
   }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
+}
+
+// 수집기가 보고한 '현재 WiFi'를 이 장소에 한 번에 등록(집·작업실 WiFi 빠른 지정).
+async function registerWifi(id, btn){
+  const wifi = btn.dataset.wc;
+  if(!wifi) return;
+  const pf = btn.closest('.pf');
+  if(!confirm('현재 WiFi "'+wifi+'"를 \''+pf.dataset.name+'\'에 등록할까요?')) return;
+  btn.disabled = true;
+  try{
+    await places('', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id, name: pf.dataset.name, wifi})});
+    renderPlaces();
+  }catch(e){ alert('등록 실패: '+e.message); btn.disabled=false; }
 }
 
 async function delPlace(id){
   if(!confirm('이 장소를 삭제할까요?')) return;
   try{ await places('/'+encodeURIComponent(id), {method:'DELETE'}); renderPlaces(); }
   catch(e){ alert('삭제 실패: '+e.message); }
+}
+
+// ── 확인한 항목 (dismiss된 데스크 항목 — 검토·되돌리기) ──
+const DCAT = {action_needed:'당장처리', attention:'관심', acquaintance:'지인', low:'일반', spam:'스팸'};
+async function renderDismissed(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let d;
+  try{ const r = await fetch('/dashboard/dismissed'); if(!r.ok) throw new Error(r.status); d = await r.json(); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  const items = d.items || [];
+  const rows = items.length ? items.map(it => `
+    <div class="pf" data-key="${esc(it.key)}">
+      <div class="hint" style="margin-bottom:4px">
+        ${fmtWhen(it.dismissed_at)} 확인${it.category?(' · '+(DCAT[it.category]||it.category)):''}</div>
+      <div style="margin-bottom:6px">${it.sender?('<b>'+esc(it.sender)+'</b> '):''}${esc(it.summary||'')}</div>
+      <div class="row"><button class="accent" onclick="undismiss(this)">되돌리기</button></div>
+    </div>`).join('')
+    : '<div class="empty">확인 처리한 항목이 없어요</div>';
+  m.innerHTML = `<div class="bar"><h2>확인한 항목</h2>
+    <span class="total">${items.length}건 — 되돌리면 데스크 '당장 처리'에 다시 떠요</span></div>` + rows;
+}
+async function undismiss(btn){
+  const pf = btn.closest('.pf');
+  const key = pf.dataset.key;
+  btn.disabled = true;
+  try{
+    await fetch('/dashboard/undismiss', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({key})});
+    pf.style.opacity = 0.45;
+    btn.textContent = '되돌림 ✓ — 데스크에 다시 뜸';
+  }catch(e){ alert('실패: '+e.message); btn.disabled=false; }
 }
 
 // ── 수집기 설정 (Android 네이티브 수집기가 매 사이클 fetch해 적용) ──
