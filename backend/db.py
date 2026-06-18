@@ -102,6 +102,11 @@ def places() -> Collection:
     return _conn().places
 
 
+def parking() -> Collection:
+    """주차 위치 — 차에서 내릴 때 GPS로 지정(좌표·시각). '내 차 어디?' 회상용."""
+    return _conn().parking
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:

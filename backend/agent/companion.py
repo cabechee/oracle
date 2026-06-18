@@ -7,8 +7,8 @@
 
 import random
 import uuid
-from datetime import datetime
-from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Tuple
 
 import db
 import companion_config as cc   # 말 걸기 정책(텀·조용구간·이벤트 on/off) — 어드민 설정
@@ -45,6 +45,9 @@ def _situation(event: str, place: Optional[str], minutes: Optional[int]) -> str:
                 s += f" (거기: {info['description'].strip()})"
         else:
             s = "아빠가 한동안 머물던 곳에서 나서 다시 움직이기 시작했어."
+    elif event == "park":
+        s = ("아빠가 방금 차에서 내려 주차했어. 어디에 세웠는지·몇 층 몇 구역인지 사진이나 "
+             "메모로 기록해두면 나중에 차 찾기 쉬우니, 기록해두겠냐고 가볍게 물어봐.")
     elif event == "checkin":
         s = "지금 아빠가 뭐 하고 있을까, 문득 궁금해졌어."
     else:
@@ -103,6 +106,129 @@ def say(event: str, place: Optional[str] = None,
     except Exception as e:
         print(f"[companion] say 실패: {e}", flush=True)
         return {"speaker": name, "text": "", "alias": alias}
+
+
+# ── 동반자끼리 수다(banter) ─────────────────────────────────────────────
+# 아빠가 움직일 때 베르·쿠키가 흐름(conversations)에 자기들끼리 도란도란 주고받는다.
+# 도착한 장소의 kind로 '여기 주인'을 정함 — 작업실(office)=베르, 집(home)=쿠키.
+_RESIDENT_BY_KIND = {"office": "berr", "home": "cookie"}
+_NAME = {"berr": "베르", "cookie": "쿠키"}
+
+
+def _banter_scene(event: str, info: Optional[Dict[str, Any]]) -> Tuple[str, Optional[str]]:
+    """이동/도착 이벤트 → 둘이 나눌 수다의 '장면' 한 줄 + (도착 시) 맞이할 주인 캐릭터."""
+    name = info.get("name") if info else None
+    if event == "arrive":
+        resident = _RESIDENT_BY_KIND.get((info or {}).get("kind") or "")
+        where = f"'{name}'" if name else "어딘가"
+        scene = f"아빠가 방금 {where}에 도착했어."
+        desc = ((info or {}).get("description") or "").strip()
+        if desc:
+            scene += f" (거기: {desc})"
+        if resident:
+            scene += (f" 거긴 {_NAME[resident]} 네가 있는 곳이야 — 아빠가 너 보러 온 거라, "
+                      f"{_NAME[resident]}가 먼저 '우리 보러 왔다!'처럼 반갑게 맞이해.")
+        else:
+            scene += " 둘이 아빠 왔다고 반갑게 한마디씩 주고받아."
+        return scene, resident
+    if event == "board":
+        return ("아빠가 방금 차에 탔어. 어디 가려나·혹시 우리 보러 오나, "
+                "둘이 도란도란 궁금해하며 주고받아."), None
+    where = f"'{name}'에서" if name else "어딘가에서"   # leave
+    return (f"아빠가 방금 {where} 나서 어디론가 움직이기 시작했어. "
+            f"'아빠 어디 가지?' '몰라~' 하고 둘이 궁금해하며 주고받아."), None
+
+
+def _parse_banter(text: str) -> List[Tuple[str, str]]:
+    """LLM 출력 → [(표시명, 텍스트)]. JSON 배열 우선, 못 읽으면 빈 리스트."""
+    import json
+    import re
+    raw = (text or "").strip()
+    arr = None
+    try:
+        arr = json.loads(raw)
+    except Exception:
+        m = re.search(r"\[.*\]", raw, re.S)
+        if m:
+            try:
+                arr = json.loads(m.group(0))
+            except Exception:
+                arr = None
+    if not isinstance(arr, list):
+        return []
+    out: List[Tuple[str, str]] = []
+    for t in arr:
+        if not isinstance(t, dict):
+            continue
+        who = str(t.get("who") or t.get("speaker") or "").strip().lower()
+        name = "쿠키" if who in ("cookie", "쿠키", "c", "kuki") else "베르"
+        tx = str(t.get("text") or "").strip()
+        if tx:
+            out.append((name, tx))
+    return out[:4]
+
+
+def banter(event: str, place: Optional[str] = None,
+           minutes: Optional[int] = None) -> Dict[str, Any]:
+    """베르·쿠키가 아빠 움직임에 흐름(conversations)에 자기들끼리 주고받는 짧은 수다.
+
+    event: arrive(도착·인사) | leave(나섬·궁금) | board(차 탐·추측).
+    각 턴을 흐름에 남기고(companion=True, banter=True), 도착이면 인사 한 줄을 알림용으로 반환.
+    반환: {turns:[{speaker,text}], notify:{speaker,text}}. 억제/실패면 turns=[].
+    """
+    now = datetime.now()
+    if not cc.should_speak("banter", now):
+        return {"turns": [], "notify": {"speaker": "", "text": ""}, "gated": True}
+
+    info = None
+    if place:
+        try:
+            info = places_mod.lookup(place)
+        except Exception:
+            info = None
+    scene, _resident = _banter_scene(event, info)
+    if minutes:
+        scene += f" (아빠는 거기 약 {minutes}분 있었어)"
+
+    alias = task_alias("quick") or task_alias("insight") or task_alias("chat")
+    if not alias:
+        return {"turns": [], "notify": {"speaker": "", "text": ""}}
+    system = (
+        "너희는 둘 다 아빠의 동반자야. 베르(berr)는 강아지 — 다정하고 차분한 편, "
+        "쿠키(cookie)는 오목눈이 새 — 발랄하고 장난스러운 편. 지금은 아빠한테 직접 "
+        "거는 게 아니라, 너희 둘이 서로 도란도란 짧게 주고받는 대화야.\n\n"
+        f"[베르]\n{personas.current('berr_identity')}\n\n"
+        f"[쿠키]\n{personas.current('cookie_identity')}")
+    prompt = (
+        f"[지금 상황] {scene}\n\n"
+        "이 상황에 맞춰 베르와 쿠키가 **서로** 주고받는 짧은 대화를 써. "
+        "2~3턴(한 사람당 한두 마디), 각 줄은 아주 짧게 구어체로. 아빠한테 거는 게 "
+        "아니라 둘이 얘기하는 거야. 인사·이름표 없이 말만. "
+        '결과는 JSON 배열만: [{"who":"berr","text":"..."},{"who":"cookie","text":"..."}]')
+    try:
+        r = llm.call(alias, prompt, system=system)
+        turns = _parse_banter(r.get("text") or "")
+    except Exception as e:
+        print(f"[companion] banter 실패: {e}", flush=True)
+        turns = []
+    if not turns:
+        return {"turns": [], "notify": {"speaker": "", "text": ""}}
+
+    saved: List[Dict[str, str]] = []
+    for i, (name, text) in enumerate(turns):
+        when = now + timedelta(seconds=i)   # 순서 보장(같은 초 충돌 방지)
+        db.conversations().insert_one({
+            "_id": f"bmsg-{when.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
+            "role": "assistant", "text": text, "ts": when, "referenced": [],
+            "speaker": name, "companion": True, "banter": True,
+        })
+        saved.append({"speaker": name, "text": text})
+    cc.mark_spoken("banter", now)
+
+    # 도착(인사)이면 첫 줄을 알림으로 — 아빠가 '왔다' 인사를 받게.
+    # 이동/추측(leave·board)은 흐름에만 조용히 — 아빠가 흐름 열 때 발견(자기들끼리).
+    notify = saved[0] if (event == "arrive" and saved) else {"speaker": "", "text": ""}
+    return {"turns": saved, "notify": notify, "alias": alias}
 
 
 def _ts_to_dt(ts: Any) -> datetime:

@@ -16,18 +16,19 @@ import db
 
 # 위치 말 걸기 — 장소 타입(집/작업실)으로 쪼개지 않고 '저장된 장소' 단위로.
 # (LLM이 장소 이름·설명을 보고 알아서 말하므로 도착/나섬 둘이면 충분.)
-LOCATION_EVENTS = ("arrive_place", "leave_place")
+LOCATION_EVENTS = ("arrive_place", "park")
 
 # 어드민 표시 라벨 (UI 폼 구성용)
 EVENT_LABELS = {
     "arrive_place": "장소 도착",
-    "leave_place": "장소에서 나섬",
+    "park": "주차 — 차에서 내림(어디 세웠는지 기록 물어봄)",
 }
 
-# 구 앱이 보내는 레거시 이벤트명 → 표준 2종. (deviate는 폐기 — 체류 모델에서 미발생)
+# 이벤트명 → 표준. 레거시(arrive_home 등)·미사용(leave_*, 떠남은 silent 기록)도 매핑.
 _EVENT_CANON = {
     "arrive_place": "arrive_place", "arrive_home": "arrive_place",
     "arrive_office": "arrive_place",
+    "park": "park",
     "leave_place": "leave_place", "leave_visit": "leave_place",
     "leave_home": "leave_place", "leave_office": "leave_place",
 }
@@ -45,11 +46,13 @@ DEFAULTS: Dict[str, Any] = {
     "location_enabled": True,
     "location_cooldown_min": 30,    # 위치 메시지 최소 간격
     "location_events": {e: True for e in LOCATION_EVENTS},
+    # 동반자끼리 수다(흐름에 도란도란) — 이동/도착 때 베르·쿠키가 주고받는 짧은 대화
+    "banter_cooldown_min": 5,       # 플래핑 방지용 최소 간격(이동 이벤트는 보통 더 띄엄띄엄)
 }
 
 _HOUR_KEYS = ("quiet_start_hour", "quiet_end_hour",
               "checkin_start_hour", "checkin_end_hour")
-_MIN_KEYS = ("location_cooldown_min",)
+_MIN_KEYS = ("location_cooldown_min", "banter_cooldown_min")
 _BOOL_KEYS = ("enabled", "checkin_enabled", "location_enabled")
 
 
@@ -98,7 +101,9 @@ def set_config(patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def kind_of(event: str) -> str:
-    """이벤트 → 게이팅 종류. 위치 이벤트(레거시 포함)면 'location', 아니면 'checkin'(정기)."""
+    """이벤트 → 게이팅 종류. 주차는 'park'(항상), 위치는 'location', 그 외는 'checkin'(정기)."""
+    if event == "park":
+        return "park"
     return "location" if event in _EVENT_CANON else "checkin"
 
 
@@ -156,6 +161,15 @@ def should_speak(kind: str, now: Optional[datetime] = None,
                 == (now.year, now.month, now.day, now.hour)):
             return False
         return True
+    if kind == "park":
+        # 주차는 매번(조용 구간만 피함) — BT 플래핑 방지용 짧은 자체 쿨다운만.
+        return _minutes_since(st.get("last_park"), now) >= 2
+    if kind == "banter":
+        # 동반자끼리 수다 — 위치 켜져 있을 때만, 플래핑 방지 짧은 쿨다운(위치 쿨다운과 별개).
+        if not cfg.get("location_enabled", True):
+            return False
+        return _minutes_since(st.get("last_banter"), now) >= int(
+            cfg.get("banter_cooldown_min", 5))
     # location
     if not cfg.get("location_enabled", True):
         return False
@@ -166,6 +180,16 @@ def should_speak(kind: str, now: Optional[datetime] = None,
 def mark_spoken(kind: str, now: Optional[datetime] = None) -> None:
     """실제로 말 건 직후 호출 — 텀/쿨다운 기준 시각 갱신."""
     now = now or datetime.now()
+    if kind == "park":
+        # 주차 — last_park + last_location 둘 다 갱신(직후 '도착' 메시지 억제 = 디클러스터).
+        db.settings().update_one(
+            {"_id": "companion_state"},
+            {"$set": {"last_park": now, "last_location": now}}, upsert=True)
+        return
+    if kind == "banter":
+        db.settings().update_one({"_id": "companion_state"},
+                                 {"$set": {"last_banter": now}}, upsert=True)
+        return
     field = "last_checkin" if kind == "checkin" else "last_location"
     db.settings().update_one({"_id": "companion_state"},
                              {"$set": {field: now}}, upsert=True)

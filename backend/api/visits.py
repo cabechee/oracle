@@ -47,3 +47,30 @@ def ep_visits(date: Optional[str] = None):
     except ValueError:
         raise HTTPException(400, "date must be YYYY-MM-DD")
     return {"items": visits_mod.visits_for_day(target)}
+
+
+class ParkIn(BaseModel):
+    lat: float
+    lng: float
+    ts: Any = None                 # epoch ms 또는 ISO
+    speaker: Optional[str] = None
+
+
+@router.post("/parking")
+def ep_parking(body: ParkIn):
+    """차에서 내림 — 주차 위치(GPS) 지정 기록 + '어디 세웠는지 기록할까요?' 말 걸기.
+
+    기록은 항상(위치 지정), 말 걸기는 동반자 게이팅(조용 구간·텀)에 따름.
+    """
+    import parking as parking_mod
+    parking_mod.record(body.lat, body.lng, body.ts)
+    from agent import companion
+    msg = companion.say("park", speaker=body.speaker)
+    return {"ok": True, **msg}
+
+
+@router.get("/parking/latest")
+def ep_parking_latest():
+    """가장 최근 주차 위치 — '내 차 어디?' 회상용."""
+    import parking as parking_mod
+    return {"parking": parking_mod.latest()}

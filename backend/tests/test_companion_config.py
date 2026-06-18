@@ -81,6 +81,36 @@ def test_checkin_hourly(monkeypatch):
     assert cc.should_speak("checkin", datetime(2026, 6, 16, 12, 30)) is False
 
 
+def test_park_always_and_declusters(monkeypatch):
+    now = datetime(2026, 6, 16, 14, 0)
+    # 주차는 'park' 종류 — 최근 도착(last_location)과 무관하게 발화(위치 쿨다운 무시).
+    _use(monkeypatch, [{"_id": "companion_state",
+                        "last_location": now - timedelta(minutes=1)}])
+    assert cc.kind_of("park") == "park"
+    assert cc.should_speak("park", now) is True
+    # mark_spoken(park) → last_park + last_location 갱신 → 직후 '도착'은 억제(디클러스터),
+    # 주차 자체도 2분 자체 쿨다운.
+    cc.mark_spoken("park", now)
+    assert cc.should_speak("location", now) is False
+    assert cc.should_speak("park", now) is False
+
+
+def test_banter_cooldown_quiet_and_master(monkeypatch):
+    now = datetime(2026, 6, 16, 14, 0)
+    # 막 떠들었으면(5분 쿨다운) 억제, 충분히 지나면 OK.
+    _use(monkeypatch, [{"_id": "companion_state",
+                        "last_banter": now - timedelta(minutes=3)}])
+    assert cc.should_speak("banter", now) is False
+    _use(monkeypatch, [{"_id": "companion_state",
+                        "last_banter": now - timedelta(minutes=6)}])
+    assert cc.should_speak("banter", now) is True
+    # 새벽 조용 구간엔 수다도 침묵.
+    assert cc.should_speak("banter", datetime(2026, 6, 16, 2, 0)) is False
+    # 위치 마스터(location_enabled) 끄면 수다도 꺼짐.
+    _use(monkeypatch, [{"_id": "companion", "location_enabled": False}])
+    assert cc.should_speak("banter", now) is False
+
+
 def test_location_cooldown(monkeypatch):
     now = datetime(2026, 6, 16, 12, 0)
     _use(monkeypatch, [{"_id": "companion_state",

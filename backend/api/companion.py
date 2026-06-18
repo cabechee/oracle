@@ -20,6 +20,22 @@ def ep_companion_say(body: SayIn):
     return companion.say(body.event, body.place, body.speaker)
 
 
+class BanterIn(BaseModel):
+    event: str                      # arrive | leave | board
+    place: Optional[str] = None     # 장소명(선택) — 도착이면 그곳 주인이 맞이
+    minutes: Optional[int] = None   # 그곳에 머문 시간(선택, 맥락)
+
+
+@router.post("/companion/banter")
+def ep_companion_banter(body: BanterIn):
+    """아빠 움직임에 베르·쿠키가 흐름에 자기들끼리 도란도란 — 각 턴은 흐름에 저장.
+
+    반환 notify: 도착(인사)이면 {speaker,text}(폰이 알림 표시), 이동/추측이면 빈 값(흐름에만).
+    """
+    from agent import companion
+    return companion.banter(body.event, body.place, body.minutes)
+
+
 class AskedIn(BaseModel):
     speaker: str = ""               # 베르 | 쿠키 (표시명)
     text: str                       # 동반자가 먼저 건 멘트
