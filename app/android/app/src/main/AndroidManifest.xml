@@ -122,5 +122,14 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 알림 출처 앱 실행 — 런처 액티비티 가시성(안드11+ 패키지 가시성) -->
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+        </intent>
+        <!-- 본문 URL 열기 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

@@ -32,11 +32,12 @@ class ChatList extends StatelessWidget {
       listenable: store,
       builder: (context, _) {
         final entries = _mergedEntries();
+        final rows = _displayRows(entries);   // 날짜 바뀌는 지점에 구분선 삽입
         final pendingChat = store.pendingChatText;
         // reverse 리스트: index 0 = 화면 맨 아래.
-        // [대화 전송 중][캡처 현상 중...][record·대화 merge...]
+        // [대화 전송 중][캡처 현상 중...][record·대화·날짜구분선 merge...]
         final head = pendingChat != null ? 1 : 0;
-        final total = entries.length + store.pendings.length + head;
+        final total = rows.length + store.pendings.length + head;
         return Column(
           children: [
             Expanded(
@@ -81,16 +82,19 @@ class ChatList extends StatelessWidget {
                           ),
                         );
                       }
-                      final e = entries[idx - store.pendings.length];
-                      if (e is ChatMessage) {
+                      final row = rows[idx - store.pendings.length];
+                      if (row is _DateDivider) {
+                        return _DateDividerRow(date: row.date);
+                      }
+                      if (row is ChatMessage) {
                         return _SpineEntry(
-                          time: DateFormat('HH:mm').format(e.ts.toLocal()),
-                          child: ChatMessageBubble(message: e, api: api),
+                          time: DateFormat('HH:mm').format(row.ts.toLocal()),
+                          child: ChatMessageBubble(message: row, api: api),
                         );
                       }
                       // idx가 아니라 record 자체를 캡처 — 시트/탭 처리 중 목록이
                       // 밀려도(pending 도착·refresh) 항상 이 record에 반영된다.
-                      final rec = e as Record;
+                      final rec = row as Record;
                       return _SpineEntry(
                         time: DateFormat('HH:mm').format(rec.ts.toLocal()),
                         child: GestureDetector(
@@ -136,6 +140,26 @@ class ChatList extends StatelessWidget {
       }
     }
     return out;
+  }
+
+  /// 항목 사이 날짜가 바뀌면 그 날의 구분선을 끼운다. entries는 최신→과거 순,
+  /// reverse 리스트라 구분선은 '그 날 묶음 위(과거쪽)'에 오도록 묶음의 마지막 뒤에 넣는다.
+  List<Object> _displayRows(List<Object> entries) {
+    final rows = <Object>[];
+    for (var i = 0; i < entries.length; i++) {
+      rows.add(entries[i]);
+      final last = i == entries.length - 1;
+      if (last || _dayKey(entries[i + 1]) != _dayKey(entries[i])) {
+        rows.add(_DateDivider(_tsOf(entries[i]).toLocal()));
+      }
+    }
+    return rows;
+  }
+
+  DateTime _tsOf(Object e) => e is ChatMessage ? e.ts : (e as Record).ts;
+  String _dayKey(Object e) {
+    final t = _tsOf(e).toLocal();
+    return '${t.year}-${t.month}-${t.day}';
   }
 
   Future<void> _cancelPending(BuildContext context, PendingCapture p) async {
@@ -332,6 +356,56 @@ class ChatList extends StatelessWidget {
       },
     );
     if (newText != null) await chat.updateComment(rec, newText);
+  }
+}
+
+/// 날짜 경계 마커 — _displayRows가 넣는 가벼운 표식.
+class _DateDivider {
+  final DateTime date;
+  const _DateDivider(this.date);
+}
+
+/// 날짜 구분선 — 흐름에서 날짜가 바뀌는 경계. "6월 18일 · 수" 가운데 라벨 + 헤어라인.
+class _DateDividerRow extends StatelessWidget {
+  final DateTime date;
+  const _DateDividerRow({required this.date});
+
+  static const _wk = ['월', '화', '수', '목', '금', '토', '일'];
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final isToday =
+        date.year == now.year && date.month == now.month && date.day == now.day;
+    final y = now.subtract(const Duration(days: 1));
+    final isYest =
+        date.year == y.year && date.month == y.month && date.day == y.day;
+    final base = '${date.month}월 ${date.day}일 · ${_wk[date.weekday - 1]}';
+    final label = isToday ? '오늘 — $base' : (isYest ? '어제 — $base' : base);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          OracleSpace.screenH, 12, OracleSpace.screenH, 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Expanded(
+            child: SizedBox(
+                height: 0.5,
+                child: ColoredBox(color: OracleColors.hairlineSoft)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(label,
+                style: OracleType.label.copyWith(color: OracleColors.gray)),
+          ),
+          const Expanded(
+            child: SizedBox(
+                height: 0.5,
+                child: ColoredBox(color: OracleColors.hairlineSoft)),
+          ),
+        ],
+      ),
+    );
   }
 }
 

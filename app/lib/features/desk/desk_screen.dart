@@ -1,3 +1,5 @@
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
@@ -69,9 +71,138 @@ class _DeskScreenState extends State<DeskScreen>
     AppLog.ui('데스크 확인 → $key');
     try {
       await widget.api.dismissDashboard(key);
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('확인 처리됨'),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+              label: '실행취소', onPressed: () => _undismiss(key)),
+        ));
+      }
     } catch (_) {
       if (mounted) setState(() => _dismissing.remove(key));
     }
+  }
+
+  /// 실수로 확인한 항목 복구 — 다시 데스크에 띄운다.
+  Future<void> _undismiss(String key) async {
+    if (mounted) setState(() => _dismissing.remove(key));
+    try {
+      await widget.api.undismissDashboard(key);
+      await _load();
+    } catch (_) {}
+  }
+
+  // ── 재분류 · 앱/링크 열기 ────────────────────────────────────
+  Future<void> _recategorize(List<String> sids, String cur) async {
+    if (sids.isEmpty) {
+      _toast('재분류할 신호가 없어요');
+      return;
+    }
+    final cat = await _pickCategory(cur);
+    if (cat == null || cat == cur) return;
+    try {
+      await widget.api.recategorizeSignals(sids, cat);
+      await _load();
+      _toast('${_catFull[cat] ?? cat}(으)로 옮겼어요');
+    } catch (_) {
+      _toast('변경 실패');
+    }
+  }
+
+  static const _catFull = {
+    'action_needed': '당장 처리', 'attention': '관심', 'acquaintance': '지인',
+    'low': '일반', 'spam': '스팸',
+  };
+
+  Future<String?> _pickCategory(String cur) {
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: OracleColors.paper,
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+            child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('카테고리 바꾸기', style: OracleType.label)),
+          ),
+          for (final e in _catFull.entries)
+            ListTile(
+              title: Text(e.value, style: OracleType.userBody),
+              trailing: e.key == cur
+                  ? const Icon(Icons.check,
+                      size: 18, color: OracleColors.vermilion)
+                  : null,
+              onTap: () => Navigator.pop(context, e.key),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _openApp(String pkg) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await AndroidIntent(
+        action: 'android.intent.action.MAIN',
+        package: pkg,
+        category: 'android.intent.category.LAUNCHER',
+        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+      ).launch();
+    } catch (_) {
+      _toast('앱을 열 수 없어요');
+    }
+  }
+
+  Future<void> _openUrl(String url) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await AndroidIntent(
+        action: 'android.intent.action.VIEW',
+        data: url,
+        flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+      ).launch();
+    } catch (_) {
+      _toast('링크를 열 수 없어요');
+    }
+  }
+
+  /// 앱 열기·링크 열기 버튼 줄 — 알림 출처 앱(패키지) + 본문 URL이 있을 때만.
+  Widget? _openRow(Map<String, dynamic> src) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+    final app = (src['app'] as String?)?.trim() ?? '';
+    final urls = (src['urls'] as List?)?.cast<String>() ?? const [];
+    if (app.isEmpty && urls.isEmpty) return null;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, top: 6),
+      child: Wrap(spacing: 8, runSpacing: 4, children: [
+        if (app.isNotEmpty)
+          _miniBtn(Icons.open_in_new, '앱 열기', () => _openApp(app)),
+        for (final u in urls.take(2))
+          _miniBtn(Icons.link, '링크', () => _openUrl(u)),
+      ]),
+    );
+  }
+
+  Widget _miniBtn(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+        decoration: BoxDecoration(
+          border: Border.all(color: OracleColors.hairline),
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 13, color: OracleColors.gray),
+          const SizedBox(width: 4),
+          Text(label,
+              style: OracleType.label.copyWith(color: OracleColors.gray)),
+        ]),
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _visible(String field) {
@@ -235,6 +366,7 @@ class _DeskScreenState extends State<DeskScreen>
   // ── 당장 처리 ───────────────────────────────────────────────
   Widget _actionRow(Map<String, dynamic> a) {
     final ts = DateTime.tryParse(a['ts'] as String? ?? '');
+    final openRow = _openRow(a);
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
@@ -267,15 +399,20 @@ class _DeskScreenState extends State<DeskScreen>
                   ],
                 ),
                 const SizedBox(height: 2),
-                Text(a['summary'] as String? ?? '',
-                    style: OracleType.journal.copyWith(
-                        fontSize: 15,
-                        height: 22 / 15,
-                        color: OracleColors.inkSoft)),
-                // 리마인더로 보내기 (나중에 처리할 것)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: InkWell(
+                GestureDetector(
+                  // 길게눌러 분류 변경 (잘못 '당장 처리'로 잡힌 것 강등 등)
+                  onLongPress: () => _recategorize(
+                      (a['sids'] as List?)?.cast<String>() ?? const [],
+                      'action_needed'),
+                  child: Text(a['summary'] as String? ?? '',
+                      style: OracleType.journal.copyWith(
+                          fontSize: 15,
+                          height: 22 / 15,
+                          color: OracleColors.inkSoft)),
+                ),
+                Row(children: [
+                  // 리마인더로 보내기 (나중에 처리할 것)
+                  InkWell(
                     onTap: () => _promoteToReminder(a),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -284,7 +421,8 @@ class _DeskScreenState extends State<DeskScreen>
                               .copyWith(color: OracleColors.gray)),
                     ),
                   ),
-                ),
+                ]),
+                if (openRow != null) openRow,
               ],
             ),
           ),
@@ -422,8 +560,10 @@ class _DeskScreenState extends State<DeskScreen>
     final cat = g['category'] as String? ?? 'low';
     final count = (g['count'] as num?)?.toInt() ?? 0;
     final lines = (g['lines'] as List?)?.cast<String>() ?? const [];
+    final sids = (g['sids'] as List?)?.cast<String>() ?? const [];
     final open = _expanded.contains(sender);
     final shown = open ? lines : lines.take(1).toList();
+    final openRow = _openRow(g);
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Column(
@@ -432,6 +572,7 @@ class _DeskScreenState extends State<DeskScreen>
           InkWell(
             onTap: () => setState(() =>
                 open ? _expanded.remove(sender) : _expanded.add(sender)),
+            onLongPress: () => _recategorize(sids, cat),  // 길게눌러 카테고리 변경
             child: Row(
               children: [
                 _catChip(cat),
@@ -465,6 +606,7 @@ class _DeskScreenState extends State<DeskScreen>
               child: Text('+${lines.length - 1}건 더',
                   style: OracleType.label.copyWith(color: OracleColors.faint)),
             ),
+          if (openRow != null) openRow,
         ],
       ),
     );

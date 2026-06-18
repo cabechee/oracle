@@ -397,6 +397,31 @@ class OracleApi {
     }
   }
 
+  /// 확인 취소(실행취소) — 방금 확인한 항목을 다시 데스크에 띄운다.
+  Future<void> undismissDashboard(String key) async {
+    final body = jsonEncode({'key': key});
+    await _req(
+        'POST /dashboard/undismiss',
+        () => http.post(Uri.parse('$baseUrl/dashboard/undismiss'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: body),
+        sent: body);
+  }
+
+  /// 신호 카테고리 직접 변경 — 그 신호들을 관심/지인/일반/스팸/당장 처리로 재분류.
+  Future<void> recategorizeSignals(List<String> sids, String category) async {
+    final body = jsonEncode({'signal_ids': sids, 'category': category});
+    final resp = await _req(
+        'POST /signals/recategorize',
+        () => http.post(Uri.parse('$baseUrl/signals/recategorize'),
+            headers: {'Content-Type': 'application/json', ...authHeaders},
+            body: body),
+        sent: body);
+    if (resp.statusCode != 200) {
+      throw Exception('recategorize 실패: ${resp.statusCode}');
+    }
+  }
+
   /// companion 한마디 — event(checkin/arrive_home 등) → {speaker, text, alias}.
   Future<Map<String, dynamic>> companionSay(String event,
       {String? place, String? speaker}) async {
