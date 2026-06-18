@@ -49,7 +49,11 @@ object Geo {
     /// 현재 연결된 WiFi SSID (위치 권한 필요). 없으면 null.
     @Suppress("DEPRECATION")
     fun wifiSsid(ctx: Context): String? {
-        return try {
+        // 안드12+(API31)에선 WifiManager.connectionInfo가 백그라운드서 SSID를 가린다(<unknown ssid>).
+        // → WifiWatcher(FLAG_INCLUDE_LOCATION_INFO NetworkCallback)가 Prefs에 적어둔 값을 우선 사용.
+        val cached = Prefs.wifiSsid(ctx).trim()
+        if (cached.isNotEmpty()) return cached
+        return try {   // 레거시 폴백(안드11 이하·콜백 미동작 시)
             val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
                 ?: return null
             val raw = wm.connectionInfo?.ssid ?: return null

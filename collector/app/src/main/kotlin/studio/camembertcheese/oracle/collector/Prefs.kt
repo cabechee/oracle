@@ -115,6 +115,9 @@ object Prefs {
     /// BT 리시버가 적는 현재 연결된 기기명(연결 시 기기명, 끊기면 "").
     fun btConnected(ctx: Context): String = sp(ctx).getString(K_BTCONN, "") ?: ""
     fun setBtConnected(ctx: Context, v: String) = sp(ctx).edit().putString(K_BTCONN, v).apply()
+    /// WifiWatcher(NetworkCallback)가 적는 현재 WiFi SSID — 안드12+ getConnectionInfo 우회.
+    fun wifiSsid(ctx: Context): String = sp(ctx).getString("wifi_ssid", "") ?: ""
+    fun setWifiSsid(ctx: Context, v: String) = sp(ctx).edit().putString("wifi_ssid", v).apply()
 
     fun places(ctx: Context): String = sp(ctx).getString(K_PLACES, "[]") ?: "[]"
     fun placesFetchedAt(ctx: Context): Long = sp(ctx).getLong(K_PLACES_AT, 0L)

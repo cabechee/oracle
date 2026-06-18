@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <!-- 현재 WiFi SSID 감지(NetworkCallback) — registerNetworkCallback에 필요 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- BT 연결 기기명 읽기(차 오디오 등) -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
 

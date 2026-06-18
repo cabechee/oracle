@@ -6,11 +6,18 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.wifi.WifiInfo
 import android.os.Build
 import android.os.IBinder
 import org.json.JSONArray
@@ -24,12 +31,19 @@ class CollectorService : Service() {
     @Volatile private var running = false
     private var worker: Thread? = null
     private var btWatcher: BtWatcher? = null
+    // BT 프로필 프록시(차 오디오 연결 감지) — ACL_CONNECTED 브로드캐스트가 기기따라 안 와서
+    // (특히 삼성/안드14) 매 루프 폴링으로 보강. 연결되면 그 기기명을 Prefs에.
+    @Volatile private var headsetProxy: BluetoothProfile? = null
+    @Volatile private var a2dpProxy: BluetoothProfile? = null
+    private var wifiCb: ConnectivityManager.NetworkCallback? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         registerBt()
+        setupBtProxies()
+        registerWifi()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -45,10 +59,56 @@ class CollectorService : Service() {
         running = false
         worker?.interrupt()
         btWatcher?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        closeBtProxies()
+        wifiCb?.let {
+            try {
+                (getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)
+                    ?.unregisterNetworkCallback(it)
+            } catch (_: Exception) {}
+        }
         super.onDestroy()
     }
 
+    /// 현재 WiFi SSID 감지 — 안드12+(API31)에선 NetworkCallback에 FLAG_INCLUDE_LOCATION_INFO를
+    /// 줘야 SSID가 안 가려진다(위치 권한 필요, 보유). 콜백이 Prefs에 SSID를 적고 Geo.wifiSsid가 읽음.
+    /// API<31은 레거시 getConnectionInfo가 동작하므로 콜백 불필요.
+    private fun registerWifi() {
+        if (Build.VERSION.SDK_INT < 31) { L.i("WiFi 콜백 스킵(SDK<31, 레거시)"); return }
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: run { L.i("WiFi: ConnectivityManager 없음"); return }
+            val cb = object : ConnectivityManager.NetworkCallback(
+                ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO) {
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return
+                    val info = caps.transportInfo as? WifiInfo
+                    val ssid = (info?.ssid ?: "").replace("\"", "").trim()
+                    // 신호세기 변동마다 불려서, 실제 SSID가 바뀔 때만 기록(로그·prefs 둘 다).
+                    if (ssid.isNotEmpty() && ssid != "<unknown ssid>"
+                        && Prefs.wifiSsid(applicationContext) != ssid) {
+                        Prefs.setWifiSsid(applicationContext, ssid)
+                        L.i("WiFi 연결: $ssid")
+                    }
+                }
+                override fun onLost(network: Network) {
+                    if (Prefs.wifiSsid(applicationContext).isNotEmpty()) {
+                        Prefs.setWifiSsid(applicationContext, "")
+                        L.i("WiFi 끊김")
+                    }
+                }
+            }
+            val req = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
+            cm.registerNetworkCallback(req, cb)
+            wifiCb = cb
+            L.i("WiFi 콜백 등록됨(FLAG_INCLUDE_LOCATION_INFO)")
+        } catch (e: Exception) {
+            L.i("WiFi 콜백 등록 실패: ${e.message}")
+        }
+    }
+
     /// BT 연결 감지 런타임 등록 — ACL_CONNECTED는 정적 등록이 막혀(암시적 제한) 서비스가 단다.
+    /// (브로드캐스트는 빠른 길. 기기따라 안 오므로 프록시 폴링이 정설.)
     private fun registerBt() {
         try {
             val w = BtWatcher()
@@ -63,6 +123,83 @@ class CollectorService : Service() {
                 registerReceiver(w, f)
             }
             btWatcher = w
+        } catch (_: Exception) {
+        }
+    }
+
+    /// HFP/A2DP 프로필 프록시 확보 — 비동기로 붙고(보통 수백 ms), 이후 connectedDevices를 폴링.
+    private fun setupBtProxies() {
+        try {
+            val mgr = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager ?: return
+            val adapter = mgr.adapter ?: return
+            val listener = object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                    when (profile) {
+                        BluetoothProfile.HEADSET -> headsetProxy = proxy
+                        BluetoothProfile.A2DP -> a2dpProxy = proxy
+                    }
+                    L.i("BT 프록시 연결됨: profile=$profile")
+                }
+                override fun onServiceDisconnected(profile: Int) {
+                    when (profile) {
+                        BluetoothProfile.HEADSET -> headsetProxy = null
+                        BluetoothProfile.A2DP -> a2dpProxy = null
+                    }
+                }
+            }
+            adapter.getProfileProxy(this, listener, BluetoothProfile.HEADSET)
+            adapter.getProfileProxy(this, listener, BluetoothProfile.A2DP)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun closeBtProxies() {
+        try {
+            val mgr = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            val adapter = mgr?.adapter ?: return
+            headsetProxy?.let { adapter.closeProfileProxy(BluetoothProfile.HEADSET, it) }
+            a2dpProxy?.let { adapter.closeProfileProxy(BluetoothProfile.A2DP, it) }
+        } catch (_: Exception) {
+        }
+    }
+
+    /// 현재 연결된 등록 장소(bt) 기기명 폴링 → Prefs.btConnected 갱신(차 등). 프록시 미준비면 건너뜀.
+    /// LocationCollector는 Prefs.btConnected만 보므로 브로드캐스트/폴링 어느 쪽이 채워도 동작.
+    private fun pollBtConnected(ctx: Context) {
+        if (headsetProxy == null && a2dpProxy == null) return   // 미준비 — 브로드캐스트 값 보존
+        val names = ArrayList<String>()
+        try {
+            for (p in listOfNotNull(headsetProxy, a2dpProxy)) {
+                for (d in p.connectedDevices) {
+                    val n = try { d.name } catch (e: SecurityException) { null }
+                    if (!n.isNullOrBlank() && !names.contains(n)) names.add(n)
+                }
+            }
+        } catch (_: Exception) {
+            return
+        }
+        val places = PlacesCache.get(ctx)
+        var chosen = ""                                          // 등록 장소 BT만 추적(이어폰 등 무시)
+        for (n in names) {
+            if (PlacesCache.byBt(places, n) != null) { chosen = n; break }
+        }
+        if (Prefs.btConnected(ctx) != chosen) {
+            L.i("BT 폴링 변화: '${Prefs.btConnected(ctx)}' -> '$chosen'  [연결=$names]")
+            Prefs.setBtConnected(ctx, chosen)
+        }
+    }
+
+    /// 라이브 상태 + 최근 로그를 백엔드에 보고 — 어드민 📍 장소서 현재 WiFi·위치·로그 확인(adb 대체).
+    private fun reportStatus(ctx: Context) {
+        try {
+            val status = JSONObject()
+                .put("device_id", Prefs.deviceId(ctx))
+                .put("wifi", Geo.wifiSsid(ctx) ?: "")
+                .put("place", Prefs.visitPlace(ctx))
+                .put("visit_on", Prefs.visitOn(ctx))
+                .put("bt", Prefs.btConnected(ctx))
+                .put("logs", JSONArray(L.snapshot()))
+            Backend.reportStatus(ctx, status)
         } catch (_: Exception) {
         }
     }
@@ -87,6 +224,7 @@ class CollectorService : Service() {
                     if (collectLoc) {
                         val loc = Backend.fetchLocationConfig(applicationContext)
                         val skip = loc == null || loc.optBoolean("skip_on_known_wifi", true)
+                        pollBtConnected(applicationContext)   // 차 BT 연결 폴링(브로드캐스트 보강)
                         LocationCollector.tick(applicationContext, skip)
                         sleepMs = ((loc?.optInt("poll_interval_sec", 60) ?: 60)
                             .coerceAtLeast(15)) * 1000L
@@ -95,6 +233,8 @@ class CollectorService : Service() {
                     }
                     // 정시 체크인 — 위치와 완전 별개. 서버가 '이 시에 안 보냈으면' 게이팅.
                     tryCheckin(applicationContext)
+                    // 라이브 상태 보고(현재 WiFi·위치·BT·최근 로그) — 어드민서 adb 없이 확인.
+                    reportStatus(applicationContext)
                 } else {
                     sleepMs = syncMin * 60_000L
                 }
@@ -144,8 +284,13 @@ class CollectorService : Service() {
         fun syncOnce(ctx: Context, cfg: JSONObject? = null): Boolean {
             val sms = if (cfg?.optBoolean("collect_sms", true) != false)
                 Collectors.unreadSms(ctx) else JSONArray()
+            // lastSync 리셋(재설치 등으로 0)이면 통화기록 전체(최근 20건=수일~수주 전까지)를
+            // 새 부재중으로 쏟아내지 않게 2시간 베이스라인만 — 직전에 놓친 건 잡되 묵은 건 무시.
+            val callSince = Prefs.lastSync(ctx).let {
+                if (it <= 0L) System.currentTimeMillis() - 2 * 3600_000L else it
+            }
             val calls = if (cfg?.optBoolean("collect_calls", true) != false)
-                Collectors.missedCalls(ctx, Prefs.lastSync(ctx)) else JSONArray()
+                Collectors.missedCalls(ctx, callSince) else JSONArray()
             val notifs = if (cfg?.optBoolean("collect_notifications", true) != false)
                 Prefs.drainNotifs(ctx) else JSONArray()
             val res = Backend.syncSignals(ctx, sms, calls, notifs)

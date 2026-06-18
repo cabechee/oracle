@@ -3,10 +3,10 @@ package studio.camembertcheese.oracle.collector
 import android.content.Context
 import org.json.JSONArray
 
-/// 위치 체류·이동 감지 → **여정 기록**(집→차→사무실→차→집) + 도착 시 말 걸기.
+/// 위치 체류·이동 감지 → **여정 기록**(집→차→사무실→차→집) + 베르·쿠키 수다(banter).
 ///
-/// 기록(여정)과 말 걸기를 분리: 떠날 때마다 그 구간을 silent로 /visits에 남기고(데이터),
-/// 말 걸기는 '도착'에만 한다(차 탑승 포함). 시간 체크인(정시)과도 완전 별개.
+/// 기록(여정)과 수다를 분리: 떠날 때마다 그 구간을 silent로 /visits에 남기고(데이터),
+/// 수다는 이동(나섬·차탐=추측)·도착(인사)에 흐름으로 건다. 시간 체크인(정시)과도 완전 별개.
 /// BT(차)→WiFi→GPS 순. Flutter location_task_handler 이식 + /places 일반화.
 object LocationCollector {
 
@@ -26,20 +26,31 @@ object LocationCollector {
             val lastBt = Prefs.btPlace(ctx)
             if ((btPlace ?: "") != lastBt) {
                 if (lastBt.isNotBlank()) {
-                    // 하차 — 탑승~하차를 이동 구간으로 기록(예: "차" 25분). 말 걸기는 도착 때.
+                    // 하차 — 탑승~하차를 이동 구간으로 기록(예: "차" 25분).
+                    L.i("BT 하차: '$lastBt' — 이동구간 기록 + 주차 지정")
                     val board = Prefs.btBoardTime(ctx)
                     recordSegment(ctx, lastBt, 0.0, 0.0,
                         if (board > 0L) board else now, now)
                     Prefs.setBtBoardTime(ctx, 0L)
+                    // 주차 위치 지정(GPS) + '어디 세웠는지 기록할까요?' 말 걸기.
+                    val loc = Geo.currentLocation(ctx)
+                    if (loc != null) {
+                        val r = Backend.recordParking(ctx, loc.latitude, loc.longitude)
+                        val text = r?.optString("text")?.trim() ?: ""
+                        if (text.isNotEmpty()) {
+                            Notify.companion(ctx, r!!.optString("speaker"), text)
+                        }
+                    }
                 }
                 if (btPlace != null) {
-                    // 탑승 — 머물던 곳(집 등)을 먼저 기록(여정), 그다음 '차 탔어요?' 말 걸기.
+                    // 탑승 — 머물던 곳(집 등)을 먼저 기록(여정), 그다음 '차 탔다, 어디 가지?' 수다.
+                    L.i("BT 탑승: '$btPlace' — 이동 시작(banter board)")
                     if (Prefs.visitOn(ctx)) {
                         endStay(ctx, now)
                         Prefs.setVisitOn(ctx, false)
                     }
                     Prefs.setBtBoardTime(ctx, now)
-                    say(ctx, btPlace)
+                    banterFlow(ctx, "board", btPlace)
                 }
                 Prefs.setBtPlace(ctx, btPlace ?: "")
             }
@@ -75,13 +86,17 @@ object LocationCollector {
                 val start = Prefs.anchorStart(ctx).let { if (it == 0L) now else it }
                 val stayedMin = ((now - start) / 60000).toInt()
                 if (gpsPlace != null || stayedMin >= STAY_MINUTES) {
+                    L.i("GPS 도착: '${gpsPlace ?: "새 곳"}' ${stayedMin}분 — banter arrive")
                     Prefs.setVisitOn(ctx, true)
                     Prefs.setVisitPlace(ctx, gpsPlace ?: "")
-                    say(ctx, gpsPlace)            // 도착 말 걸기 (이름 있으면 그곳, 없으면 새 곳)
+                    banterFlow(ctx, "arrive", gpsPlace)   // 도착 인사(그곳 주인이 맞이)
                 }
             } else {
-                if (visitOn) {                    // 떠남 — 머물던 곳을 여정에 기록(silent)
+                if (visitOn) {                    // 떠남 — 머물던 곳을 여정에 기록(silent) + 수다(궁금)
+                    val left = Prefs.visitPlace(ctx)
                     endStay(ctx, now)
+                    L.i("GPS 나섬: '$left' — banter leave")
+                    banterFlow(ctx, "leave", left.ifBlank { null })
                 }
                 setAnchor(ctx, lat, lng, now)
             }
@@ -98,7 +113,8 @@ object LocationCollector {
         Prefs.setAnchor(ctx, 0.0, 0.0, now)
         Prefs.setVisitOn(ctx, true)
         Prefs.setVisitPlace(ctx, place)
-        say(ctx, place)
+        L.i("WiFi 도착: '$place' — banter arrive")
+        banterFlow(ctx, "arrive", place)
     }
 
     /// 머물던 곳(현재 anchor/visitPlace)을 이동 직전에 여정으로 기록(silent).
@@ -114,11 +130,13 @@ object LocationCollector {
         Prefs.setVisitPlace(ctx, "")
     }
 
-    /// 도착 말 걸기 — 서버 게이팅 후 비어있지 않으면 알림. (떠남/이동엔 말 안 검 — 기록만)
-    private fun say(ctx: Context, place: String?) {
-        val r = Backend.companionSay(ctx, "arrive_place", place) ?: return
-        val text = r.optString("text").trim()
-        if (text.isNotEmpty()) Notify.companion(ctx, r.optString("speaker"), text)
+    /// 베르·쿠키 수다 — 서버가 흐름에 각 턴 기록. notify(도착 인사)가 있으면 알림 표시.
+    /// 이동·추측(leave·board)은 notify 비어 흐름에만 조용히(자기들끼리). 게이팅·실패면 조용.
+    private fun banterFlow(ctx: Context, event: String, place: String?) {
+        val r = Backend.banter(ctx, event, place) ?: return
+        val notify = r.optJSONObject("notify")
+        val text = notify?.optString("text")?.trim() ?: ""
+        if (text.isNotEmpty()) Notify.companion(ctx, notify!!.optString("speaker"), text)
     }
 
     /// 여정 한 구간(체류 또는 이동)을 /visits에 silent 기록.

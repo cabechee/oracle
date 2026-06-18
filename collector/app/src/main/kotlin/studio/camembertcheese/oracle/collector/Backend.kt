@@ -39,6 +39,26 @@ object Backend {
         return post(Prefs.baseUrl(ctx) + "/companion/say", body)
     }
 
+    /// 주차 위치 지정(차에서 내림) — GPS 기록 + '어디 세웠는지 기록할까요?' 말 걸기 반환.
+    fun recordParking(ctx: Context, lat: Double, lng: Double): JSONObject? {
+        val body = JSONObject()
+            .put("lat", lat).put("lng", lng)
+            .put("ts", System.currentTimeMillis())
+        return post(Prefs.baseUrl(ctx) + "/parking", body)
+    }
+
+    /// 동반자끼리 수다 — 아빠 이동/도착에 베르·쿠키가 흐름에 주고받음(서버가 흐름에 기록).
+    /// event: arrive | leave | board. 반환 notify={speaker,text}는 도착(인사) 때만 채워짐.
+    fun banter(ctx: Context, event: String, place: String?): JSONObject? {
+        val body = JSONObject().put("event", event)
+        if (place != null) body.put("place", place)
+        return post(Prefs.baseUrl(ctx) + "/companion/banter", body)
+    }
+
+    /// 라이브 상태 보고 — 현재 WiFi·위치·BT·최근 로그(어드민 표시·adb 대체).
+    fun reportStatus(ctx: Context, status: JSONObject): JSONObject? =
+        post(Prefs.baseUrl(ctx) + "/collector-status", status)
+
     /// 방문 기록(체류·이동 구간). silent=true면 여정 기록만(말 걸기 생략).
     fun recordVisit(ctx: Context, place: String?, lat: Double, lng: Double,
                     startMs: Long, endMs: Long, minutes: Int,
