@@ -59,6 +59,12 @@ object Backend {
     fun reportStatus(ctx: Context, status: JSONObject): JSONObject? =
         post(Prefs.baseUrl(ctx) + "/collector-status", status)
 
+    /// 저장 안 된 새 곳 15분+ 체류 — '여기 어디예요?' 질문 + 좌표 동봉(답하면 임시 장소 저장).
+    fun askPlace(ctx: Context, lat: Double, lng: Double): JSONObject? {
+        val body = JSONObject().put("lat", lat).put("lng", lng)
+        return post(Prefs.baseUrl(ctx) + "/companion/askplace", body)
+    }
+
     /// 방문 기록(체류·이동 구간). silent=true면 여정 기록만(말 걸기 생략).
     fun recordVisit(ctx: Context, place: String?, lat: Double, lng: Double,
                     startMs: Long, endMs: Long, minutes: Int,

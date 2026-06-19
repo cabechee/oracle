@@ -54,7 +54,15 @@ object LocationCollector {
                 }
                 Prefs.setBtPlace(ctx, btPlace ?: "")
             }
-            if (btPlace != null) return   // 차 등에 있으면 GPS 스킵(이동 중)
+            if (btPlace != null) {
+                // BT 장소. **고정 장소(좌표 등록됨)**면 거기 있는 것 — GPS 스킵(점2 규칙).
+                // **차 등 이동체(좌표 없음)**면 스펙대로 '차여도 1분마다' GPS로 현재 위치를 추적하되,
+                // 움직이는 중이라 체류/도착 판정은 안 한다(앵커만 따라가게 갱신 → 하차 후 도착 매끄럽게).
+                if (PlacesCache.coordsOf(places, btPlace) != null) return   // 고정 BT 장소
+                val loc = Geo.currentLocation(ctx)
+                if (loc != null) Prefs.setAnchor(ctx, loc.latitude, loc.longitude, now)
+                return
+            }
 
             // 1) WiFi — 등록 장소 WiFi면 GPS 없이 즉시 그 장소.
             if (skipOnWifi) {
@@ -66,9 +74,8 @@ object LocationCollector {
                 }
             }
 
-            // 2) GPS — 체류 확정 중엔 2틱마다만(배터리)
+            // 2) GPS — WiFi·BT로 확정 안 된 경우 **1분마다 항상** 확인(배터리는 WiFi/BT 매칭이 절약).
             val visitOn = Prefs.visitOn(ctx)
-            if (visitOn && tickN % 2 != 0) return
             val loc = Geo.currentLocation(ctx) ?: return
             val lat = loc.latitude
             val lng = loc.longitude
@@ -86,10 +93,16 @@ object LocationCollector {
                 val start = Prefs.anchorStart(ctx).let { if (it == 0L) now else it }
                 val stayedMin = ((now - start) / 60000).toInt()
                 if (gpsPlace != null || stayedMin >= STAY_MINUTES) {
-                    L.i("GPS 도착: '${gpsPlace ?: "새 곳"}' ${stayedMin}분 — banter arrive")
                     Prefs.setVisitOn(ctx, true)
                     Prefs.setVisitPlace(ctx, gpsPlace ?: "")
-                    banterFlow(ctx, "arrive", gpsPlace)   // 도착 인사(그곳 주인이 맞이)
+                    if (gpsPlace != null) {
+                        L.i("GPS 도착(등록): '$gpsPlace' — banter arrive")
+                        banterFlow(ctx, "arrive", gpsPlace)   // 저장된 곳 — 거주자 인사
+                    } else {
+                        // 저장 안 된 새 곳 15분+ — '아빠 왔다 반겨야지'(엉뚱) 대신 어딘지 물어봄.
+                        L.i("GPS 체류 ${stayedMin}분(미등록) — 여기 어디? 물어봄")
+                        askPlace(ctx, lat, lng)
+                    }
                 }
             } else {
                 if (visitOn) {                    // 떠남 — 머물던 곳을 여정에 기록(silent) + 수다(궁금)
@@ -137,6 +150,13 @@ object LocationCollector {
         val notify = r.optJSONObject("notify")
         val text = notify?.optString("text")?.trim() ?: ""
         if (text.isNotEmpty()) Notify.companion(ctx, notify!!.optString("speaker"), text)
+    }
+
+    /// 저장 안 된 새 곳 15분+ 체류 — '여기 어디예요?' 물어봄(좌표 동봉 → 답하면 임시 장소 저장).
+    private fun askPlace(ctx: Context, lat: Double, lng: Double) {
+        val r = Backend.askPlace(ctx, lat, lng) ?: return
+        val text = r.optString("text").trim()
+        if (text.isNotEmpty()) Notify.companion(ctx, r.optString("speaker"), text)
     }
 
     /// 여정 한 구간(체류 또는 이동)을 /visits에 silent 기록.

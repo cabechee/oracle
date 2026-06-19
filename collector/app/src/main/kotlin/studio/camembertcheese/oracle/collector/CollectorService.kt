@@ -36,6 +36,10 @@ class CollectorService : Service() {
     @Volatile private var headsetProxy: BluetoothProfile? = null
     @Volatile private var a2dpProxy: BluetoothProfile? = null
     private var wifiCb: ConnectivityManager.NetworkCallback? = null
+    // BT 폴링 디바운스 — 차 BT 연결 깜빡임(flapping)에 가짜 탑승/하차가 뜨지 않게.
+    @Volatile private var btBaselined = false   // 재시작 직후 첫 폴은 기준선만(이벤트 X)
+    private var btCandidate: String? = null      // 바뀐 값 후보(연속 확인용)
+    private var btCandidateCount = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -183,9 +187,34 @@ class CollectorService : Service() {
         for (n in names) {
             if (PlacesCache.byBt(places, n) != null) { chosen = n; break }
         }
-        if (Prefs.btConnected(ctx) != chosen) {
-            L.i("BT 폴링 변화: '${Prefs.btConnected(ctx)}' -> '$chosen'  [연결=$names]")
+        // 재시작 직후 — 실제 현재 상태로 '기준선'만 맞춘다(탑승/하차 이벤트 없이).
+        // 안 그러면 stale btConnected('차')에서 ''로 바뀌며 가짜 '하차·주차'가 뜬다(09:34 버그).
+        if (!btBaselined) {
+            btBaselined = true
+            if (Prefs.btConnected(ctx) != chosen) {
+                Prefs.setBtConnected(ctx, chosen)
+                Prefs.setBtPlace(ctx, if (chosen.isBlank()) ""
+                                      else (PlacesCache.byBt(places, chosen) ?: ""))
+                L.i("BT 기준선 동기화: '$chosen' (재시작 — 이벤트 없이)")
+            }
+            return
+        }
+        if (chosen == Prefs.btConnected(ctx)) {                  // 변화 없음 — 후보 리셋
+            btCandidate = null; btCandidateCount = 0
+            return
+        }
+        // 변화 감지 — 차 BT 깜빡임(connect/disconnect/reconnect) 방지: 2회 연속 같아야 확정.
+        if (chosen == btCandidate) {
+            btCandidateCount++
+        } else {
+            btCandidate = chosen; btCandidateCount = 1
+        }
+        if (btCandidateCount >= 2) {
+            L.i("BT 폴링 변화(확정): '${Prefs.btConnected(ctx)}' -> '$chosen'  [연결=$names]")
             Prefs.setBtConnected(ctx, chosen)
+            btCandidate = null; btCandidateCount = 0
+        } else {
+            L.i("BT 변화 후보(대기 — 깜빡임 방지): '$chosen'  [연결=$names]")
         }
     }
 
@@ -199,6 +228,10 @@ class CollectorService : Service() {
                 .put("visit_on", Prefs.visitOn(ctx))
                 .put("bt", Prefs.btConnected(ctx))
                 .put("logs", JSONArray(L.snapshot()))
+            // 현재 GPS(앵커) — 차 등 이동 중에도 1분마다 갱신돼 어디 있는지 보임.
+            val la = Prefs.anchorLat(ctx)
+            val lo = Prefs.anchorLng(ctx)
+            if (la != null && lo != null) status.put("lat", la).put("lng", lo)
             Backend.reportStatus(ctx, status)
         } catch (_: Exception) {
         }
@@ -255,17 +288,25 @@ class CollectorService : Service() {
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= 34) {
-            // 위치 권한 있으면 location 타입 포함(없으면 dataSync만 — FGS 시작 거부 방지).
-            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                == PackageManager.PERMISSION_GRANTED
-            ) {
-                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        // ⚠️ 안드15(API35)에서 **dataSync FGS는 6시간/일 제한** — 만료되면 OS가 서비스를 멈추고,
+        // START_STICKY 재시작이 startForeground(dataSync)에서 ForegroundServiceStartNotAllowedException로
+        // 크래시 → ~6시간마다 재시작/가짜 주차의 근본 원인이었다.
+        // **location 타입은 시간제한 없음** — 위치권한 있으면 location만 쓴다(신호 수집도 그 FGS 안에서 함).
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                val type = if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                else
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                startForeground(1, notif, type)
+            } else {
+                startForeground(1, notif)
             }
-            startForeground(1, notif, type)
-        } else {
-            startForeground(1, notif)
+        } catch (e: Exception) {
+            // FGS 시작 거부(시간제한·백그라운드 제약 등) — 크래시(무한 재시작) 대신 무타입 폴백, 그래도 안 되면 포기.
+            L.i("startForeground 실패: ${e.message}")
+            try { startForeground(1, notif) } catch (_: Exception) {}
         }
     }
 

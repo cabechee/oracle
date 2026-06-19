@@ -19,23 +19,37 @@ object PlacesCache {
         return try { JSONArray(Prefs.places(ctx)) } catch (e: Exception) { JSONArray() }
     }
 
-    /// 연결된 BT 기기명이 어떤 장소의 bt와 같으면 그 장소 이름.
+    /// 한 장소의 다중 필드(bts/wifis) 또는 구 단일(bt/wifi) 중 target과 일치하는 게 있나(OR).
+    private fun matchesAny(p: JSONObject, plural: String, single: String, target: String): Boolean {
+        val arr = p.optJSONArray(plural)
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                if (arr.optString(i).trim() == target) return true
+            }
+            return false
+        }
+        return p.optString(single).trim() == target   // 구 단일 필드 폴백
+    }
+
+    /// 연결된 BT 기기명이 어떤 장소의 bts(여러 개) 중 하나라도 같으면 그 장소 이름.
     fun byBt(places: JSONArray, btDevice: String): String? {
         if (btDevice.isBlank()) return null
+        val t = btDevice.trim()
         for (i in 0 until places.length()) {
             val p = places.optJSONObject(i) ?: continue
-            if ((p.optString("bt").trim()) == btDevice.trim() && p.optString("name").isNotBlank())
+            if (p.optString("name").isNotBlank() && matchesAny(p, "bts", "bt", t))
                 return p.optString("name")
         }
         return null
     }
 
-    /// 현재 SSID가 어떤 장소의 wifi와 같으면 그 장소 이름.
+    /// 현재 SSID가 어떤 장소의 wifis(여러 개) 중 하나라도 같으면 그 장소 이름.
     fun byWifi(places: JSONArray, ssid: String): String? {
         if (ssid.isBlank()) return null
+        val t = ssid.trim()
         for (i in 0 until places.length()) {
             val p = places.optJSONObject(i) ?: continue
-            if ((p.optString("wifi").trim()) == ssid.trim() && p.optString("name").isNotBlank())
+            if (p.optString("name").isNotBlank() && matchesAny(p, "wifis", "wifi", t))
                 return p.optString("name")
         }
         return null
