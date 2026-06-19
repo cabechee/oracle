@@ -47,6 +47,24 @@ object Backend {
         return post(Prefs.baseUrl(ctx) + "/parking", body)
     }
 
+    /// 출차(주차중→운전중) — '어디 가?' 한마디 + 운행 스레드 시작. {speaker,text} 반환(억제면 빈 text).
+    fun carDeparture(ctx: Context, lat: Double, lng: Double): JSONObject? {
+        val body = JSONObject()
+            .put("lat", lat).put("lng", lng)
+            .put("ts", System.currentTimeMillis())
+        return post(Prefs.baseUrl(ctx) + "/car/departure", body)
+    }
+
+    /// 주차(운전중→주차중) — 주차 위치 기록 + 질문('어디?'/답했으면 '잘 도착했어?').
+    /// silent=true(안전망: 오래 정지 조용히 리셋)면 위치만 남기고 질문 안 함.
+    fun carParking(ctx: Context, lat: Double, lng: Double, silent: Boolean): JSONObject? {
+        val body = JSONObject()
+            .put("lat", lat).put("lng", lng)
+            .put("ts", System.currentTimeMillis())
+            .put("silent", silent)
+        return post(Prefs.baseUrl(ctx) + "/car/parking", body)
+    }
+
     /// 동반자끼리 수다 — 아빠 이동/도착에 베르·쿠키가 흐름에 주고받음(서버가 흐름에 기록).
     /// event: arrive | leave | board. 반환 notify={speaker,text}는 도착(인사) 때만 채워짐.
     fun banter(ctx: Context, event: String, place: String?): JSONObject? {

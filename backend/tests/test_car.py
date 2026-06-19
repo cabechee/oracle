@@ -1,0 +1,185 @@
+"""차량 출차/주차 — 운행 스레드(어디 가?→잘 도착했어?)·안전망 silent·게이팅·임계값."""
+
+from datetime import datetime, timedelta
+
+import companion_config as cc
+import location_config as lc
+from agent import companion
+
+
+class _FakeSettings:
+    def __init__(self, docs=None):
+        self.docs = {d["_id"]: dict(d) for d in (docs or [])}
+
+    def find_one(self, flt):
+        d = self.docs.get(flt.get("_id"))
+        return dict(d) if d else None
+
+    def update_one(self, flt, update, upsert=False):
+        doc = self.docs.setdefault(flt["_id"], {"_id": flt["_id"]})
+        doc.update(update.get("$set", {}))
+
+
+class _FakeConvos:
+    """role + ts>$gt 필터 + ts 오름차순 첫 건 (pymongo find_one(sort=) 흉내)."""
+    def __init__(self, docs=None):
+        self.docs = list(docs or [])
+
+    def find_one(self, flt, sort=None):
+        after = (flt.get("ts") or {}).get("$gt")
+        role = flt.get("role")
+        cand = [d for d in self.docs
+                if d.get("role") == role and (after is None or d["ts"] > after)]
+        cand.sort(key=lambda d: d["ts"])
+        return dict(cand[0]) if cand else None
+
+
+def _capture_speak(monkeypatch):
+    """_speak를 가짜로 — 호출된 (kind, situation) 캡처하고 고정 텍스트 반환."""
+    calls = []
+
+    def fake(kind, situation, speaker=None):
+        calls.append({"kind": kind, "situation": situation, "speaker": speaker})
+        return {"speaker": "베르", "text": "응 거기 어때?", "alias": "x"}
+
+    monkeypatch.setattr(companion, "_speak", fake)
+    return calls
+
+
+# ── 출차: 운행 스레드 시작 ──
+def test_departure_starts_drive_thread(monkeypatch):
+    s = _FakeSettings()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    calls = _capture_speak(monkeypatch)
+    r = companion.car_departure(37.5, 127.0, 1718000000000)
+    assert r["text"] == "응 거기 어때?"
+    assert calls[0]["kind"] == "car"
+    assert "어디 가" in calls[0]["situation"]
+    drive = s.docs["drive"]
+    assert drive["state"] == "driving"
+    assert isinstance(drive["question_ts"], datetime)   # 질문했으니 답 매칭 기준 기록
+
+
+def test_departure_gated_no_question_ts(monkeypatch):
+    s = _FakeSettings()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion, "_speak",
+                        lambda *a, **k: {"speaker": "", "text": "", "alias": ""})
+    companion.car_departure(37.5, 127.0)
+    drive = s.docs["drive"]
+    assert drive["state"] == "driving"
+    assert "question_ts" not in drive    # 억제됐으면 매칭 기준 없음(주차 때 generic)
+
+
+# ── 주차: 답 매칭 / generic / silent ──
+def test_parking_links_destination(monkeypatch):
+    qts = datetime(2026, 6, 19, 14, 0)
+    s = _FakeSettings([{"_id": "drive", "state": "driving", "question_ts": qts}])
+    convos = _FakeConvos([
+        {"role": "user", "text": "강남 가", "ts": qts + timedelta(minutes=1)},
+        {"role": "user", "text": "딴소리", "ts": qts + timedelta(minutes=5)},
+    ])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: convos)
+    import parking
+    recorded = []
+    monkeypatch.setattr(parking, "record",
+                        lambda lat, lng, ts=None: recorded.append((lat, lng)))
+    calls = _capture_speak(monkeypatch)
+    companion.car_parking(37.49, 127.03, 1718000300000)
+    assert recorded == [(37.49, 127.03)]              # 위치는 항상 기록
+    assert "강남" in calls[0]["situation"]            # 출발 첫 답을 목적지로
+    assert "잘 도착" in calls[0]["situation"]
+    assert s.docs["drive"]["state"] == "parked"       # 운행 닫힘
+    assert s.docs["drive"]["question_ts"] is None
+
+
+def test_parking_no_answer_generic(monkeypatch):
+    s = _FakeSettings([{"_id": "drive", "state": "driving"}])   # question_ts 없음
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: _FakeConvos())
+    import parking
+    monkeypatch.setattr(parking, "record", lambda *a, **k: None)
+    calls = _capture_speak(monkeypatch)
+    companion.car_parking(37.49, 127.03)
+    assert "잘 도착" not in calls[0]["situation"]       # 답 없으면 도착 확인 안 함
+    assert "세웠" in calls[0]["situation"]
+
+
+def test_parking_silent_no_question(monkeypatch):
+    s = _FakeSettings([{"_id": "drive", "state": "driving"}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    import parking
+    recorded = []
+    monkeypatch.setattr(parking, "record",
+                        lambda lat, lng, ts=None: recorded.append((lat, lng)))
+    monkeypatch.setattr(companion, "_speak",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("silent엔 말 X")))
+    r = companion.car_parking(37.49, 127.03, silent=True)
+    assert r["text"] == ""
+    assert recorded == [(37.49, 127.03)]              # 위치는 남김(내 차 어디)
+    assert s.docs["drive"]["state"] == "parked"
+
+
+def test_first_user_reply_after(monkeypatch):
+    base = datetime(2026, 6, 19, 14, 0)
+    convos = _FakeConvos([
+        {"role": "assistant", "text": "어디 가?", "ts": base},
+        {"role": "user", "text": "병원", "ts": base + timedelta(minutes=2)},
+        {"role": "user", "text": "두번째", "ts": base + timedelta(minutes=9)},
+    ])
+    monkeypatch.setattr(companion.db, "conversations", lambda: convos)
+    assert companion._first_user_reply_after(base) == "병원"            # 첫 user 답
+    assert companion._first_user_reply_after(base + timedelta(minutes=5)) == "두번째"
+
+
+# ── companion_config: car 게이팅 ──
+def _cc_use(monkeypatch, docs=None):
+    fake = _FakeSettings(docs)
+    monkeypatch.setattr(cc.db, "settings", lambda: fake)
+    return fake
+
+
+def test_car_gating_quiet_vs_day(monkeypatch):
+    _cc_use(monkeypatch)   # 기본 quiet 23~8, car_cooldown 3
+    assert cc.should_speak("car", datetime(2026, 6, 19, 2, 0)) is False   # 새벽 침묵
+    assert cc.should_speak("car", datetime(2026, 6, 19, 14, 0)) is True   # 낮 OK
+
+
+def test_car_disabled(monkeypatch):
+    _cc_use(monkeypatch, [{"_id": "companion", "car_enabled": False}])
+    assert cc.should_speak("car", datetime(2026, 6, 19, 14, 0)) is False
+
+
+def test_car_cooldown(monkeypatch):
+    now = datetime(2026, 6, 19, 14, 0)
+    s = _cc_use(monkeypatch,
+                [{"_id": "companion_state", "last_car": now - timedelta(minutes=1)}])
+    assert cc.should_speak("car", now) is False        # 1분 전 → 쿨다운(3분) 미충족
+    s.docs["companion_state"]["last_car"] = now - timedelta(minutes=5)
+    assert cc.should_speak("car", now) is True
+
+
+def test_car_mark_spoken(monkeypatch):
+    s = _cc_use(monkeypatch)
+    now = datetime(2026, 6, 19, 14, 0)
+    cc.mark_spoken("car", now)
+    assert s.docs["companion_state"]["last_car"] == now
+
+
+# ── location_config: 차량 임계값 ──
+def test_car_thresholds_defaults(monkeypatch):
+    monkeypatch.setattr(lc.db, "settings", lambda: _FakeSettings())
+    cfg = lc.get_config()
+    assert cfg["car_depart_radius_m"] == 200
+    assert cfg["car_park_debounce_ticks"] == 2
+
+
+def test_car_thresholds_clamp(monkeypatch):
+    s = _FakeSettings()
+    monkeypatch.setattr(lc.db, "settings", lambda: s)   # set→get 같은 인스턴스
+    out = lc.set_config({"car_depart_radius_m": 999999, "car_park_debounce_ticks": 0,
+                         "car_stationary_reset_min": 2})
+    assert out["car_depart_radius_m"] == 5000     # hi clamp
+    assert out["car_park_debounce_ticks"] == 1    # lo clamp
+    assert out["car_stationary_reset_min"] == 5   # lo clamp

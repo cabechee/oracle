@@ -51,6 +51,7 @@ class CollectorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Prefs.setCollecting(applicationContext, true)   // 대시보드 토글 — 시작됨
         startForegroundNotif()
         if (!running) {
             running = true
@@ -227,6 +228,7 @@ class CollectorService : Service() {
                 .put("place", Prefs.visitPlace(ctx))
                 .put("visit_on", Prefs.visitOn(ctx))
                 .put("bt", Prefs.btConnected(ctx))
+                .put("car_state", Prefs.carState(ctx))   // 주차중 | 운전중 (어드민 표시)
                 .put("logs", JSONArray(L.snapshot()))
             // 현재 GPS(앵커) — 차 등 이동 중에도 1분마다 갱신돼 어디 있는지 보임.
             val la = Prefs.anchorLat(ctx)
@@ -258,7 +260,7 @@ class CollectorService : Service() {
                         val loc = Backend.fetchLocationConfig(applicationContext)
                         val skip = loc == null || loc.optBoolean("skip_on_known_wifi", true)
                         pollBtConnected(applicationContext)   // 차 BT 연결 폴링(브로드캐스트 보강)
-                        LocationCollector.tick(applicationContext, skip)
+                        LocationCollector.tick(applicationContext, skip, loc)
                         sleepMs = ((loc?.optInt("poll_interval_sec", 60) ?: 60)
                             .coerceAtLeast(15)) * 1000L
                     } else {

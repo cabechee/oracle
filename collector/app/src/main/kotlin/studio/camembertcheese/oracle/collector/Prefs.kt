@@ -65,6 +65,15 @@ object Prefs {
         return arr
     }
 
+    /// 아직 안 보낸 알림 버퍼 개수 — 대시보드 '대기 신호'.
+    fun notifBufferCount(ctx: Context): Int =
+        try { JSONArray(sp(ctx).getString(K_NOTIF_BUF, "[]")).length() } catch (_: Exception) { 0 }
+
+    /// 사용자가 수집을 켰는지(시작/중지 토글 표시용). 서비스 시작 시 true, 명시적 중지 시 false.
+    fun collecting(ctx: Context): Boolean = sp(ctx).getBoolean("ui_collecting", false)
+    fun setCollecting(ctx: Context, v: Boolean) =
+        sp(ctx).edit().putBoolean("ui_collecting", v).apply()
+
     @Synchronized
     fun restoreNotifs(ctx: Context, drained: JSONArray) {
         // 전송 실패 — 비웠던 알림을 되돌린다(그 사이 들어온 것 뒤에 붙임).
@@ -123,4 +132,42 @@ object Prefs {
     fun placesFetchedAt(ctx: Context): Long = sp(ctx).getLong(K_PLACES_AT, 0L)
     fun setPlaces(ctx: Context, json: String, at: Long) =
         sp(ctx).edit().putString(K_PLACES, json).putLong(K_PLACES_AT, at).apply()
+
+    // ── 차량 상태머신(주차중 ⇄ 운전중) ──
+    // 출차 = 차 BT 연결 채로 주차지점서 200m+ 이동. 주차 = 차 BT 해제(디바운스).
+    // 안전망 = 운전중 한참 정지 시 조용히 주차중 리셋. (재시작 시 carBaselined로 가짜이벤트 방지)
+    fun carState(ctx: Context): String = sp(ctx).getString("car_state", "parked") ?: "parked"
+    fun setCarState(ctx: Context, v: String) = sp(ctx).edit().putString("car_state", v).apply()
+
+    /// 주차 위치 = 출차 200m 기준점. 차 BT 연결 순간/주차 시 갱신, 도보론 안 흔듦(차 위치 고정).
+    fun departAnchor(ctx: Context): Pair<Double, Double>? {
+        val la = getD(ctx, "depart_lat"); val lo = getD(ctx, "depart_lng")
+        return if (la != null && lo != null) Pair(la, lo) else null
+    }
+    fun setDepartAnchor(ctx: Context, lat: Double, lng: Double) =
+        sp(ctx).edit().putString("depart_lat", lat.toString())
+            .putString("depart_lng", lng.toString()).apply()
+
+    /// 안전망 정지 감지용 — 기준점 + 마지막으로 (정지반경 밖으로) 움직인 시각.
+    fun driveAnchor(ctx: Context): Pair<Double, Double>? {
+        val la = getD(ctx, "drive_lat"); val lo = getD(ctx, "drive_lng")
+        return if (la != null && lo != null) Pair(la, lo) else null
+    }
+    fun driveLastMove(ctx: Context): Long = sp(ctx).getLong("drive_last_move", 0L)
+    fun setDriveAnchor(ctx: Context, lat: Double, lng: Double, lastMove: Long) =
+        sp(ctx).edit().putString("drive_lat", lat.toString())
+            .putString("drive_lng", lng.toString())
+            .putLong("drive_last_move", lastMove).apply()
+    fun clearDriveAnchor(ctx: Context) =
+        sp(ctx).edit().remove("drive_lat").remove("drive_lng")
+            .remove("drive_last_move").apply()
+
+    /// 운전 중 차 이름(드라이브 구간 라벨). 출차 시 set, 주차 시 "".
+    fun carName(ctx: Context): String = sp(ctx).getString("car_name", "") ?: ""
+    fun setCarName(ctx: Context, v: String) = sp(ctx).edit().putString("car_name", v).apply()
+
+    /// 주차 디바운스 — 연속 BT 해제 틱 수(시동 깜빡임 흡수).
+    fun parkPendingTicks(ctx: Context): Int = sp(ctx).getInt("park_pending_ticks", 0)
+    fun setParkPendingTicks(ctx: Context, v: Int) =
+        sp(ctx).edit().putInt("park_pending_ticks", v).apply()
 }

@@ -61,21 +61,17 @@ def _situation(event: str, place: Optional[str], minutes: Optional[int]) -> str:
     return s
 
 
-def say(event: str, place: Optional[str] = None,
-        speaker: Optional[str] = None,
-        minutes: Optional[int] = None) -> Dict[str, Any]:
-    """이벤트에 맞춰 쿠키/베르 중 하나가 거는 한마디. speaker 미지정이면 랜덤.
+def _speak(kind: str, situation: str,
+           speaker: Optional[str] = None) -> Dict[str, Any]:
+    """게이팅 통과 시 쿠키/베르 중 하나가 situation에 맞춰 거는 한마디(아빠한테 직접).
 
-    반환: {speaker: "쿠키"|"베르", text, alias}. 미설정/실패/게이팅이면 text="".
+    say()·car_departure()·car_parking()의 공통 코어 — 페르소나/말투/맥락/LLM 호출.
+    반환: {speaker, text, alias}. 미설정/실패/게이팅이면 text="".
     """
     now = datetime.now()
-    kind = cc.kind_of(event)
-    # 지금 말 걸 타이밍인가 — 마스터·새벽 조용구간·활동 시간대·텀/쿨다운·이벤트 on/off.
-    # (LLM 호출 전에 막으므로 억제될 땐 비용 0. 빈 text → 폰이 알림 안 띄움)
-    if not cc.event_enabled(event) or not cc.should_speak(kind, now):
+    # 지금 말 걸 타이밍인가 — 마스터·새벽 조용구간·텀/쿨다운. (LLM 전에 막아 억제 시 비용 0)
+    if not cc.should_speak(kind, now):
         return {"speaker": "", "text": "", "alias": "", "gated": True}
-
-    ctx = _situation(event, place, minutes)
     who = speaker if speaker in ("cookie", "berr") else random.choice(["cookie", "berr"])
     if who == "cookie":
         system = personas.current("cookie_identity")
@@ -98,7 +94,7 @@ def say(event: str, place: Optional[str] = None,
     prompt = (
         f"지금은 네가 **먼저** {term}에게 톡 말을 거는 상황이야. {term}가 너한테 무슨 말을 한 게 "
         f"아니라({term}는 아직 아무 말도 안 했어), {term} 생각이 나서 네가 문득 말 거는 거야.\n\n"
-        f"[계기] {ctx}\n\n"
+        f"[계기] {situation}\n\n"
         f"{ctx_block}"
         f"이 상황에 맞춰 {term}에게 짧게 말 걸어 — 한 문장, 길어도 두 문장. 자연스럽고 가볍게, "
         f"부담 주지 말고. {tone} 인사·이름표 없이 그 한마디만. (사용자 호칭은 꼭 '{term}'.)")
@@ -109,8 +105,82 @@ def say(event: str, place: Optional[str] = None,
             cc.mark_spoken(kind, now)   # 텀/쿨다운 기준 시각 갱신 (빈 응답엔 안 함)
         return {"speaker": name, "text": text, "alias": alias}
     except Exception as e:
-        print(f"[companion] say 실패: {e}", flush=True)
+        print(f"[companion] _speak 실패: {e}", flush=True)
         return {"speaker": name, "text": "", "alias": alias}
+
+
+def say(event: str, place: Optional[str] = None,
+        speaker: Optional[str] = None,
+        minutes: Optional[int] = None) -> Dict[str, Any]:
+    """이벤트에 맞춰 쿠키/베르 중 하나가 거는 한마디. speaker 미지정이면 랜덤.
+
+    반환: {speaker: "쿠키"|"베르", text, alias}. 미설정/실패/게이팅이면 text="".
+    """
+    # 이벤트별 on/off(어드민)는 여기서, 텀·조용구간은 _speak가. 억제면 _situation도 안 거치게.
+    if not cc.event_enabled(event):
+        return {"speaker": "", "text": "", "alias": "", "gated": True}
+    ctx = _situation(event, place, minutes)
+    return _speak(cc.kind_of(event), ctx, speaker)
+
+
+# ── 차량 출차/주차 — 상태전이는 수집기가, 질문·운행 스레드는 여기서 ──────────
+# 수집기(폰)가 BT/GPS로 주차중⇄운전중을 판정하고, 출차/주차 순간에만 아래를 부른다.
+# 백엔드는 '어디 가?'를 물은 시각(question_ts)을 운행 스레드(settings['drive'])에 적어두고,
+# 주차 때 그 이후 아빠 답(대화)을 찾아 '거기 잘 도착했어?'로 잇는다.
+
+def _first_user_reply_after(after: datetime) -> Optional[str]:
+    """출발 질문 이후 아빠가 흐름에 남긴 첫 답(목적지). 없으면 None."""
+    try:
+        d = db.conversations().find_one(
+            {"role": "user", "ts": {"$gt": after}}, sort=[("ts", 1)])
+    except Exception:
+        return None
+    return (d.get("text") or "").strip() if d else None
+
+
+def car_departure(lat: float, lng: float, ts: Any = None,
+                  speaker: Optional[str] = None) -> Dict[str, Any]:
+    """출차(주차중→운전중) — '어디 가?' 한마디 + 운행 스레드 시작.
+
+    질문을 실제로 했을 때만 question_ts를 적어, 주차 때 답 매칭의 기준으로 쓴다.
+    """
+    situation = ("아빠가 방금 차를 몰고 어디론가 출발했어(세워둔 데서 한참 벗어나 움직이기 "
+                 "시작). 어디 가는지 궁금해서 가볍게 물어봐 — '어디 가?' 정도로 아주 짧게.")
+    r = _speak("car", situation, speaker)
+    doc: Dict[str, Any] = {"state": "driving", "departed_at": _ts_to_dt(ts)}
+    if (r.get("text") or "").strip():
+        doc["question_ts"] = datetime.now()   # '어디 가?'를 실제로 물은 순간
+    db.settings().update_one({"_id": "drive"}, {"$set": doc}, upsert=True)
+    return r
+
+
+def car_parking(lat: float, lng: float, ts: Any = None,
+                silent: bool = False,
+                speaker: Optional[str] = None) -> Dict[str, Any]:
+    """주차(운전중→주차중) — 주차 위치(GPS) 기록 + 질문. 운행 스레드 닫음.
+
+    silent=True(안전망: 오래 정지해 조용히 리셋)면 위치만 남기고 말은 안 건다.
+    아빠가 출발 때 '어디 가?'에 답했으면 '거기 잘 도착했어?', 아니면 '어디 세웠어?'.
+    """
+    import parking as parking_mod
+    parking_mod.record(lat, lng, ts)            # 위치는 항상 ('내 차 어디?' 회상용)
+    drive = db.settings().find_one({"_id": "drive"}) or {}
+    db.settings().update_one({"_id": "drive"},
+                             {"$set": {"state": "parked", "question_ts": None}},
+                             upsert=True)
+    if silent:
+        return {"speaker": "", "text": "", "alias": ""}
+    dest = None
+    qts = drive.get("question_ts")
+    if isinstance(qts, datetime):
+        dest = _first_user_reply_after(qts)
+    if dest:
+        situation = (f"아빠가 출발할 때 '어디 가?'라고 물으니 '{dest}'라고 했었어. 이제 도착해서 "
+                     f"차를 세웠어. 거기('{dest}') 잘 도착했는지 가볍게 안부 물어봐 — 짧게.")
+    else:
+        situation = ("아빠가 방금 차를 세웠어(도착·주차). 어디 도착했는지·어디 세웠는지 가볍게 "
+                     "물어봐 — 짧게, 나중에 차 둔 데 기억하게.")
+    return _speak("car", situation, speaker)
 
 
 # ── 동반자끼리 수다(banter) ─────────────────────────────────────────────

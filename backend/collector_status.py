@@ -22,6 +22,7 @@ def report(data: Dict[str, Any]) -> Dict[str, Any]:
         "place": str(data.get("place") or ""),
         "visit_on": bool(data.get("visit_on")),
         "bt": str(data.get("bt") or ""),
+        "car_state": str(data.get("car_state") or ""),   # 주차중 | 운전중 (parked | driving)
         "lat": data.get("lat"),     # 현재 GPS(앵커) — 차 이동 중에도 1분마다 갱신
         "lng": data.get("lng"),
         "logs": logs,
@@ -41,6 +42,7 @@ def view() -> Dict[str, Any]:
         "place": d.get("place", ""),
         "visit_on": bool(d.get("visit_on")),
         "bt": d.get("bt", ""),
+        "car_state": d.get("car_state", ""),
         "lat": d.get("lat"),
         "lng": d.get("lng"),
         "logs": d.get("logs", []),

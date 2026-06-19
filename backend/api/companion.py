@@ -54,6 +54,41 @@ def ep_companion_banter(body: BanterIn):
     return companion.banter(body.event, body.place, body.minutes)
 
 
+class CarDepartIn(BaseModel):
+    lat: float
+    lng: float
+    ts: Optional[int] = None         # epoch ms (출발 순간)
+    speaker: Optional[str] = None
+
+
+@router.post("/car/departure")
+def ep_car_departure(body: CarDepartIn):
+    """출차(주차중→운전중) — '어디 가?' 한마디 + 운행 스레드 시작.
+
+    상태전이 판정(BT 연결+200m)은 수집기가 끝내고 이 순간에만 부른다.
+    """
+    from agent import companion
+    return companion.car_departure(body.lat, body.lng, body.ts, body.speaker)
+
+
+class CarParkIn(BaseModel):
+    lat: float
+    lng: float
+    ts: Optional[int] = None         # epoch ms (주차 순간)
+    silent: bool = False             # 안전망(오래 정지해 조용히 리셋)이면 위치만 남기고 침묵
+    speaker: Optional[str] = None
+
+
+@router.post("/car/parking")
+def ep_car_parking(body: CarParkIn):
+    """주차(운전중→주차중) — 주차 위치 기록 + 질문('어디?'/답했으면 '잘 도착했어?').
+
+    상태전이 판정(BT 해제·디바운스)은 수집기가, 답 매칭·질문은 백엔드가.
+    """
+    from agent import companion
+    return companion.car_parking(body.lat, body.lng, body.ts, body.silent, body.speaker)
+
+
 class AskedIn(BaseModel):
     speaker: str = ""               # 베르 | 쿠키 (표시명)
     text: str                       # 동반자가 먼저 건 멘트

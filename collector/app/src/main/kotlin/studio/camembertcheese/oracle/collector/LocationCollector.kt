@@ -1,119 +1,232 @@
 package studio.camembertcheese.oracle.collector
 
 import android.content.Context
-import org.json.JSONArray
+import org.json.JSONObject
 
-/// 위치 체류·이동 감지 → **여정 기록**(집→차→사무실→차→집) + 베르·쿠키 수다(banter).
+/// 위치 체류·이동 감지 → **여정 기록**(집→차→사무실→차→집) + 베르·쿠키 수다(banter)
+/// + **차량 출차/주차 상태머신**.
 ///
 /// 기록(여정)과 수다를 분리: 떠날 때마다 그 구간을 silent로 /visits에 남기고(데이터),
-/// 수다는 이동(나섬·차탐=추측)·도착(인사)에 흐름으로 건다. 시간 체크인(정시)과도 완전 별개.
-/// BT(차)→WiFi→GPS 순. Flutter location_task_handler 이식 + /places 일반화.
+/// 수다는 이동(나섬)·도착(인사)에 흐름으로 건다. 시간 체크인(정시)과도 완전 별개.
+///
+/// 차량(좌표 없는 BT 장소=차)은 별도 상태머신:
+///   주차중 ──[차 BT 연결 + 세운 데서 200m+ 이동]──▶ 운전중   ('어디 가?')
+///   운전중 ──[차 BT 해제(디바운스)]──▶ 주차중                ('어디?'/'잘 도착했어?')
+///   운전중 ──[한참 정지(안전망)]──▶ 주차중                  (조용히, 질문 X)
+/// 비대칭 근거: BT 해제 = 이미 차서 멀어짐(=주차). BT 연결 = 차 근처일 뿐(물건 꺼내기?) →
+/// 200m 게이트로 운전 확정. 물건 꺼내기는 BT 연결돼도 200m 안 → 출차 아님.
 object LocationCollector {
 
     private const val ARRIVE_RADIUS = 120.0
     private const val STAY_RADIUS = 150.0
     private const val STAY_MINUTES = 15
 
-    fun tick(ctx: Context, skipOnWifi: Boolean) {
+    // 재시작 직후 첫 틱은 현재 BT로 상태만 맞추고 이벤트 X(가짜 출차/주차 방지). 프로세스 생존 동안만.
+    @Volatile private var carBaselined = false
+
+    fun tick(ctx: Context, skipOnWifi: Boolean, locCfg: JSONObject?) {
         try {
             val now = System.currentTimeMillis()
-            val tickN = Prefs.bumpTick(ctx)
+            Prefs.bumpTick(ctx)
             val places = PlacesCache.get(ctx)
 
-            // 0) BT — 연결된 기기가 등록 장소(bt)면 그 장소(차 등). 이동 구간 = 여정 기록.
             val btDev = Prefs.btConnected(ctx)
             val btPlace = if (btDev.isNotBlank()) PlacesCache.byBt(places, btDev) else null
-            val lastBt = Prefs.btPlace(ctx)
-            if ((btPlace ?: "") != lastBt) {
-                if (lastBt.isNotBlank()) {
-                    // 하차 — 탑승~하차를 이동 구간으로 기록(예: "차" 25분).
-                    L.i("BT 하차: '$lastBt' — 이동구간 기록 + 주차 지정")
-                    val board = Prefs.btBoardTime(ctx)
-                    recordSegment(ctx, lastBt, 0.0, 0.0,
-                        if (board > 0L) board else now, now)
-                    Prefs.setBtBoardTime(ctx, 0L)
-                    // 주차 위치 지정(GPS) + '어디 세웠는지 기록할까요?' 말 걸기.
-                    val loc = Geo.currentLocation(ctx)
-                    if (loc != null) {
-                        val r = Backend.recordParking(ctx, loc.latitude, loc.longitude)
-                        val text = r?.optString("text")?.trim() ?: ""
-                        if (text.isNotEmpty()) {
-                            Notify.companion(ctx, r!!.optString("speaker"), text)
-                        }
-                    }
-                }
-                if (btPlace != null) {
-                    // 탑승 — 머물던 곳(집 등)을 먼저 기록(여정), 그다음 '차 탔다, 어디 가지?' 수다.
-                    L.i("BT 탑승: '$btPlace' — 이동 시작(banter board)")
-                    if (Prefs.visitOn(ctx)) {
-                        endStay(ctx, now)
-                        Prefs.setVisitOn(ctx, false)
-                    }
-                    Prefs.setBtBoardTime(ctx, now)
-                    banterFlow(ctx, "board", btPlace)
-                }
-                Prefs.setBtPlace(ctx, btPlace ?: "")
-            }
-            if (btPlace != null) {
-                // BT 장소. **고정 장소(좌표 등록됨)**면 거기 있는 것 — GPS 스킵(점2 규칙).
-                // **차 등 이동체(좌표 없음)**면 스펙대로 '차여도 1분마다' GPS로 현재 위치를 추적하되,
-                // 움직이는 중이라 체류/도착 판정은 안 한다(앵커만 따라가게 갱신 → 하차 후 도착 매끄럽게).
-                if (PlacesCache.coordsOf(places, btPlace) != null) return   // 고정 BT 장소
+            val isFixedBt = btPlace != null && PlacesCache.coordsOf(places, btPlace) != null
+            // 좌표 없는 BT 장소 = 차(이동체). 좌표 있으면 고정 장소(스피커 등).
+            val carName = if (btPlace != null && !isFixedBt) btPlace else null
+            val onCar = carName != null
+
+            // 차량 상태머신 — 처리하면(운전중·전이 발생) true → 체류머신 스킵.
+            if (carTick(ctx, now, onCar, carName, locCfg)) return
+
+            // 고정 BT 장소(좌표 있는 스피커 등) — 거기 있는 것, 체류머신 스킵(기존 동작).
+            if (isFixedBt) {
                 val loc = Geo.currentLocation(ctx)
                 if (loc != null) Prefs.setAnchor(ctx, loc.latitude, loc.longitude, now)
                 return
             }
 
-            // 1) WiFi — 등록 장소 WiFi면 GPS 없이 즉시 그 장소.
-            if (skipOnWifi) {
-                val ssid = Geo.wifiSsid(ctx)
-                val wifiPlace = if (ssid != null) PlacesCache.byWifi(places, ssid) else null
-                if (wifiPlace != null) {
-                    onPlaceImmediate(ctx, wifiPlace, now)
-                    return
+            // 평범한 체류/이동(WiFi·GPS) — 도보로 장소 오감, banter arrive/leave, askPlace.
+            stayTick(ctx, skipOnWifi, now, places)
+        } catch (_: Exception) {
+        }
+    }
+
+    // ── 차량 상태머신 ────────────────────────────────────────────────
+    /// 차 상태를 한 틱 진행. 처리했으면(운전중이거나 전이 발생) true — 호출부가 체류머신 스킵.
+    private fun carTick(ctx: Context, now: Long, onCar: Boolean,
+                        carName: String?, locCfg: JSONObject?): Boolean {
+        val departR = (locCfg?.optInt("car_depart_radius_m", 200) ?: 200).toDouble()
+        val statR = (locCfg?.optInt("car_stationary_radius_m", 75) ?: 75).toDouble()
+        val resetMs = (locCfg?.optInt("car_stationary_reset_min", 30) ?: 30) * 60_000L
+        val debounce = (locCfg?.optInt("car_park_debounce_ticks", 2) ?: 2).coerceAtLeast(1)
+
+        // 0) 재시작 직후 — 현재 BT(+지속 상태)로만 맞추고 이벤트 X.
+        if (!carBaselined) {
+            carBaselined = true
+            Prefs.setParkPendingTicks(ctx, 0)
+            if (onCar && Prefs.carState(ctx) == "driving") {
+                val loc = Geo.currentLocation(ctx)
+                if (loc != null) Prefs.setDriveAnchor(ctx, loc.latitude, loc.longitude, now)
+                L.i("차 상태 기준선: 운전중 유지(재시작)")
+                return true
+            }
+            Prefs.setCarState(ctx, "parked")
+            val loc = Geo.currentLocation(ctx)
+            if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude)
+            L.i("차 상태 기준선: 주차중")
+            return false
+        }
+
+        if (Prefs.carState(ctx) == "driving") {
+            val loc = Geo.currentLocation(ctx)
+            // 1) 주차 — 차 BT 해제(연속 debounce 틱). 시동 잠깐 껐다 켜기는 흡수.
+            if (!onCar) {
+                val pend = Prefs.parkPendingTicks(ctx) + 1
+                Prefs.setParkPendingTicks(ctx, pend)
+                if (pend >= debounce) {
+                    L.i("주차(BT 해제 ${pend}틱 확정) — 운전중→주차중")
+                    doPark(ctx, loc, now, silent = false)
+                } else {
+                    L.i("BT 해제 후보 ${pend}/${debounce}틱(시동 깜빡임?) — 대기")
                 }
+                return true
             }
+            Prefs.setParkPendingTicks(ctx, 0)   // BT 유지/도로 잡힘 — 디바운스 리셋
 
-            // 2) GPS — WiFi·BT로 확정 안 된 경우 **1분마다 항상** 확인(배터리는 WiFi/BT 매칭이 절약).
-            val visitOn = Prefs.visitOn(ctx)
-            val loc = Geo.currentLocation(ctx) ?: return
-            val lat = loc.latitude
-            val lng = loc.longitude
-            val gpsPlace = PlacesCache.byGps(places, lat, lng, ARRIVE_RADIUS)
-
-            val aLat = Prefs.anchorLat(ctx)
-            val aLng = Prefs.anchorLng(ctx)
-            if (aLat == null || aLng == null) {
-                setAnchor(ctx, lat, lng, now); return
-            }
-            val fromAnchor = Geo.distance(lat, lng, aLat, aLng).toDouble()
-
-            if (fromAnchor <= STAY_RADIUS) {
-                if (visitOn) return
-                val start = Prefs.anchorStart(ctx).let { if (it == 0L) now else it }
-                val stayedMin = ((now - start) / 60000).toInt()
-                if (gpsPlace != null || stayedMin >= STAY_MINUTES) {
-                    Prefs.setVisitOn(ctx, true)
-                    Prefs.setVisitPlace(ctx, gpsPlace ?: "")
-                    if (gpsPlace != null) {
-                        L.i("GPS 도착(등록): '$gpsPlace' — banter arrive")
-                        banterFlow(ctx, "arrive", gpsPlace)   // 저장된 곳 — 거주자 인사
-                    } else {
-                        // 저장 안 된 새 곳 15분+ — '아빠 왔다 반겨야지'(엉뚱) 대신 어딘지 물어봄.
-                        L.i("GPS 체류 ${stayedMin}분(미등록) — 여기 어디? 물어봄")
-                        askPlace(ctx, lat, lng)
+            // 2) 안전망 — 운전중인데 한참(reset 분) 정지 지속 → 조용히 주차중(질문 X).
+            if (loc != null) {
+                val da = Prefs.driveAnchor(ctx)
+                if (da == null) {
+                    Prefs.setDriveAnchor(ctx, loc.latitude, loc.longitude, now)
+                } else {
+                    val moved = Geo.distance(loc.latitude, loc.longitude, da.first, da.second)
+                        .toDouble()
+                    if (moved > statR) {
+                        Prefs.setDriveAnchor(ctx, loc.latitude, loc.longitude, now) // 움직임 — 타이머 리셋
+                    } else if (now - Prefs.driveLastMove(ctx) >= resetMs) {
+                        L.i("안전망: 정지 ${resetMs / 60000}분 지속 — 조용히 주차중 리셋")
+                        doPark(ctx, loc, now, silent = true)
                     }
                 }
-            } else {
-                if (visitOn) {                    // 떠남 — 머물던 곳을 여정에 기록(silent) + 수다(궁금)
-                    val left = Prefs.visitPlace(ctx)
-                    endStay(ctx, now)
-                    L.i("GPS 나섬: '$left' — banter leave")
-                    banterFlow(ctx, "leave", left.ifBlank { null })
-                }
-                setAnchor(ctx, lat, lng, now)
             }
-        } catch (_: Exception) {
+            return true   // 운전중 — 체류머신 스킵
+        }
+
+        // 주차중
+        if (onCar) {
+            // 3) 출차 — 차 BT 연결 채로 세운 데서 departR 이상 벗어남.
+            val loc = Geo.currentLocation(ctx)
+            val da = Prefs.departAnchor(ctx)
+            if (da == null) {
+                if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude) // 연결 순간 신선한 기준
+            } else if (loc != null) {
+                val moved = Geo.distance(loc.latitude, loc.longitude, da.first, da.second)
+                    .toDouble()
+                if (moved >= departR) {
+                    L.i("출차(BT 연결 + ${moved.toInt()}m ≥ ${departR.toInt()}m) — 주차중→운전중: '$carName'")
+                    doDepart(ctx, loc.latitude, loc.longitude, now, carName)
+                }
+            }
+            return true   // BT 연결 채 주차중 — 출차 감시 중, 체류머신 스킵(조기 leave 방지)
+        }
+        // 차 BT 없는 주차중 — departAnchor가 없으면(첫 실행) 채워둠. 도보론 안 흔듦(차 위치 고정).
+        if (Prefs.departAnchor(ctx) == null) {
+            val loc = Geo.currentLocation(ctx)
+            if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude)
+        }
+        return false   // 주차중 — 체류머신 돌게
+    }
+
+    /// 출차 — 머물던 곳(여정 silent) 마무리 + 운전중 진입 + '어디 가?' 질문.
+    private fun doDepart(ctx: Context, lat: Double, lng: Double, now: Long, carName: String?) {
+        if (Prefs.visitOn(ctx)) {           // 머물던 곳(집 등)을 먼저 여정에 기록
+            endStay(ctx, now)
+            Prefs.setVisitOn(ctx, false)
+        }
+        Prefs.setCarState(ctx, "driving")
+        Prefs.setBtBoardTime(ctx, now)      // 드라이브 구간 시작(주차 때 구간 길이)
+        Prefs.setCarName(ctx, carName ?: "차")
+        Prefs.setDriveAnchor(ctx, lat, lng, now)
+        Prefs.setParkPendingTicks(ctx, 0)
+        val r = Backend.carDeparture(ctx, lat, lng)
+        val text = r?.optString("text")?.trim() ?: ""
+        if (text.isNotEmpty()) Notify.companion(ctx, r!!.optString("speaker"), text)
+    }
+
+    /// 주차 — 드라이브 구간(여정 silent) + 주차 위치 기록 + 질문(silent면 위치만). 주차중 진입.
+    private fun doPark(ctx: Context, loc: android.location.Location?, now: Long, silent: Boolean) {
+        val board = Prefs.btBoardTime(ctx)
+        recordSegment(ctx, Prefs.carName(ctx).ifBlank { "차" }, 0.0, 0.0,
+            if (board > 0L) board else now, now)
+        Prefs.setCarState(ctx, "parked")
+        Prefs.setBtBoardTime(ctx, 0L)
+        Prefs.setCarName(ctx, "")
+        Prefs.setParkPendingTicks(ctx, 0)
+        Prefs.clearDriveAnchor(ctx)
+        // 새 주차 위치를 다음 출차의 200m 기준점으로.
+        if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude)
+        val anchor = Prefs.departAnchor(ctx)
+        val plat = loc?.latitude ?: anchor?.first ?: 0.0
+        val plng = loc?.longitude ?: anchor?.second ?: 0.0
+        val r = Backend.carParking(ctx, plat, plng, silent)
+        if (!silent) {
+            val text = r?.optString("text")?.trim() ?: ""
+            if (text.isNotEmpty()) Notify.companion(ctx, r!!.optString("speaker"), text)
+        }
+    }
+
+    // ── 평범한 체류/이동(WiFi·GPS) 머신 ───────────────────────────────
+    private fun stayTick(ctx: Context, skipOnWifi: Boolean, now: Long, places: org.json.JSONArray) {
+        // 1) WiFi — 등록 장소 WiFi면 GPS 없이 즉시 그 장소.
+        if (skipOnWifi) {
+            val ssid = Geo.wifiSsid(ctx)
+            val wifiPlace = if (ssid != null) PlacesCache.byWifi(places, ssid) else null
+            if (wifiPlace != null) {
+                onPlaceImmediate(ctx, wifiPlace, now)
+                return
+            }
+        }
+
+        // 2) GPS — WiFi·BT로 확정 안 된 경우 **1분마다 항상** 확인(배터리는 WiFi/BT 매칭이 절약).
+        val visitOn = Prefs.visitOn(ctx)
+        val loc = Geo.currentLocation(ctx) ?: return
+        val lat = loc.latitude
+        val lng = loc.longitude
+        val gpsPlace = PlacesCache.byGps(places, lat, lng, ARRIVE_RADIUS)
+
+        val aLat = Prefs.anchorLat(ctx)
+        val aLng = Prefs.anchorLng(ctx)
+        if (aLat == null || aLng == null) {
+            setAnchor(ctx, lat, lng, now); return
+        }
+        val fromAnchor = Geo.distance(lat, lng, aLat, aLng).toDouble()
+
+        if (fromAnchor <= STAY_RADIUS) {
+            if (visitOn) return
+            val start = Prefs.anchorStart(ctx).let { if (it == 0L) now else it }
+            val stayedMin = ((now - start) / 60000).toInt()
+            if (gpsPlace != null || stayedMin >= STAY_MINUTES) {
+                Prefs.setVisitOn(ctx, true)
+                Prefs.setVisitPlace(ctx, gpsPlace ?: "")
+                if (gpsPlace != null) {
+                    L.i("GPS 도착(등록): '$gpsPlace' — banter arrive")
+                    banterFlow(ctx, "arrive", gpsPlace)   // 저장된 곳 — 거주자 인사
+                } else {
+                    // 저장 안 된 새 곳 15분+ — '아빠 왔다 반겨야지'(엉뚱) 대신 어딘지 물어봄.
+                    L.i("GPS 체류 ${stayedMin}분(미등록) — 여기 어디? 물어봄")
+                    askPlace(ctx, lat, lng)
+                }
+            }
+        } else {
+            if (visitOn) {                    // 떠남 — 머물던 곳을 여정에 기록(silent) + 수다(궁금)
+                val left = Prefs.visitPlace(ctx)
+                endStay(ctx, now)
+                L.i("GPS 나섬: '$left' — banter leave")
+                banterFlow(ctx, "leave", left.ifBlank { null })
+            }
+            setAnchor(ctx, lat, lng, now)
         }
     }
 
@@ -144,7 +257,7 @@ object LocationCollector {
     }
 
     /// 베르·쿠키 수다 — 서버가 흐름에 각 턴 기록. notify(도착 인사)가 있으면 알림 표시.
-    /// 이동·추측(leave·board)은 notify 비어 흐름에만 조용히(자기들끼리). 게이팅·실패면 조용.
+    /// 이동·추측(leave)은 notify 비어 흐름에만 조용히(자기들끼리). 게이팅·실패면 조용.
     private fun banterFlow(ctx: Context, event: String, place: String?) {
         val r = Backend.banter(ctx, event, place) ?: return
         val notify = r.optJSONObject("notify")
