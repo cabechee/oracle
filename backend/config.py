@@ -142,7 +142,8 @@ TESLA_REDIRECT_URI = os.getenv("TESLA_REDIRECT_URI", "http://localhost:8080/call
 TESLA_API_BASE = os.getenv(
     "TESLA_API_BASE", "https://fleet-api.prd.na.vn.cloud.tesla.com")
 TESLA_SCOPES = os.getenv(
-    "TESLA_SCOPES", "openid offline_access vehicle_device_data vehicle_location")
+    "TESLA_SCOPES",
+    "openid offline_access vehicle_device_data vehicle_location vehicle_charging_cmds")
 TESLA_TOKEN_PATH = os.getenv(
     "TESLA_TOKEN_PATH", os.path.join(_PROJECT_ROOT, "tesla_token.json"))
 TESLA_PRIVATE_KEY_PATH = os.getenv(
