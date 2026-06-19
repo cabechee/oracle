@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle · 유저스토리</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="sidebar"></div>
+<main class="content"><div class="inner">
+
+<div class="eyebrow">공통 레퍼런스 · User Stories</div>
+<h1>유저스토리</h1>
+<p class="lede">포맷 — <b>"~로서, ~하고 싶다, 왜냐하면 ~"</b>. 수용기준(AC)은 단순 기능은 체크리스트,
+흐름/엣지케이스는 Given/When/Then. 페르소나는 <a href="pm.html#persona">PRD 페르소나</a>.</p>
+
+<div class="note"><b>Definition of Done (전역)</b>
+백엔드 테스트 통과 · 수집기 컴파일/APK 빌드 · 어드민에서 동작 확인 · 회귀 없음 · (해당 시) 디바이스 검증 · 문서 갱신.</div>
+
+<h2 class="anchor" id="capture">에픽 1 · 캡처 & 즉답</h2>
+<div class="story"><span class="id">US-CAP-1</span> · <b>아빠로서</b>, 본 것을 사진으로 던지고 싶다, <b>왜냐하면</b> 바로 의미 있는 코멘트를 받고 싶으니까.
+<div class="ac"><b>AC</b> · ☐ 인입 즉시 <code>processing</code> stub이 흐름에 보인다 · ☐ 완료 시 베르 인사이트 + 쿠키 한마디가 채워진다 · ☐ 사진은 3단계 분석(객체·장면·OCR)을 거친다 · ☐ 4초 폴링으로 결과가 자동 갱신된다.</div></div>
+<div class="story"><span class="id">US-CAP-2</span> · <b>아빠로서</b>, 음성·텍스트도 던지고 싶다, <b>왜냐하면</b> 사진이 아닌 생각도 남기고 싶으니까.
+<div class="ac"><b>AC</b> · ☐ 음성은 인식되어 캡션화된다 · ☐ 텍스트 코멘트만으로도 record가 생성된다 · ☐ 즉답이 붙는다.</div></div>
+<div class="story"><span class="id">US-CAP-3</span> · <b>아빠로서</b>, 잘못 올린 것을 숨기고 코멘트를 고치고 싶다.
+<div class="ac"><b>AC</b> · ☐ <code>/hide</code>로 흐름에서 사라진다(soft delete) · ☐ <code>PATCH</code>로 코멘트가 수정된다 · ☐ 재분석(<code>reprocess</code>)이 가능하다.</div></div>
+
+<h2 class="anchor" id="chat">에픽 2 · 대화(흐름)</h2>
+<div class="story"><span class="id">US-CHAT-1</span> · <b>아빠로서</b>, 흐름에서 자연어로 묻고 싶다, <b>왜냐하면</b> 과거 기록을 근거로 답을 받고 싶으니까.
+<div class="ac"><b>AC</b> · ☐ 입력→베르 응답이 흐름에 쌓인다 · ☐ 응답은 근거 record를 <code>referenced</code>로 단다 · ☐ 특정 record를 멘션해 맥락을 줄 수 있다.</div></div>
+<div class="story"><span class="id">US-CHAT-2</span> · <b>아빠로서</b>, 대화 중 제안된 액션을 확인/취소하고 싶다.
+<div class="ac"><b>Given</b> 베르가 "일정 등록할까요?" 액션을 제안하면 · <b>When</b> 확인을 누르면 · <b>Then</b> 캘린더 이벤트가 생성되고 메시지 상태가 확정으로 바뀐다(취소 시 무효).</div></div>
+
+<h2 class="anchor" id="search">에픽 3 · 검색 & 회상</h2>
+<div class="story"><span class="id">US-SRCH-1</span> · <b>아빠로서</b>, "지난주 마우스 관련 뭐였더라?"처럼 묻고 싶다, <b>왜냐하면</b> 흩어진 기록을 다시 찾고 싶으니까.
+<div class="ac"><b>AC</b> · ☐ 3요소 검색(유사도+최근성+중요도)으로 후보를 모은다 · ☐ 답변에 참조 record 썸네일이 붙는다 · ☐ 임베딩 미설정이어도 최근순 fallback으로 동작한다.</div></div>
+
+<h2 class="anchor" id="digest">에픽 4 · 다이제스트 & 발행물</h2>
+<div class="story"><span class="id">US-DIG-1</span> · <b>아빠로서</b>, 자정마다 하루가 자동으로 일기로 엮이길 바란다, <b>왜냐하면</b> 일일이 회고하지 않아도 흐름이 남으니까.
+<div class="ac"><b>Given</b> 그날 record들이 있으면 · <b>When</b> 00:05 배치가 돌면 · <b>Then</b> 일 저널(vault md + Mongo)이 생성되고 '오늘의 한 줄'이 표지에 노출된다. 월요일=주간, 1일=월간 동반.</div></div>
+<div class="story"><span class="id">US-DIG-2</span> · <b>아빠로서</b>, 아침/저녁에 짧은 발행물을 받고 싶다.
+<div class="ac"><b>AC</b> · ☐ 07시 조간(수면+밤 신호+어제 한 줄+On This Day) · ☐ 21시 석간(오늘 흐름+환기) · ☐ 앱 타임라인에 카드로 표시.</div></div>
+
+<h2 class="anchor" id="signals">에픽 5 · 신호 대신 읽어드림 (데스크)</h2>
+<div class="story"><span class="id">US-SIG-1</span> · <b>아빠로서</b>, 받은 문자·부재중·푸시를 대신 읽고 우선순위를 잡아주길 바란다, <b>왜냐하면</b> 다 보지 않아도 중요한 것만 챙기고 싶으니까.
+<div class="ac"><b>AC</b> · ☐ 수집기가 30분마다 동기화 · ☐ 새 것만 로컬 LLM이 5단계 분류(action_needed·attention·acquaintance·low·spam) · ☐ SMS 본문은 클라우드로 안 나간다 · ☐ 묵은 부재중은 오늘 일로 둔갑하지 않는다(날짜 포함·48h age-out).</div></div>
+<div class="story"><span class="id">US-SIG-2</span> · <b>아빠로서</b>, 결제 알림이 가계부로, 처리할 일이 리마인더로 모이길 바란다.
+<div class="ac"><b>AC</b> · ☐ 결제 신호→금액·수단 추출해 ledger 항목 · ☐ action_needed→리마인더 승격(또는 수동 추가) · ☐ 오탐은 삭제 가능.</div></div>
+<div class="story"><span class="id">US-SIG-3</span> · <b>아빠로서</b>, 분류가 틀리면 바로잡고 싶다.
+<div class="ac"><b>AC</b> · ☐ '부정확' 피드백 · ☐ 카테고리 재지정(<code>recategorize</code>)이 brief에 반영.</div></div>
+
+<h2 class="anchor" id="location">에픽 6 · 위치 & 동반자</h2>
+<div class="story"><span class="id">US-LOC-1</span> · <b>아빠로서</b>, 집·작업실·자주 가는 곳을 등록하고 싶다, <b>왜냐하면</b> 동반자가 맥락을 알고 말 걸길 바라니까.
+<div class="ac"><b>AC</b> · ☐ WiFi/BT/좌표/설명으로 장소 등록(여러 개 OR 매칭) · ☐ 미등록 WiFi는 "여기 저장할까?" 제안.</div></div>
+<div class="story"><span class="id">US-LOC-2</span> · <b>아빠로서</b>, 도착하면 동반자가 (적당히) 반겨주길 바란다, <b>왜냐하면</b> 도배는 싫으니까.
+<div class="ac"><b>Given</b> 거주자(집=쿠키/작업실=베르) 장소에 도착하면 · <b>When</b> 게이팅(새벽 침묵·쿨다운) 통과 시 · <b>Then</b> 도착 인사 알림이 오고 흐름에 banter가 남는다. 새 곳은 "여기 어디?" 물어 임시 저장.</div></div>
+
+<h2 class="anchor" id="car">에픽 7 · 차량 출차/주차</h2>
+<div class="story"><span class="id">US-CAR-1</span> · <b>아빠로서</b>, 차로 출발하면 "어디 가?"를 묻길 바란다 — 단, 물건 꺼내러 잠깐 탄 건 빼고.
+<div class="ac"><b>Given</b> 주차중 상태에서 · <b>When</b> 차 BT 연결 + 세운 데서 200m↑ 이동하면 · <b>Then</b> "어디 가?" 알림 + 운전중 진입. <b>And</b> BT 연결돼도 200m 안 움직이면 출차 아님.</div></div>
+<div class="story"><span class="id">US-CAR-2</span> · <b>아빠로서</b>, 도착해 차를 세우면 "잘 도착했어?"를 묻고 주차 위치를 기억하길 바란다.
+<div class="ac"><b>Given</b> 운전중에 · <b>When</b> 차 BT 해제(2틱 디바운스)되면 · <b>Then</b> 주차 GPS가 기록되고, 출발 때 "어디 가?"에 답했으면 "거기 잘 도착했어?", 아니면 "어디 세웠어?". <b>And</b> 30분 정지(지하 등)는 질문 없이 조용히 주차로 리셋.</div></div>
+<div class="story"><span class="id">US-CAR-3</span> · <b>아빠로서</b>, "내 차 어디 뒀지?"를 다시 볼 수 있길 바란다.
+<div class="ac"><b>AC</b> · ☐ <code>/parking/latest</code>로 최근 주차 위치 회상.</div></div>
+
+<h2 class="anchor" id="calendar">에픽 8 · 캘린더</h2>
+<div class="story"><span class="id">US-CAL-1</span> · <b>아빠로서</b>, "내일 3시 치과 예약 넣어줘"처럼 자연어로 일정을 잡고 싶다.
+<div class="ac"><b>AC</b> · ☐ 흐름에서 확인 카드 → 확정 시 Google 이벤트 생성 · ☐ 다가오는/오늘 일정 조회 · ☐ 미인증이면 graceful(빈 결과).</div></div>
+
+<h2 class="anchor" id="suite">수집기(시스템) 스토리</h2>
+<div class="story"><span class="id">US-COLL-1</span> · <b>운영자(나)로서</b>, 폰 수집기가 지금 잘 도는지·뭐가 막혔는지 한눈에 보고 싶다.
+<div class="ac"><b>AC</b> · ☐ 대시보드 상태 요약(전송 신선도) · ☐ 권한 점검(빠진 것만 [설정]) · ☐ 라이브 센서(차·WiFi·BT·장소) · ☐ 시작/중지·전송·로그.</div></div>
+
+<div class="foot">흐름 상세는 <a href="flows.html">유저플로우</a> · 기능 배경은 <a href="pm.html#features">PRD</a>.</div>
+</div></main>
+<script src="nav.js"></script>
+</body>
+</html>

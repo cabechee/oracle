@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle · 개발자 Tech Spec</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="sidebar"></div>
+<main class="content"><div class="inner">
+
+<div class="eyebrow">🛠 개발자 · Technical Specification</div>
+<h1>기술 설계 문서</h1>
+<p class="lede">아키텍처·데이터모델·디펜던시·배포·상태머신. API 상세는 <a href="api.html">API 레퍼런스</a>.</p>
+
+<div class="toc"><b>목차</b>
+<ul>
+<li><a href="#arch">아키텍처</a></li>
+<li><a href="#components">컴포넌트 구조</a></li>
+<li><a href="#data">데이터 모델</a></li>
+<li><a href="#deps">디펜던시</a></li>
+<li><a href="#config">설정(env)</a></li>
+<li><a href="#deploy">빌드 · 배포</a></li>
+<li><a href="#cron">배치 · 자동화</a></li>
+<li><a href="#car">차량 상태머신</a></li>
+<li><a href="#sec">보안 · 프라이버시</a></li>
+</ul></div>
+
+<h2 class="anchor" id="arch">아키텍처</h2>
+<p>3개 컴포넌트 + 외부 의존(MongoDB·Nest·LLM 제공자·임베딩·Tailscale). 전체 다이어그램은
+<a href="index.html#system">Overview</a>. 처리 흐름은 비동기 인입 + 자정 배치 2축.</p>
+<div class="mermaid">
+sequenceDiagram
+  participant P as 폰(앱)
+  participant B as 백엔드 /ingest
+  participant Q as BackgroundTask
+  participant N as Nest→LLM
+  P->>B: POST /ingest (async_mode=1)
+  B->>B: corpus.append() → vault 정본
+  B-->>P: stub record (status=processing) 즉시
+  B->>Q: 큐잉
+  Q->>N: vision/quick/insight 호출
+  N-->>Q: 결과
+  Q->>B: MongoDB record 갱신(status=done)
+  loop 4s 폴링
+    P->>B: GET /records/{id}
+    B-->>P: status=done + 인사이트
+  end
+</div>
+
+<h2 class="anchor" id="components">컴포넌트 구조</h2>
+<h3>백엔드 (FastAPI · Python 3.9)</h3>
+<table>
+<tr><th>레이어</th><th>모듈</th><th>역할</th></tr>
+<tr><td>진입</td><td><code>main.py</code></td><td>FastAPI 앱 + 미들웨어(토큰 인증) + 라우터 마운트(루트, admin만 <code>/admin/api</code>)</td></tr>
+<tr><td>라우터</td><td><code>api/*.py</code> (21개)</td><td>ingest·records·journal·threads·query·chat·signals·companion·visits·places·calendar·…</td></tr>
+<tr><td>에이전트</td><td><code>agent/llm.py</code></td><td>모든 LLM 호출의 단일 통로(Nest 래퍼, cache_prefix·system 전파)</td></tr>
+<tr><td></td><td><code>agent/vision.py</code></td><td>사진 3단계 분석(Analyze→Reason)</td></tr>
+<tr><td></td><td><code>agent/memory.py</code></td><td>3요소 검색(유사도+최근성+중요도) + 워킹메모리</td></tr>
+<tr><td></td><td><code>agent/chat.py</code></td><td>대화 모드(MVP, 호문쿨루스 교체 경계로 얇게)</td></tr>
+<tr><td></td><td><code>agent/companion.py</code></td><td>동반자 말걸기·banter·차량 출차/주차</td></tr>
+<tr><td>저장</td><td><code>db.py</code> · <code>corpus.py</code></td><td>MongoDB 접근자 · Vault 평문 read/append</td></tr>
+<tr><td>배치</td><td><code>nightly.py</code> · <code>briefing.py</code></td><td>자정 일/주/월 저널 · 조간/석간</td></tr>
+<tr><td>도메인</td><td><code>signals.py classify.py ledger.py reminders.py visits.py parking.py places.py gcal.py</code></td><td>신호 분류·가계부·리마인더·방문·주차·장소·캘린더</td></tr>
+<tr><td>설정</td><td><code>config.py</code> · <code>*_config.py</code></td><td>env·alias·companion/location/collector 게이팅 설정</td></tr>
+</table>
+
+<h3>Flutter 앱 (Dart 3.12)</h3>
+<pre>lib/
+ ├ main.dart            앱 진입(5줄)
+ ├ app.dart            라이트 테마(오프화이트)
+ ├ api.dart            REST 클라이언트(async, 4s 폴링)
+ ├ models.dart         Record·Journal·ChatMessage 직렬화
+ ├ core/
+ │   ├ record_store.dart   records+pendings SSOT(ChangeNotifier)
+ │   ├ design.dart         디자인 토큰(색·서체·간격)
+ │   └ flags.dart          flutterCollects=false (수집 비활성)
+ └ features/
+     ├ capture/   카메라·영상·오디오·갤러리·공유인텐트 → /ingest
+     ├ chat/      흐름 타임라인(record+대화 merge, 스파인)
+     ├ home/      앱 셸(탭·생명주기·모델 picker)
+     └ notifications/  로컬 알림</pre>
+
+<h3>Android 수집기 (순수 플랫폼, 외부 의존 0)</h3>
+<pre>collector/.../collector/
+ ├ MainActivity.kt        대시보드(상태·점검·라이브·액션)
+ ├ CollectorService.kt    FGS(location 타입) — 신호 sync + 위치 틱
+ ├ LocationCollector.kt   체류머신 + 차량 출차/주차 상태머신
+ ├ BtWatcher.kt           차 BT 연결 감지(브로드캐스트+프록시 폴링)
+ ├ Geo.kt PlacesCache.kt  위치·장소 매칭(BT→WiFi→GPS)
+ ├ Backend.kt Prefs.kt    HttpURLConnection + SharedPreferences
+ └ Notify.kt L.kt         동반자 알림 · 인메모리 로그</pre>
+
+<h2 class="anchor" id="data">데이터 모델</h2>
+<p>정본은 <b>Vault</b>(평문 마크다운+미디어, append-only). MongoDB는 검색·메타 캐시.
+모든 기본 문서는 <b>멱등 id</b>(결정적 hash 또는 시각 구간).</p>
+
+<h3>핵심 — 캡처 · 대화</h3>
+<table>
+<tr><th>컬렉션</th><th>id</th><th>주요 필드</th></tr>
+<tr><td><b>records</b></td><td><code>rec-…</code></td><td>ts·status(processing/done/failed)·vault_path·image/audio/video_paths·user_comment·exif·location·<b>quick</b>(쿠키)·<b>vlm</b>·<b>analysis</b>·<b>insight</b>(베르)·suggestion·reactions·thread_ids·embedding</td></tr>
+<tr><td><b>threads</b></td><td><code>int</code> auto</td><td>name·lineage_from·created_at·status — records.thread_ids가 가리킴</td></tr>
+<tr><td><b>conversations</b></td><td><code>msg-…</code></td><td>role(user/assistant)·text·ts·referenced[](근거 record)·mentions[]·action(액션제안)·quick·companion·banter</td></tr>
+</table>
+
+<h3>신호 — 대신 읽어드림</h3>
+<table>
+<tr><th>컬렉션</th><th>id</th><th>주요 필드</th></tr>
+<tr><td><b>signals</b></td><td><code>sig-{sha1}</code></td><td>kind(sms/missed_call/notification)·sender·body·otp·app·briefed·aged_out·ts·source</td></tr>
+<tr><td><b>signal_briefs</b></td><td><code>brief-{sha1}</code></td><td>summary·items[]{category(action_needed/attention/acquaintance/low/spam)·sender·summary·signal_ids·feedback}</td></tr>
+<tr><td><b>ledger</b></td><td><code>pay-…</code></td><td>date·amount·card·installment·memo·signal_ids — 결제 신호 정규식 추출</td></tr>
+<tr><td><b>reminders</b></td><td><code>rem-{sha1}</code></td><td>text·due·done·source(manual/signal)·signal_id</td></tr>
+</table>
+
+<h3>위치 · 차량 · 건강</h3>
+<table>
+<tr><th>컬렉션</th><th>id</th><th>주요 필드</th></tr>
+<tr><td><b>places</b></td><td><code>place-…</code></td><td>name·kind(home/office/place)·lat·lng·<b>wifis[]·bts[]</b>(OR 매칭)·description</td></tr>
+<tr><td><b>visits</b></td><td><code>visit-{sha1}</code></td><td>place·lat·lng·start·end·minutes — 체류 감지 여정</td></tr>
+<tr><td><b>parking</b></td><td><code>park-…</code></td><td>lat·lng·ts — 최신이 '내 차 위치'</td></tr>
+<tr><td><b>metrics</b></td><td><code>YYYY-MM-DD</code></td><td>sleep_min·steps — Health Connect</td></tr>
+</table>
+
+<h3>저널 · 발행물 · 시스템</h3>
+<table>
+<tr><th>컬렉션</th><th>id</th><th>주요 필드</th></tr>
+<tr><td><b>journals</b></td><td><code>day-…/week-…/month-…</code></td><td>kind·date·period_start/end·text·summary3(day)·record_count·reaction_signal·embedding</td></tr>
+<tr><td><b>briefings</b></td><td><code>morning-…/evening-…</code></td><td>kind·date·text·ts</td></tr>
+<tr><td><b>dashboard_state</b></td><td><code>action:…/pending:…</code></td><td>dismissed_at — 데스크 확인 처리</td></tr>
+<tr><td><b>index_meta</b></td><td>월 라벨</td><td>월별 태그·엔티티·thread 활동(자정 갱신)</td></tr>
+</table>
+
+<h3>settings — _id별 런타임 설정</h3>
+<table>
+<tr><th>_id</th><th>용도 · 주요 필드</th></tr>
+<tr><td><code>companion</code></td><td>말걸기 정책 — enabled·quiet_start/end_hour·checkin_*·location_cooldown_min·location_events·banter_cooldown_min·<b>car_enabled·car_cooldown_min</b></td></tr>
+<tr><td><code>companion_state</code></td><td>발화 상태 — last_checkin·last_location·last_park·last_banter·<b>last_car</b></td></tr>
+<tr><td><code>drive</code></td><td><b>운행 스레드</b> — state(parked/driving)·departed_at·question_ts("어디 가?" 시각, 답 매칭용)</td></tr>
+<tr><td><code>location</code></td><td>위치 센싱 — poll_interval_sec·skip_on_known_wifi·<b>car_depart_radius_m(200)·car_stationary_radius_m(75)·car_stationary_reset_min(30)·car_park_debounce_ticks(2)</b></td></tr>
+<tr><td><code>collector</code></td><td>수집기 — enabled·sync_interval_min·collect_{sms,calls,notifications,location}</td></tr>
+<tr><td><code>collector_status</code></td><td>heartbeat — wifi·place·bt·<b>car_state</b>·lat·lng·logs·updated_at</td></tr>
+<tr><td><code>personas</code></td><td>베르/쿠키 정체성·역할 프롬프트(어드민 편집)</td></tr>
+<tr><td><code>task_aliases</code></td><td>용도→LLM alias 매핑(vision·insight·quick·chat·query·signals·daily_digest·embed…)</td></tr>
+<tr><td><code>signal_excludes</code></td><td>patterns[] — 신호 요약 제외</td></tr>
+<tr><td><code>pending_place</code></td><td>lat·lng·ts — 아직 저장 안 한 임시 장소</td></tr>
+</table>
+
+<h2 class="anchor" id="deps">디펜던시</h2>
+<h3>백엔드 (requirements.txt)</h3>
+<p><span class="tag">fastapi</span><span class="tag">uvicorn[standard]</span><span class="tag">python-dotenv</span>
+<span class="tag">httpx</span><span class="tag">pymongo</span><span class="tag">python-multipart</span>
+<span class="tag">Pillow</span><span class="tag">numpy</span><span class="tag">google-api-python-client</span>
+<span class="tag">google-auth</span><span class="tag">google-auth-oauthlib</span></p>
+<div class="note">Pillow=EXIF GPS·orientation, numpy=임베딩 점수 정규화, httpx=Nest 호출, google-*=캘린더(OAuth2). DB는 pymongo.</div>
+
+<h3>Flutter (pubspec.yaml · 주요)</h3>
+<table>
+<tr><th>패키지</th><th>용도</th></tr>
+<tr><td>camera · record · image_picker</td><td>사진/영상·음성·갤러리 캡처</td></tr>
+<tr><td>http · shared_preferences · path_provider</td><td>REST·로컬 저장·파일 경로</td></tr>
+<tr><td>flutter_markdown · intl</td><td>일기 렌더·날짜 포맷</td></tr>
+<tr><td>geolocator · network_info_plus</td><td>GPS·WiFi SSID</td></tr>
+<tr><td>flutter_local_notifications · receive_sharing_intent · home_widget</td><td>알림·공유인텐트·홈위젯</td></tr>
+<tr><td>notification_listener_service · call_log · another_telephony · workmanager · flutter_foreground_task</td><td>(레거시 수집, <code>flutterCollects=false</code>로 비활성)</td></tr>
+<tr><td>health · permission_handler · android_intent_plus</td><td>건강·권한·인텐트</td></tr>
+</table>
+<p class="k">폰트 번들: Pretendard(유저)·GowunBatang(동반자·일기)·Literata(디스플레이)·Phosphor Thin(아이콘).</p>
+
+<h3>수집기 (build.gradle.kts)</h3>
+<pre>compileSdk 36 · minSdk 26 · targetSdk 36
+dependencies { /* 외부 의존 없음 — HttpURLConnection + org.json (내장) */ }</pre>
+
+<h2 class="anchor" id="config">설정 (config.py · env)</h2>
+<table>
+<tr><th>변수</th><th>기본값</th><th>설명</th></tr>
+<tr><td><code>NEST_BASE_URL</code></td><td>http://192.168.68.50:7780</td><td>LLM 게이트웨이 (chocolat은 localhost:7780)</td></tr>
+<tr><td><code>NEST_TOKEN</code></td><td>(필수)</td><td>Nest 인증</td></tr>
+<tr><td><code>MONGO_URL</code> / <code>MONGO_DB</code></td><td>localhost:27017 / oracle</td><td>MongoDB</td></tr>
+<tr><td><code>VAULT_DIR</code></td><td>./corpus</td><td>정본 vault 경로</td></tr>
+<tr><td><code>ORACLE_HOST</code> / <code>ORACLE_PORT</code></td><td>0.0.0.0 / 8001</td><td>서버 바인드</td></tr>
+<tr><td><code>ORACLE_TOKEN</code></td><td>(빈값=무인증)</td><td>설정 시 토큰 인증(loopback 면제). 앱은 <code>--dart-define</code></td></tr>
+<tr><td><code>ORACLE_EMBED</code></td><td>(선택)</td><td>임베딩 alias — 미설정 시 최근순 fallback</td></tr>
+<tr><td><code>ORACLE_WORKING_DAYS</code> / <code>_MAX_CHARS</code></td><td>7 / 12000</td><td>워킹메모리 범위·상한</td></tr>
+<tr><td><code>ORACLE_MEM_W_*</code> / <code>_TAU_DAYS</code></td><td>1.0 / 30</td><td>검색 가중치(유사도·최근성·중요도)·감쇠</td></tr>
+<tr><td><code>GCAL_CREDS_PATH</code> / <code>_TOKEN_PATH</code></td><td>./gcal_*.json</td><td>구글 OAuth</td></tr>
+</table>
+
+<h2 class="anchor" id="deploy">빌드 · 배포</h2>
+<h4>백엔드 (chocolat 영구화)</h4>
+<pre># bert → chocolat 코드 동기화
+rsync -avh --exclude='.venv/' --exclude='__pycache__/' \
+  ~/projects/oracle/backend/ chocolat:~/projects/oracle/backend/
+# chocolat: venv + .env + LaunchAgent 등록(1회) → kickstart
+ssh chocolat 'cd ~/projects/oracle/backend && .venv/bin/pip install -r requirements.txt'
+launchctl kickstart -k gui/$(id -u)/h59.oracle.backend</pre>
+<h4>Flutter APK</h4>
+<pre>export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+cd ~/projects/oracle/app && flutter build apk --debug
+adb install -r build/app/outputs/flutter-apk/app-debug.apk</pre>
+<h4>수집기 APK</h4>
+<pre>export JAVA_HOME=/opt/homebrew/opt/openjdk@17/.../Contents/Home
+cd ~/projects/oracle/collector && ./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk</pre>
+
+<h2 class="anchor" id="cron">배치 · 자동화 (chocolat LaunchAgent)</h2>
+<table>
+<tr><th>plist</th><th>스케줄</th><th>역할</th></tr>
+<tr><td><code>h59.oracle.backend</code></td><td>KeepAlive</td><td>FastAPI 서버(부팅 자동·crash 재시작)</td></tr>
+<tr><td><code>h59.oracle.midnight</code></td><td>매일 00:05</td><td>자정 배치 — 분류 + 일(매일)/주(월)/월(1일) 저널 + 인덱스</td></tr>
+<tr><td><code>h59.oracle.morning</code></td><td>매일 07:00</td><td>조간 발행물</td></tr>
+<tr><td><code>h59.oracle.evening</code></td><td>매일 21:00</td><td>석간 발행물</td></tr>
+<tr><td><code>h59.oracle.vault-backup</code></td><td>매일 03:20</td><td>vault 스냅샷(rsync --link-dest 증분, 14일 회전)</td></tr>
+<tr><td><code>h59.oracle.mongo-backup</code></td><td>매주 일 03:00</td><td>mongodump --gzip(28일 회전)</td></tr>
+<tr><td><code>h59.embed</code></td><td>KeepAlive</td><td>로컬 임베딩 서버(llama-server)</td></tr>
+</table>
+
+<h2 class="anchor" id="car">차량 출차/주차 상태머신</h2>
+<p>물리 상태전이는 <b>수집기</b>가, "어디 가에 답했나"는 대화를 가진 <b>백엔드</b>(운행 스레드)가 판정.
+비대칭 근거: BT 해제=이미 차서 멀어짐(주차 단독), BT 연결=차 근처일 뿐(물건 꺼내기?) → 200m 게이트로 운전 확정.</p>
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> 주차중
+  주차중 --> 운전중: 차 BT 연결 + 세운 데서 200m↑ 이동 → "어디 가?"
+  운전중 --> 주차중: 차 BT 해제(2틱 디바운스) → 주차 GPS + "어디?/잘 도착했어?"
+  운전중 --> 주차중: 30분 정지(안전망) → 조용히 리셋
+</div>
+<ul>
+<li><b>출차</b>: <code>POST /car/departure</code> → "어디 가?" + <code>drive.question_ts</code> 기록</li>
+<li><b>주차</b>: <code>POST /car/parking</code> → <code>question_ts</code> 이후 첫 user 답 조회 → "강남 잘 도착했어?", 없으면 "어디 세웠어?"</li>
+<li><b>재시작 baseline</b>: 현재 BT로 상태만 맞추고 이벤트 억제(가짜 출차/주차 방지)</li>
+<li>임계값은 <code>settings.location</code>에서 어드민 튜닝</li>
+</ul>
+
+<h2 class="anchor" id="sec">보안 · 프라이버시 · 관측성</h2>
+<ul>
+<li><b>네트워크</b>: Tailscale(WireGuard) 내부망 전제. 공개 노출 안 함.</li>
+<li><b>인증</b>: 기본 무인증. <code>ORACLE_TOKEN</code> 설정 시 미들웨어 토큰 검사(loopback 면제).</li>
+<li><b>프라이버시</b>: SMS 본문은 <b>로컬 LLM만</b>(클라우드 금지). OTP redact. 신호 source 태깅(provenance).</li>
+<li><b>관측성</b>: 수집기가 <code>/collector-status</code>로 WiFi·위치·BT·차상태·로그 보고 → 어드민에서 adb 없이 확인.</li>
+<li><b>백업</b>: vault 일일(14일)·mongo 주간(28일) 자동 회전.</li>
+</ul>
+
+<div class="foot">엔드포인트 상세는 <a href="api.html">API 레퍼런스</a> · 화면은 <a href="design.html">디자이너 문서</a>.</div>
+</div></main>
+<script src="mermaid.min.js"></script>
+<script src="nav.js"></script>
+</body>
+</html>

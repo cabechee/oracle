@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle · API 레퍼런스</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="sidebar"></div>
+<main class="content"><div class="inner">
+
+<div class="eyebrow">공통 레퍼런스 · API</div>
+<h1>API 레퍼런스</h1>
+<p class="lede">FastAPI 백엔드 · <b>84</b>개 엔드포인트 · <b>21</b>개 라우터. 모든 경로는 루트 마운트
+(<code>admin</code>만 <code>/admin/api</code> prefix).</p>
+
+<div class="note"><b>기본 정보</b>
+Base URL <code>http://chocolat.tail575fea.ts.net:8001</code> (Tailscale magic DNS) ·
+인증 기본 무인증, <code>ORACLE_TOKEN</code> 설정 시 헤더 토큰 ·
+FastAPI 자동 문서 <code>/docs</code>(Swagger)·<code>/redoc</code>·<code>/openapi.json</code> — <b>인터랙티브 시도는 이걸 사용</b>.
+이 페이지는 한국어 개관.</div>
+
+<div class="warn"><b>비동기 인입 패턴</b>
+<code>POST /ingest?async_mode=1</code> 은 stub record(<code>status=processing</code>)를 즉시 반환하고,
+폰이 <code>GET /records/{id}</code> 를 4초 간격(최대 재시도)으로 폴링해 <code>status=done</code> 을 받습니다.</div>
+
+<div class="kpi">
+  <div class="box"><div class="n">39</div><div class="l">GET</div></div>
+  <div class="box"><div class="n">39</div><div class="l">POST</div></div>
+  <div class="box"><div class="n">1</div><div class="l">PATCH</div></div>
+  <div class="box"><div class="n">5</div><div class="l">DELETE</div></div>
+</div>
+
+<h2 class="anchor" id="ingest">ingest · 인입 · LLM</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/ingest</td><td>사진/음성/영상/코멘트 인입. multipart: file[]·audio·video·comment·model·companion_prompt/speaker. <code>?async_mode&backfill&model</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/llm/models</td><td>Nest 등록 모델·council 카탈로그 → <code>{models, councils}</code></td></tr>
+</table>
+
+<h2 class="anchor" id="records">records · 기록</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/records/{id}/reaction</td><td>반응 <code>{reaction, section?}</code></td></tr>
+<tr><td><span class="b patch">patch</span></td><td class="path">/records/{id}</td><td>코멘트 편집 <code>{user_comment}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/records/{id}/hide</td><td>숨김(soft delete)</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/records/{id}/reprocess</td><td>재분석 <code>?part=all|quick|analysis|comment|discovery</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/records</td><td>목록 <code>?limit=50&offset=0</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/records/{id}</td><td>단건(폴링)</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/photos/{path}</td><td>vault 상대경로 사진 서빙(FileResponse)</td></tr>
+</table>
+
+<h2 class="anchor" id="journal">journal · 저널 · 다이제스트</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/digest/run</td><td>자정 배치 트리거 <code>?target_date</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/journal/weekly</td><td>주간 회고 수동</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/journal/monthly</td><td>월간 회고 수동</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/journal/list</td><td>저널 메타 <code>?kind=day|week|month</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/journal/{jid}</td><td>저널 본문</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/digest/list</td><td>다이제스트 목록</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/digest/{date}</td><td>날짜별 마크다운</td></tr>
+</table>
+
+<h2 class="anchor" id="threads">threads · 주제</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적</th></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/threads</td><td>활동 있는 주제 <code>?within_days=60</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/threads/silent</td><td>환기 후보(오래 무언급) <code>?min_days&max_days</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/threads/{id}</td><td>주제 + 속한 기록 타임라인</td></tr>
+</table>
+
+<h2 class="anchor" id="query-chat">query · chat · 검색·대화</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/query</td><td>자연어 검색 <code>{question, limit?}</code> → <code>{answer, sources}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/embed/backfill</td><td>임베딩 일괄</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/chat</td><td>대화 한 턴 <code>{message, mention_ids?}</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/chat/history</td><td>대화 히스토리 <code>?limit=200</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/chat/action/{id}/confirm</td><td>제안 액션 실행</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/chat/action/{id}/cancel</td><td>제안 액션 취소</td></tr>
+</table>
+
+<h2 class="anchor" id="index-nest">index · nest · home</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적</th></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/index/master</td><td>vault 마스터 인덱스</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/index/meta</td><td>월별 통계</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/nest/health</td><td>Nest 게이트웨이 상태</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/home/cover</td><td>홈 표지(날씨·일정·다이제스트) <code>?date</code></td></tr>
+</table>
+
+<h2 class="anchor" id="signals">signals · 신호 · 수집기</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 클라이언트</th></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/signals/sync</td><td>SMS·부재중·알림 저장+요약 <code>{sms, calls, notifications, source}</code> · <b>수집기</b></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/collector-config</td><td>수집기 설정 조회 · <b>수집기</b></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/collector-config</td><td>수집기 설정 갱신 · 어드민</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/collector-status</td><td>라이브 상태 보고(WiFi·GPS·BT·car_state) · <b>수집기</b></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/collector-status</td><td>현재 상태 조회 · 어드민</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/signals/recent</td><td>신호 로그 <code>?briefs=40&raw=80</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/signals/brief/{id}/feedback</td><td>분류 피드백 <code>{item_index, feedback}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/signals/recategorize</td><td>카테고리 변경 <code>{signal_ids, category}</code></td></tr>
+</table>
+
+<h2 class="anchor" id="companion">companion · car · 동반자 · 차량</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/companion/say</td><td>위치·시간 이벤트 한마디 <code>{event, place?, speaker?}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/companion/askplace</td><td>새 곳 '여기 어디?' <code>{lat, lng}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/companion/banter</td><td>베르·쿠키 도란도란 <code>{event:arrive|leave|board, place?, minutes?}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/car/departure</td><td>출차 <code>{lat, lng, ts?, speaker?}</code> → "어디 가?" + 운행 스레드</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/car/parking</td><td>주차 <code>{lat, lng, ts?, silent?, speaker?}</code> → 위치 기록 + 질문</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/companion/asked</td><td>선제 멘트 흐름 기록 <code>{speaker, text, ts?}</code></td></tr>
+</table>
+
+<h2 class="anchor" id="visits">visits · parking · places · 위치</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/collector-records</td><td>여정·주차·신호 통합 <code>?limit=100</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/visits</td><td>방문 기록 <code>{place?, lat, lng, start_ts, end_ts, minutes, silent?}</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/visits</td><td>날짜별 방문 <code>?date</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/parking</td><td>주차 위치 기록 <code>{lat, lng, ts?}</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/parking/latest</td><td>최근 주차 위치('내 차 어디?')</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/places</td><td>장소 목록</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/places</td><td>장소 등록/수정 <code>{name, kind?, lat?, lng?, wifis?, bts?, description?, id?}</code></td></tr>
+<tr><td><span class="b delete">del</span></td><td class="path">/places/{id}</td><td>장소 삭제</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/location-config</td><td>위치 센싱 설정 조회</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/location-config</td><td>위치 설정 갱신(차량 임계값 포함)</td></tr>
+</table>
+
+<h2 class="anchor" id="desk">dashboard · reminders · ledger · 데스크</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/dashboard</td><td>데스크 피드(action·pending·neglected)</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/dashboard/dismiss</td><td>항목 확인 <code>{key}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/dashboard/undismiss</td><td>확인 취소 <code>{key}</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/dashboard/dismissed</td><td>확인 히스토리 <code>?limit=150</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/reminders</td><td>할 일 목록 <code>?include_done</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/reminders</td><td>추가 <code>{text, due?, source?, signal_id?}</code></td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/reminders/{id}/done</td><td>완료 표시</td></tr>
+<tr><td><span class="b delete">del</span></td><td class="path">/reminders/{id}</td><td>삭제</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/ledger</td><td>가계부 <code>?date</code> → <code>{total, count, items}</code></td></tr>
+<tr><td><span class="b delete">del</span></td><td class="path">/ledger/{id}</td><td>오탐 삭제</td></tr>
+</table>
+
+<h2 class="anchor" id="briefing-metrics-cal">briefing · metrics · calendar</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적 · 요청</th></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/briefing/run</td><td>조간/석간 합성 <code>?kind=morning|evening</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/briefing/latest</td><td>최신 발행물 <code>?kind</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/briefing/list</td><td>발행물 목록</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/metrics/sync</td><td>수면·걸음 <code>{date, sleep_min?, steps?}</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/calendar/status</td><td>인증 상태</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/calendar/upcoming</td><td>다가오는 일정 <code>?days=7</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/calendar/today</td><td>오늘 일정 + 한 줄</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/calendar/events</td><td>이벤트 생성 <code>{title, start, end?, description?, location?, all_day?}</code></td></tr>
+</table>
+
+<h2 class="anchor" id="admin">admin · 어드민 (<code>/admin/api</code> prefix)</h2>
+<table>
+<tr><th>M</th><th>경로</th><th>목적</th></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/admin/api/stats</td><td>컬렉션별 문서 수</td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/admin/api/collection/{name}</td><td>문서 페이징 <code>?limit&skip&q</code></td></tr>
+<tr><td><span class="b get">get</span></td><td class="path">/admin/api/collection/{name}/{id}</td><td>문서 단건</td></tr>
+<tr><td><span class="b delete">del</span></td><td class="path">/admin/api/collection/{name}/{id}</td><td>문서 삭제</td></tr>
+<tr><td><span class="b post">post</span></td><td class="path">/admin/api/signals/rebrief</td><td>신호 전체 재요약</td></tr>
+<tr><td><span class="b get">get</span> <span class="b post">post</span></td><td class="path">/admin/api/personas</td><td>인격(쿠키/베르) 조회·갱신</td></tr>
+<tr><td><span class="b get">get</span> <span class="b post">post</span></td><td class="path">/admin/api/signal-excludes</td><td>신호 제외 패턴</td></tr>
+<tr><td><span class="b get">get</span> <span class="b post">post</span></td><td class="path">/admin/api/task-aliases</td><td>작업→모델 alias</td></tr>
+<tr><td><span class="b get">get</span> <span class="b post">post</span></td><td class="path">/admin/api/companion-config</td><td>동반자 말걸기 설정</td></tr>
+</table>
+
+<div class="foot">정확한 스키마·시도는 백엔드 <code>/docs</code>(자동 OpenAPI). 데이터 형태는 <a href="dev.html#data">데이터 모델</a>.</div>
+</div></main>
+<script src="nav.js"></script>
+</body>
+</html>

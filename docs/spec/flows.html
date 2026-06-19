@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle · 유저플로우</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="sidebar"></div>
+<main class="content"><div class="inner">
+
+<div class="eyebrow">공통 레퍼런스 · User Flows</div>
+<h1>유저플로우</h1>
+<p class="lede">단일 경로는 번호 스텝, 분기·상태 전이가 있는 흐름은 다이어그램으로
+(NNG 가이드 적용). 화면은 <a href="design.html#screens">화면 인벤토리</a>.</p>
+
+<div class="toc"><b>플로우 인덱스</b>
+<ul>
+<li><a href="#capture">A · 캡처 → 즉답</a></li>
+<li><a href="#notif">B · 알림 → 기록</a></li>
+<li><a href="#car">C · 차량 출차/주차</a></li>
+<li><a href="#chat">D · 대화 + 액션</a></li>
+<li><a href="#search">E · 검색/회상</a></li>
+<li><a href="#desk">F · 신호 → 데스크</a></li>
+<li><a href="#arrive">G · 도착 말걸기</a></li>
+</ul></div>
+
+<h2 class="anchor" id="capture">A · 캡처 → 즉답</h2>
+<div class="mermaid">
+flowchart TD
+  s([기록 탭 · 카메라]) --> cap[사진/영상/음성/텍스트 입력]
+  cap --> send[전송 → POST /ingest async]
+  send --> stub[stub record processing 즉시 표시]
+  stub --> poll{4s 폴링<br/>status=done?}
+  poll -- 아니오 --> poll
+  poll -- 예 --> show[베르 인사이트 + 쿠키 한마디 + 분석]
+  show --> react[흐름서 반응·편집 가능]
+  react --> e([끝])
+</div>
+
+<h2 class="anchor" id="notif">B · 알림 → 기록 (동반자 질문에 답)</h2>
+<ol>
+<li>수집기가 이벤트 감지(도착·체크인·출차 등) → 동반자가 선제 멘트 생성</li>
+<li>폰에 알림 표시 — payload <code>{s:화자, t:질문}</code></li>
+<li>알림 탭(콜드스타트/포그라운드) → 앱이 payload 수신</li>
+<li>기존 모달 정리 후 <b>기록 탭</b>으로 이동, 상단에 질문 배너 표시</li>
+<li>아빠가 사진/음성/텍스트로 답 입력</li>
+<li>전송 → <code>/ingest</code>에 <code>companion_prompt/speaker</code> 동봉(맥락 포함)</li>
+<li>흐름에 질문 버블과 답 record가 쌍으로 남는다(탭한 시각 기준)</li>
+</ol>
+
+<h2 class="anchor" id="car">C · 차량 출차/주차 (2상태 머신)</h2>
+<p>물리 전이는 수집기, "어디 가에 답했나"는 백엔드 운행 스레드가 판정. 상세는 <a href="dev.html#car">Tech Spec</a>.</p>
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> 주차중
+  주차중 --> 운전중: 차 BT 연결 + 200m↑ 이동<br/>→ "어디 가?"
+  운전중 --> 주차중: BT 해제(2틱)<br/>→ 주차 GPS + "잘 도착했어?/어디?"
+  운전중 --> 주차중: 30분 정지(안전망)<br/>→ 조용히 리셋
+</div>
+<div class="note"><b>"잘 도착했어?" 분기</b> 주차 시 백엔드가 <code>question_ts</code> 이후 첫 user 답을 찾는다 →
+있으면 "(목적지) 잘 도착했어?", 없으면 "어디 세웠어?".</div>
+
+<h2 class="anchor" id="chat">D · 대화 + 액션 확인</h2>
+<div class="mermaid">
+flowchart TD
+  i[흐름 입력] --> send[POST /chat]
+  send --> resp[베르 응답 + 근거 record]
+  resp --> act{액션 제안<br/>있나?}
+  act -- 없음 --> done([끝])
+  act -- 있음 --> ask[버튼: 일정 등록할까요?]
+  ask --> dec{확인?}
+  dec -- 확인 --> run[confirm → 캘린더 생성]
+  dec -- 취소 --> cancel[cancel → 무효]
+  run --> done
+  cancel --> done
+</div>
+
+<h2 class="anchor" id="search">E · 검색/회상</h2>
+<ol>
+<li>AppBar 검색 → 질의 화면</li>
+<li>"지난주 마우스 관련?" 입력 → <code>POST /query</code></li>
+<li>3요소 검색으로 후보 record/journal 수집 → LLM이 답 합성</li>
+<li>답변 + 참조 record 썸네일 카드 표시(누적 히스토리)</li>
+<li>다음 질문 반복</li>
+</ol>
+
+<h2 class="anchor" id="desk">F · 신호 → 데스크 처리</h2>
+<ol>
+<li>수집기 30분 sync → <code>/signals/sync</code>(SMS·부재중·알림)</li>
+<li>새 신호만 로컬 LLM이 5단계 분류 → brief 생성 → 폰 알림</li>
+<li>데스크 탭: 당장 처리(action)·리마인더·오늘 알림·가계부·오래 못 챙긴 사람</li>
+<li>action 카드 확인 → <code>dismiss</code>(실행취소 가능)</li>
+<li>분류 틀리면 재지정(<code>recategorize</code>) / '부정확' 피드백</li>
+<li>결제는 가계부로, 처리할 일은 리마인더로 자동/수동 승격</li>
+</ol>
+
+<h2 class="anchor" id="arrive">G · 도착 말걸기 (banter)</h2>
+<ol>
+<li>수집기 체류·도착 감지(BT→WiFi→GPS)</li>
+<li>거주자 장소(집=쿠키·작업실=베르)면 그 주인이 먼저 반김</li>
+<li>게이팅(마스터·새벽 침묵·쿨다운) 통과 시에만 알림</li>
+<li>베르·쿠키가 흐름에서 2~3턴 도란도란(사용자 미포함) → 흐름 캡션 "( ~에 도착했다 )"</li>
+<li>미등록 새 곳 15분+ 체류 → "여기 어디?" 질문 → 답하면 임시 장소 저장</li>
+</ol>
+
+<div class="foot">흐름의 권한·게이팅 정책은 <a href="dev.html#car">Tech Spec</a>, 화면 단위는 <a href="design.html#screens">디자이너 문서</a>.</div>
+</div></main>
+<script src="mermaid.min.js"></script>
+<script src="nav.js"></script>
+</body>
+</html>

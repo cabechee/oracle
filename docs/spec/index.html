@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle · 제품 문서 Overview</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="sidebar"></div>
+<main class="content"><div class="inner">
+
+<div class="eyebrow">Overview · 시작하기</div>
+<h1>Oracle 제품 문서</h1>
+<p class="lede">일상을 사진·음성·텍스트로 던지면 LLM 동반자가 즉시 반응하고, 자정마다 하루를 회고로
+엮어주는 <b>개인 일상 디스커버리 채팅 동반자 + 비서</b>. 이 문서는 현재 구현된 코드에서
+역으로 추출한 스펙입니다.</p>
+
+<div class="kpi">
+  <div class="box"><div class="n">3</div><div class="l">컴포넌트 (앱·수집기·백엔드)</div></div>
+  <div class="box"><div class="n">84</div><div class="l">API 엔드포인트</div></div>
+  <div class="box"><div class="n">16</div><div class="l">데이터 컬렉션</div></div>
+  <div class="box"><div class="n">20</div><div class="l">제품 능력</div></div>
+  <div class="box"><div class="n">2</div><div class="l">동반자 (베르·쿠키)</div></div>
+</div>
+
+<div class="note"><b>이 문서를 읽는 법</b>
+역할(기획/개발/디자인)별 페이지는 <b>진입로</b>이고, 사실의 단일 출처(SSoT)는 공통 페이지
+(<a href="api.html">API</a> · <a href="stories.html">유저스토리</a> · <a href="flows.html">유저플로우</a>)와
+코드입니다. 중복 대신 링크로 잇습니다. 모든 내용은 코드에서 추출했으므로, 충돌 시 코드가 정본입니다.</div>
+
+<h2 class="anchor" id="system">시스템 구성</h2>
+<p>역할이 분리된 세 컴포넌트가 Tailscale(WireGuard) 내부망으로 한 백엔드(SoT)에 모입니다.
+iOS 샌드박싱 때문에 <b>수집(Android 네이티브)</b> 과 <b>인터페이스(Flutter, 공통)</b> 를 나눴습니다.</p>
+
+<div class="mermaid">
+flowchart LR
+  subgraph CL[클라이언트]
+    F["Flutter 앱<br/>Android·iOS·web<br/>(active 인터페이스)"]
+    C["Android 수집기<br/>(passive 수집)"]
+  end
+  subgraph CH["chocolat 서버 · Tailscale magic DNS"]
+    B["FastAPI 백엔드<br/>:8001 (SoT)"]
+    M[("MongoDB<br/>메타·검색 캐시")]
+    V[("Vault<br/>평문 정본")]
+    N["Nest 게이트웨이<br/>:7780"]
+    E["h59.embed<br/>Qwen3-Embedding :7790"]
+  end
+  P["LLM 제공자<br/>Claude·Gemini·Qwen·…"]
+  F -->|REST| B
+  C -->|REST| B
+  B --> M
+  B --> V
+  B -->|LLM 호출| N
+  B -->|임베딩| N
+  N --> P
+  N --> E
+</div>
+
+<table>
+<tr><th>구성요소</th><th>역할</th><th>스택</th></tr>
+<tr><td><b>Flutter 앱</b></td><td>능동 인터페이스 — 캡처·대화·타임라인·데스크·검색. iOS/web 공유</td><td>Flutter 3.44 / Dart 3.12</td></tr>
+<tr><td><b>Android 수집기</b></td><td>수동 수집 전담 — 문자·통화·알림·위치·차량(passive, 별도 앱)</td><td>순수 Android (외부 의존 0)</td></tr>
+<tr><td><b>FastAPI 백엔드</b></td><td>단일 진실원 — 인입·분류·다이제스트·검색·대화·동반자</td><td>FastAPI / Python 3.9</td></tr>
+<tr><td><b>MongoDB</b></td><td>메타·검색·인덱스 캐시 (정본 아님)</td><td>localhost:27017 · db <code>oracle</code></td></tr>
+<tr><td><b>Vault</b></td><td>정본 — 평문 마크다운 + 미디어(append-only)</td><td>파일시스템 <code>corpus/</code></td></tr>
+<tr><td><b>Nest 게이트웨이</b></td><td>LLM 제공자·effort·계정 일괄 관리 (모델 agnostic)</td><td>별도 repo · :7780</td></tr>
+<tr><td><b>h59.embed</b></td><td>로컬 임베딩 서버 (검색용 벡터)</td><td>llama-server + Qwen3-Embedding-0.6B :7790</td></tr>
+</table>
+
+<h2 class="anchor" id="layers">3계층 의미 누층</h2>
+<p>캡처는 즉답으로 끝나지 않고, 자정마다 분류·다이제스트로 의미가 쌓입니다.</p>
+<div class="grid">
+  <div class="card"><h4>Layer 1 · 인입 (실시간)</h4><div class="k">캡처 → VLM 캡션 + LLM 즉답 → Record. 베르(인사이트) + 쿠키(빠른 한마디).</div></div>
+  <div class="card"><h4>Layer 2 · 분류 (자정)</h4><div class="k">Record에 thread·type·tags·위치 부착. 며칠 무언급 thread 점검.</div></div>
+  <div class="card"><h4>Layer 3 · 다이제스트 (자정)</h4><div class="k">일/주/월 서술 저널 + 상위 인덱스 생성. 조간·석간 발행물.</div></div>
+</div>
+
+<h2 class="anchor" id="glossary">핵심 개념 · 용어집</h2>
+<table>
+<tr><th>용어</th><th>뜻</th></tr>
+<tr><td><b>캡처 / Record</b></td><td>사진·음성·텍스트 1건. 제품의 기본 단위. <code>rec-…</code></td></tr>
+<tr><td><b>동반자</b></td><td>두 캐릭터 — <b>베르</b>(강아지, '아빠'라 부름, 메인) · <b>쿠키</b>(오목눈이 새, '오빠'라 부름, 빠른 한마디)</td></tr>
+<tr><td><b>다이제스트 / 저널</b></td><td>자정 배치가 쓰는 일/주/월 서술 회고. Vault에 평문, MongoDB <code>journals</code>에 메타</td></tr>
+<tr><td><b>수집기</b></td><td>문자·통화·알림·위치를 모으는 별도 Android 앱 (passive)</td></tr>
+<tr><td><b>신호 / Brief</b></td><td>수집된 SMS·부재중·푸시(=신호) → 30분 주기 분류 요약(=brief). '대신 읽어드림'</td></tr>
+<tr><td><b>체류 / 방문 (Visit)</b></td><td>한곳에 ~150m·~15분 머물면 방문으로 기록. 여정(집→차→사무실)</td></tr>
+<tr><td><b>Banter</b></td><td>아빠 이동 시 베르·쿠키가 흐름에서 자기들끼리 도란도란(사용자 미포함)</td></tr>
+<tr><td><b>출차 / 주차</b></td><td>차량 BT+GPS 2상태 머신. 출차="어디 가?" · 주차="잘 도착했어?"</td></tr>
+<tr><td><b>Vault</b></td><td>정본 저장소. 평문 마크다운 + 미디어. MongoDB는 캐시일 뿐</td></tr>
+<tr><td><b>워킹 메모리</b></td><td>대화/검색 시 주는 맥락 — 지난 N일(기본 7) 저널 + 오늘 캡처(상한 12k자)</td></tr>
+<tr><td><b>Nest</b></td><td>LLM 게이트웨이. Oracle은 모델을 직접 모르고 alias로만 호출(모델 agnostic)</td></tr>
+</table>
+
+<h2 class="anchor" id="entry">역할별 진입로</h2>
+<div class="grid">
+  <a class="card" href="pm.html" style="text-decoration:none;color:inherit"><h4>🧭 기획자 · PRD</h4>
+    <div class="k">제품 목표·페르소나·기능요구·범위/비범위·로드맵·의사결정 로그</div></a>
+  <a class="card" href="dev.html" style="text-decoration:none;color:inherit"><h4>🛠 개발자 · Tech Spec</h4>
+    <div class="k">아키텍처·데이터모델·디펜던시·빌드/배포·상태머신·보안</div></a>
+  <a class="card" href="design.html" style="text-decoration:none;color:inherit"><h4>🎨 디자이너 · Design</h4>
+    <div class="k">에디토리얼 디자인 시스템·토큰·화면 인벤토리·컴포넌트·인터랙션</div></a>
+</div>
+<div class="grid">
+  <a class="card" href="api.html" style="text-decoration:none;color:inherit"><h4>API 레퍼런스</h4>
+    <div class="k">84개 엔드포인트, 라우터별 그룹</div></a>
+  <a class="card" href="stories.html" style="text-decoration:none;color:inherit"><h4>유저스토리</h4>
+    <div class="k">에픽별 스토리 + 수용기준</div></a>
+  <a class="card" href="flows.html" style="text-decoration:none;color:inherit"><h4>유저플로우</h4>
+    <div class="k">캡처·알림·차량 상태머신 등 핵심 흐름</div></a>
+</div>
+
+<div class="foot">Oracle 제품 문서 · 코드에서 역설계 추출 · 정본=<code>~/projects/oracle</code> · 충돌 시 코드 우선</div>
+</div></main>
+<script src="mermaid.min.js"></script>
+<script src="nav.js"></script>
+</body>
+</html>

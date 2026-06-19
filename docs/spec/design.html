@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle · 디자이너 Design System</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.sw{display:flex;flex-wrap:wrap;gap:10px;margin:1em 0}
+.sw .c{width:128px;border:1px solid var(--line);border-radius:9px;overflow:hidden;font-size:11.5px}
+.sw .c .chip{height:46px}
+.sw .c .lab{padding:5px 8px;background:var(--card)}
+.sw .c .lab b{display:block;font-size:12px}
+.sw .c .lab span{color:var(--faint);font-family:var(--mono);font-size:10.5px}
+.type-row{border-bottom:1px solid var(--line);padding:10px 0}
+.type-row .meta{font-size:11.5px;color:var(--faint);font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div id="sidebar"></div>
+<main class="content"><div class="inner">
+
+<div class="eyebrow">🎨 디자이너 · Design System</div>
+<h1>디자인 시스템 & 핸드오프</h1>
+<p class="lede">컨셉은 <b>오프화이트 에디토리얼</b> — 발행물 같은 종이 질감, 화자를 서체로 구분.
+토큰의 정본은 <code>app/lib/core/design.dart</code>.</p>
+
+<div class="toc"><b>목차</b>
+<ul>
+<li><a href="#principles">디자인 원칙</a></li>
+<li><a href="#color">색상 토큰</a></li>
+<li><a href="#type">타이포그래피</a></li>
+<li><a href="#space">간격 시스템</a></li>
+<li><a href="#screens">화면 인벤토리</a></li>
+<li><a href="#components">컴포넌트</a></li>
+<li><a href="#motion">인터랙션 · 모션</a></li>
+</ul></div>
+
+<h2 class="anchor" id="principles">디자인 원칙</h2>
+<ul>
+<li><b>에디토리얼/발행물 은유</b> — 스파인(좌측 시간축 레일), 방주(우측 회잉크 주석), No.N 발행물 느낌.</li>
+<li><b>화자 = 서체</b> — 유저(Pretendard), 동반자/일기(GowunBatang 명조), 캡션·숫자(Literata).</li>
+<li><b>주홍은 한 곳만</b> — 화면당 액센트(vermilion) 1곳 원칙(원고지 주홍).</li>
+<li><b>위계 = 여백</b> — 내부 여백 ≤ 외부 여백. 모든 행간 4pt 격자(수직 리듬).</li>
+<li><b>사진은 인화물</b> — 흰 마진 + 헤어라인 테두리로 '붙인 사진'처럼.</li>
+</ul>
+
+<h2 class="anchor" id="color">색상 토큰</h2>
+<p class="k">3계층 권장(primitive → semantic → component). 아래는 현재 primitive/semantic.</p>
+<div class="sw">
+  <div class="c"><div class="chip" style="background:#FAF9F6"></div><div class="lab"><b>paper</b><span>#FAF9F6</span></div></div>
+  <div class="c"><div class="chip" style="background:#161411"></div><div class="lab"><b>ink</b><span>#161411</span></div></div>
+  <div class="c"><div class="chip" style="background:#211E19"></div><div class="lab"><b>inkSoft</b><span>#211E19</span></div></div>
+  <div class="c"><div class="chip" style="background:#9A948A"></div><div class="lab"><b>gray</b><span>#9A948A</span></div></div>
+  <div class="c"><div class="chip" style="background:#C9C4BA"></div><div class="lab"><b>faint</b><span>#C9C4BA</span></div></div>
+  <div class="c"><div class="chip" style="background:#E5E2DA"></div><div class="lab"><b>hairline</b><span>#E5E2DA</span></div></div>
+  <div class="c"><div class="chip" style="background:#76705F"></div><div class="lab"><b>marginalia</b><span>#76705F</span></div></div>
+  <div class="c"><div class="chip" style="background:#BC4B33"></div><div class="lab"><b>vermilion</b><span>#BC4B33</span></div></div>
+</div>
+<table>
+<tr><th>토큰</th><th>역할</th></tr>
+<tr><td><code>paper</code></td><td>배경(오프화이트)</td></tr>
+<tr><td><code>ink</code> / <code>inkSoft</code></td><td>본문 잉크 / 일기 본문(약간 진함)</td></tr>
+<tr><td><code>gray</code> / <code>faint</code></td><td>보조 텍스트 / 비활성·힌트</td></tr>
+<tr><td><code>hairline</code> / <code>hairlineSoft</code></td><td>구분선 / 스파인 레일</td></tr>
+<tr><td><code>mat</code> / <code>matBorder</code></td><td>사진 인화 마진 / 테두리 헤어라인</td></tr>
+<tr><td><code>marginalia</code></td><td>방주 회잉크(동반자 우측 주석)</td></tr>
+<tr><td><code>vermilion</code></td><td>액센트(화면당 1곳)</td></tr>
+</table>
+
+<h2 class="anchor" id="type">타이포그래피</h2>
+<div class="type-row"><span style="font-family:'Pretendard',sans-serif;font-size:15px">유저 본문 — Pretendard 15/24 (한글 모바일 기준)</span><div class="meta">user body</div></div>
+<div class="type-row"><span style="font-family:'GowunBatang',serif;font-size:13.5px">동반자 방주 — GowunBatang 13.5/22 (본문보다 한 단 작게)</span><div class="meta">companion marginalia</div></div>
+<div class="type-row"><span style="font-family:'GowunBatang',serif;font-size:15px;line-height:1.87">일기·발행물 — GowunBatang 15/28 (인쇄급 행간)</span><div class="meta">journal / briefing</div></div>
+<div class="type-row"><span style="font-family:Georgia,serif;font-size:12px;letter-spacing:.02em">타임스탬프·캡션 — Literata 12/16 (opsz 8)</span><div class="meta">caption</div></div>
+<div class="type-row"><span style="font-family:Georgia,serif;font-size:34px;font-weight:300;letter-spacing:-1px">40 — 디스플레이 숫자 (Literata Light, 홈 마스트헤드)</span><div class="meta">display</div></div>
+<p class="k">번들 폰트: Pretendard · GowunBatang · Literata(Variable) · Phosphor Thin(아이콘 8종). 화자별 매핑이 핵심 규칙.</p>
+
+<h2 class="anchor" id="space">간격 시스템 (8pt 격자)</h2>
+<table>
+<tr><th>토큰</th><th>값</th><th>용도</th></tr>
+<tr><td><code>screenH</code></td><td>24</td><td>화면 좌우 여백</td></tr>
+<tr><td><code>rail</code></td><td>56</td><td>스파인 레일 폭(타임축)</td></tr>
+<tr><td><code>gutter</code></td><td>16</td><td>레일–본문 거터(방주 들여쓰기)</td></tr>
+<tr><td><code>inPhoto</code></td><td>8</td><td>사진→캡션</td></tr>
+<tr><td><code>inBlock</code></td><td>12</td><td>본문→방주, 방주→리액션</td></tr>
+<tr><td><code>entry</code> / <code>section</code></td><td>40</td><td>엔트리 사이 / 섹션 사이</td></tr>
+</table>
+
+<h2 class="anchor" id="screens">화면 인벤토리</h2>
+<p>4탭 + 모달 시스템. 흐름은 <a href="flows.html">유저플로우</a>.</p>
+<table>
+<tr><th>화면</th><th>위치</th><th>목적 · 주요 요소</th></tr>
+<tr><td><b>홈 (오늘)</b></td><td>Tab 0</td><td>마스트헤드(날짜)·건강 한 줄·발행물·어제 한 줄·오늘 기록·그날의 오늘</td></tr>
+<tr><td><b>흐름 (대화)</b></td><td>Tab 1</td><td>스파인 타임라인 — record+대화 merge, 사진/음성/텍스트 버블, 동반자 방주, 반응</td></tr>
+<tr><td><b>데스크</b></td><td>Tab 2</td><td>당장 처리(신호)·리마인더·오늘 알림·가계부·오래 못 챙긴 사람</td></tr>
+<tr><td><b>기록 (캡처)</b></td><td>Tab 3</td><td>전체화면 카메라·영상·음성·텍스트 + 동반자 질문 배너</td></tr>
+<tr><td>일기 (Digest)</td><td>모달</td><td>날짜 리스트 + 마크다운 본문 + '발행'</td></tr>
+<tr><td>검색 (Query)</td><td>모달</td><td>검색바 + 답변 + 참조 record 카드</td></tr>
+<tr><td>색인 (Index)</td><td>모달</td><td>펜딩 스레드 환기 + 마스터 인덱스</td></tr>
+<tr><td>위치 설정</td><td>모달</td><td>추적 토글·장소 목록·WiFi 저장 제안</td></tr>
+<tr><td>신호 로그</td><td>모달</td><td>brief 타임라인 + 원본 신호 + 분류 탭</td></tr>
+<tr><td>온보딩 / 진단 로그</td><td>첫 실행 / 히든</td><td>사용법 안내 / 디버그 로그(타이틀 long-press)</td></tr>
+</table>
+
+<h2 class="anchor" id="components">컴포넌트 카탈로그</h2>
+<p class="k">각 컴포넌트: 해부 → 변형 → 상태 → do/don't. 핵심 컴포넌트:</p>
+<div class="grid">
+<div class="card"><h4>RecordBubble</h4><div class="k">사진(인화 마진)·음성·코멘트 + 베르 인사이트 + 쿠키 방주 + 반응. 상태: processing / done / failed.</div></div>
+<div class="card"><h4>ChatMessageBubble</h4><div class="k">유저(우측 검정)·베르(좌측 아바타)·쿠키(방주 회잉크). 변형: 일반 / 액션 제안(버튼).</div></div>
+<div class="card"><h4>AskBanner</h4><div class="k">기록 탭 상단 동반자 질문 오버레이(반투명). 화자명 + 질문, 탭 시각 기록.</div></div>
+<div class="card"><h4>ActionCard (데스크)</h4><div class="k">신호 액션. 상태: 대기 / 확인됨(dismiss, 실행취소). 카테고리 색.</div></div>
+<div class="card"><h4>RefRecordCard</h4><div class="k">검색/대화 참조 — 사진 썸네일 + 캡션.</div></div>
+<div class="card"><h4>표지 마스트헤드</h4><div class="k">Literata 디스플레이 날짜 + 발행물 No. 에디토리얼 헤더.</div></div>
+</div>
+<div class="note"><b>상태 규약</b> 최소 4상태(default·hover/press·active·disabled) + 접근성 focus. 비동기 컴포넌트는
+processing/done/failed 3상태를 명시.</div>
+
+<h2 class="anchor" id="motion">인터랙션 · 모션</h2>
+<ul>
+<li><b>비동기 인입</b>: 전송 즉시 pending 버블 → 4초 폴링으로 done 전환(자연스러운 채움).</li>
+<li><b>동반자 말걸기</b>: 알림 → 탭 → 기록 탭 진입 + 질문 배너 슬라이드. 흐름엔 Q&A 쌍으로 안착.</li>
+<li><b>반응 피드백</b>: 사진 캡션 아래 "정확해·부족해·틀렸어", 코멘트엔 "좋아·싫어".</li>
+<li><b>플랫폼 가드</b>: 웹은 카메라·녹음 안내만, 수집은 Android 수집기 전담(<code>flutterCollects=false</code>).</li>
+</ul>
+
+<h3>핸드오프 노트</h3>
+<ul>
+<li>토큰 SoT = <code>app/lib/core/design.dart</code> — 디자인 변경은 여기서.</li>
+<li>남은 디자인: 필름 질감 · 오늘의 한 줄 · 잔여 화면 · 다크 필름 모드.</li>
+<li>수집기 대시보드(별도 네이티브)는 라이트 유틸리티 톤 — 메인 앱 에디토리얼과 의도적으로 분리.</li>
+</ul>
+
+<div class="foot">토큰 정본=<code>design.dart</code> · 화면 흐름=<a href="flows.html">유저플로우</a> · 기능 배경=<a href="pm.html">PRD</a>.</div>
+</div></main>
+<script src="nav.js"></script>
+</body>
+</html>
