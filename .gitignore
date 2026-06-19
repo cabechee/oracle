@@ -9,6 +9,11 @@ __pycache__/
 gcal_credentials.json
 gcal_token.json
 
+# Tesla Fleet API 비밀 — 커밋 금지. 개인키=차량 명령 서명, 토큰=계정 접근.
+# (공개키 deploy/teslaoracle-pages/.well-known/...는 공개용이라 커밋 OK)
+tesla-private-key.pem
+tesla_token.json
+
 # vault content — 개인 데이터, 별도 동기화(Obsidian/git private 등)
 corpus/
 digest/

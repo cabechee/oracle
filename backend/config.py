@@ -132,6 +132,23 @@ GCAL_TOKEN_PATH = os.getenv(
 GCAL_CALENDAR_ID = os.getenv("GCAL_CALENDAR_ID", "primary")
 
 
+# ── Tesla Fleet API (차량 위치·운행 — 차 상태머신 보강) ─────────────
+# 비밀(client secret)은 .env에만. developer.tesla.com 폼 완료 후 발급받아 채운다.
+# 지역 베이스: 한국=아태권은 NA 엔드포인트. EU/중국이면 .env에서 TESLA_API_BASE 교체.
+TESLA_CLIENT_ID = os.getenv("TESLA_CLIENT_ID", "")
+TESLA_CLIENT_SECRET = os.getenv("TESLA_CLIENT_SECRET", "")
+TESLA_DOMAIN = os.getenv("TESLA_DOMAIN", "teslaoracle.camembertcheese.studio")
+TESLA_REDIRECT_URI = os.getenv("TESLA_REDIRECT_URI", "http://localhost:8080/callback")
+TESLA_API_BASE = os.getenv(
+    "TESLA_API_BASE", "https://fleet-api.prd.na.vn.cloud.tesla.com")
+TESLA_SCOPES = os.getenv(
+    "TESLA_SCOPES", "openid offline_access vehicle_device_data vehicle_location")
+TESLA_TOKEN_PATH = os.getenv(
+    "TESLA_TOKEN_PATH", os.path.join(_PROJECT_ROOT, "tesla_token.json"))
+TESLA_PRIVATE_KEY_PATH = os.getenv(
+    "TESLA_PRIVATE_KEY_PATH", os.path.join(_PROJECT_ROOT, "tesla-private-key.pem"))
+
+
 # ── 서버 ────────────────────────────────────────────────────────
 HOST = os.getenv("ORACLE_HOST", "0.0.0.0")
 PORT = int(os.getenv("ORACLE_PORT", "8001"))   # finder=8000 옆 (8765=claude-dashboard 차지, 회피)
