@@ -7,8 +7,8 @@
 
 | 무엇 | 어디 | 상태 |
 |---|---|---|
-| EC 키 쌍(P-256) | 개인키 `tesla-private-key.pem`(repo 루트, **gitignore**) · 공개키 `deploy/teslaoracle-pages/.well-known/appspecific/com.tesla.3p.public-key.pem`(공개, 커밋 OK) | ✅ 생성됨 |
-| 공개키 호스팅 | Cloudflare Pages → `https://teslaoracle.camembertcheese.studio` | ⏳ 배포 필요 |
+| EC 키 쌍(P-256) | 개인키 `tesla-private-key.pem`(repo 루트, **gitignore**) · 공개키 `deploy/oraclecar-pages/.well-known/appspecific/com.tesla.3p.public-key.pem`(공개, 커밋 OK) | ✅ 생성됨 |
+| 공개키 호스팅 | ✅ 배포됨 → `https://oraclecar.pages.dev` (06-20, 공개키 라이브 검증·폼 통과) | ✅ |
 | 백엔드 모듈 | `backend/tesla.py` (graceful, 읽기 전용) | ✅ |
 | 일회 인증 | `scripts/tesla_auth.py` (authorization_code) | ✅ |
 | 파트너 등록 | `scripts/tesla_register.py` (도메인+공개키) | ✅ |
@@ -18,7 +18,7 @@
 
 ### 1. developer.tesla.com 앱 폼
 - OAuth 부여 유형: **인증 코드 및 사물 통신**
-- 허용 출처 URL: `https://teslaoracle.camembertcheese.studio`
+- 허용 출처 URL: `https://oraclecar.pages.dev`
 - 허용 리디렉션 URI: `http://localhost:8080/callback`
 - 허용 반환 URL: 비움
 - 다음 단계 scope: `vehicle_device_data` · `vehicle_location` (명령 원하면 `vehicle_cmds` 추가)
@@ -28,17 +28,17 @@
   TESLA_CLIENT_SECRET=...
   ```
 
-### 2. Cloudflare Pages로 공개키 호스팅
+### 2. Cloudflare Pages로 공개키 호스팅 — ✅ 완료(06-20)
 ```bash
-# CF 로그인 상태에서 (wrangler login 또는 CLOUDFLARE_API_TOKEN)
-npx wrangler pages deploy deploy/teslaoracle-pages --project-name teslaoracle
+# wrangler login 후
+npx wrangler pages deploy deploy/oraclecar-pages --project-name oraclecar --branch main
 ```
-→ CF 대시보드 > Pages > teslaoracle > Custom domains 에 **`teslaoracle.camembertcheese.studio`** 추가
-(DNS가 CF에 있으니 CNAME 자동 생성). 확인:
-```bash
-curl https://teslaoracle.camembertcheese.studio/.well-known/appspecific/com.tesla.3p.public-key.pem
-```
-공개키 PEM이 뜨면 OK. (한 번 배포하면 CF 엣지가 24/7 무료 서빙 — 별도 서버 불필요.)
+→ 기본 도메인 **`oraclecar.pages.dev`** 즉시 라이브(공개키 라이브 검증 완료, 테슬라 폼 통과).
+별도 서버·DNS 불필요 — CF 엣지가 24/7 무료 서빙. (자체 도메인 원하면 대시보드 Custom domains에서 추가 — 선택.)
+검증: `curl https://oraclecar.pages.dev/.well-known/appspecific/com.tesla.3p.public-key.pem`
+
+**보안**: 이 URL은 공개돼도 안전 — **공개키만** 노출(원래 공개용, 테슬라가 fetch). 개인키·client_secret·토큰은
+전부 repo 밖/gitignore라 여기 없음. 공개키론 차량 접근·서명 위조 불가.
 
 ### 3. 파트너 등록 (공개키 호스팅 후 1회)
 ```bash

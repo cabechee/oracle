@@ -3,7 +3,7 @@
 
 전제(순서):
   1) developer.tesla.com 앱 생성 — 부여유형 '인증 코드 및 사물 통신',
-     허용 출처 URL = https://teslaoracle.camembertcheese.studio,
+     허용 출처 URL = https://oraclecar.pages.dev,
      허용 리디렉션 URI = http://localhost:8080/callback
   2) 공개키를 https://{TESLA_DOMAIN}/.well-known/appspecific/com.tesla.3p.public-key.pem 에 호스팅(CF Pages)
   3) `python scripts/tesla_register.py` 로 파트너 등록(도메인+공개키)

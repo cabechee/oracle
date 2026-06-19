@@ -137,7 +137,7 @@ GCAL_CALENDAR_ID = os.getenv("GCAL_CALENDAR_ID", "primary")
 # 지역 베이스: 한국=아태권은 NA 엔드포인트. EU/중국이면 .env에서 TESLA_API_BASE 교체.
 TESLA_CLIENT_ID = os.getenv("TESLA_CLIENT_ID", "")
 TESLA_CLIENT_SECRET = os.getenv("TESLA_CLIENT_SECRET", "")
-TESLA_DOMAIN = os.getenv("TESLA_DOMAIN", "teslaoracle.camembertcheese.studio")
+TESLA_DOMAIN = os.getenv("TESLA_DOMAIN", "oraclecar.pages.dev")
 TESLA_REDIRECT_URI = os.getenv("TESLA_REDIRECT_URI", "http://localhost:8080/callback")
 TESLA_API_BASE = os.getenv(
     "TESLA_API_BASE", "https://fleet-api.prd.na.vn.cloud.tesla.com")
