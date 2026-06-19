@@ -384,13 +384,43 @@ def _quick_react(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         media += nest_client.audio_from_paths(audio_abs)
     if video_abs:
         media += nest_client.video_from_paths(video_abs)
+    # 베르(insight)와 동일한 맥락을 쿠키에게도 — 빠른 응답도 흐름을 알고 답하게.
+    # (백필=지난 사진은 맥락 미주입 — 베르와 같은 규칙.)
+    context = "" if ctx.get("backfill") else memory_mod.working_memory(ctx.get("ts"))
     try:
         text = quick_mod.say(alias, user_input=ctx.get("user_comment") or "",
-                             media=media or None)
+                             media=media or None, context=context)
         return {"alias": alias, "text": text} if text else None
     except Exception as e:
         print(f"[quick] 쿠키 반응 실패: {e}", flush=True)
         return None
+
+
+def _maybe_save_pending_place(ctx: Dict[str, Any]) -> None:
+    """askplace('여기 어디?') 직후 짧은 텍스트 답이면 그 곳을 임시 장소로 저장(스펙: 답하면 저장).
+
+    오저장 방지: 텍스트만(사진·소리 X) + 짧음(장소 이름급 ≤30자) + pending이 최근(15분)일 때만.
+    """
+    try:
+        comment = (ctx.get("user_comment") or "").strip()
+        if not comment or len(comment) > 30:
+            return
+        if ctx.get("image_paths") or ctx.get("audio_paths") or ctx.get("video_paths"):
+            return
+        pp = db.settings().find_one({"_id": "pending_place"})
+        if not pp or pp.get("lat") is None:
+            return
+        from datetime import datetime, timedelta
+        ts = pp.get("ts")
+        if not isinstance(ts, datetime) or (datetime.now() - ts) > timedelta(minutes=15):
+            return
+        import places as places_mod
+        places_mod.upsert(name=comment, lat=pp.get("lat"), lng=pp.get("lng"),
+                          kind="place", description="(자동 등록 — '여기 어디?' 답)")
+        db.settings().delete_one({"_id": "pending_place"})
+        print(f"[place] 임시 장소 저장: {comment}", flush=True)
+    except Exception as e:
+        print(f"[place] pending 저장 실패: {e}", flush=True)
 
 
 def _record_doc(ctx: Dict[str, Any], body: Dict[str, Any], status: str) -> Dict[str, Any]:
@@ -473,6 +503,7 @@ def ingest(
     body = _process_capture(ctx)
     body["quick"] = _quick_react(ctx)        # 쿠키 한마디 (동기 경로 — 구앱 호환)
     db.records().insert_one(_record_doc(ctx, body, "done"))
+    _maybe_save_pending_place(ctx)           # '여기 어디?' 답이면 임시 장소 저장
     return _response(ctx, body, "done")
 
 
@@ -499,6 +530,7 @@ def ingest_async_start(
                    audio_bytes, audio_ext, video_bytes, video_ext, backfill=backfill,
                    companion_prompt=companion_prompt, companion_speaker=companion_speaker)
     db.records().insert_one(_record_doc(ctx, {}, "processing"))
+    _maybe_save_pending_place(ctx)           # '여기 어디?' 답이면 임시 장소 저장
     return _response(ctx, {}, "processing"), ctx
 
 

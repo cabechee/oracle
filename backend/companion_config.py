@@ -101,9 +101,11 @@ def set_config(patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def kind_of(event: str) -> str:
-    """이벤트 → 게이팅 종류. 주차는 'park'(항상), 위치는 'location', 그 외는 'checkin'(정기)."""
+    """이벤트 → 게이팅 종류. 주차는 'park'(항상), 위치/장소질문은 'location', 그 외는 'checkin'."""
     if event == "park":
         return "park"
+    if event == "askplace":
+        return "location"   # 새 곳 '여기 어디?' — 위치 쿨다운으로 도배 방지
     return "location" if event in _EVENT_CANON else "checkin"
 
 
@@ -236,6 +238,13 @@ def gather_context(now: Optional[datetime] = None) -> str:
         lines = visits_mod.day_lines(now.date())
         if lines:
             bits.append("오늘 다닌 곳: " + "; ".join(lines[:4]))
+    except Exception:
+        pass
+    try:
+        import gcal
+        cal = gcal.day_lines(now.date())
+        if cal:
+            bits.append("오늘 일정: " + "; ".join(cal[:4]))
     except Exception:
         pass
     return "\n".join(f"- {b}" for b in bits)

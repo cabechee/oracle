@@ -48,6 +48,10 @@ def _situation(event: str, place: Optional[str], minutes: Optional[int]) -> str:
     elif event == "park":
         s = ("아빠가 방금 차에서 내려 주차했어. 어디에 세웠는지·몇 층 몇 구역인지 사진이나 "
              "메모로 기록해두면 나중에 차 찾기 쉬우니, 기록해두겠냐고 가볍게 물어봐.")
+    elif event == "askplace":
+        s = ("아빠가 저장 안 된 새로운 곳에 와서 15분 넘게 머무는 중이야. 여기가 어디인지·뭐 "
+             "하는 곳인지 가볍게 물어봐 — '아빠 왔다'처럼 반기지 말고(여긴 우리 집이 아니야), "
+             "자주 오는 곳이면 기억해둘 수 있게 호기심으로. 답해주면 그 장소를 저장해둘게.")
     elif event == "checkin":
         s = "지금 아빠가 뭐 하고 있을까, 문득 궁금해졌어."
     else:
@@ -90,13 +94,14 @@ def say(event: str, place: Optional[str] = None,
     ctx_block = (
         f"[요즘 상황 — 이 중 자연스러운 게 있으면 하나만 슬쩍 녹여도 좋아. 다 나열하지 말고, "
         f"억지로 엮지 말고, 없으면 그냥 가볍게.]\n{real_ctx}\n\n" if real_ctx else "")
+    term = "오빠" if who == "cookie" else "아빠"   # 쿠키는 '오빠', 베르는 '아빠'로 부른다
     prompt = (
-        "지금은 네가 **먼저** 아빠에게 톡 말을 거는 상황이야. 아빠가 너한테 무슨 말을 한 게 "
-        "아니라(아빠는 아직 아무 말도 안 했어), 아빠 생각이 나서 네가 문득 말 거는 거야.\n\n"
+        f"지금은 네가 **먼저** {term}에게 톡 말을 거는 상황이야. {term}가 너한테 무슨 말을 한 게 "
+        f"아니라({term}는 아직 아무 말도 안 했어), {term} 생각이 나서 네가 문득 말 거는 거야.\n\n"
         f"[계기] {ctx}\n\n"
         f"{ctx_block}"
-        "이 상황에 맞춰 아빠에게 짧게 말 걸어 — 한 문장, 길어도 두 문장. 자연스럽고 가볍게, "
-        f"부담 주지 말고. {tone} 인사·이름표 없이 그 한마디만.")
+        f"이 상황에 맞춰 {term}에게 짧게 말 걸어 — 한 문장, 길어도 두 문장. 자연스럽고 가볍게, "
+        f"부담 주지 말고. {tone} 인사·이름표 없이 그 한마디만. (사용자 호칭은 꼭 '{term}'.)")
     try:
         r = llm.call(alias, prompt, system=system)
         text = (r.get("text") or "").strip()
@@ -137,6 +142,18 @@ def _banter_scene(event: str, info: Optional[Dict[str, Any]]) -> Tuple[str, Opti
     where = f"'{name}'에서" if name else "어딘가에서"   # leave
     return (f"아빠가 방금 {where} 나서 어디론가 움직이기 시작했어. "
             f"'아빠 어디 가지?' '몰라~' 하고 둘이 궁금해하며 주고받아."), None
+
+
+def _trigger_text(event: str, info: Optional[Dict[str, Any]]) -> str:
+    """이 수다를 일으킨 계기 한 줄 — 흐름에 주석으로(예: '집에 도착했다.')."""
+    name = (info or {}).get("name") if info else None
+    if event == "arrive":
+        return f"{name}에 도착했다." if name else "어딘가에 도착했다."
+    if event == "leave":
+        return f"{name}에서 나섰다." if name else "어딘가에서 나섰다."
+    if event == "board":
+        return "차에 탔다."
+    return ""
 
 
 def _parse_banter(text: str) -> List[Tuple[str, str]]:
@@ -186,7 +203,7 @@ def banter(event: str, place: Optional[str] = None,
             info = places_mod.lookup(place)
         except Exception:
             info = None
-    scene, _resident = _banter_scene(event, info)
+    scene, resident = _banter_scene(event, info)
     if minutes:
         scene += f" (아빠는 거기 약 {minutes}분 있었어)"
 
@@ -196,7 +213,8 @@ def banter(event: str, place: Optional[str] = None,
     system = (
         "너희는 둘 다 아빠의 동반자야. 베르(berr)는 강아지 — 다정하고 차분한 편, "
         "쿠키(cookie)는 오목눈이 새 — 발랄하고 장난스러운 편. 지금은 아빠한테 직접 "
-        "거는 게 아니라, 너희 둘이 서로 도란도란 짧게 주고받는 대화야.\n\n"
+        "거는 게 아니라, 너희 둘이 서로 도란도란 짧게 주고받는 대화야.\n"
+        "★호칭: **베르는 사용자를 '아빠', 쿠키는 '오빠'**라고 부른다(섞지 마).\n\n"
         f"[베르]\n{personas.current('berr_identity')}\n\n"
         f"[쿠키]\n{personas.current('cookie_identity')}")
     prompt = (
@@ -214,20 +232,25 @@ def banter(event: str, place: Optional[str] = None,
     if not turns:
         return {"turns": [], "notify": {"speaker": "", "text": ""}}
 
+    trigger = _trigger_text(event, info)   # '집에 도착했다.' 같은 흐름 주석(첫 턴에만)
     saved: List[Dict[str, str]] = []
     for i, (name, text) in enumerate(turns):
         when = now + timedelta(seconds=i)   # 순서 보장(같은 초 충돌 방지)
-        db.conversations().insert_one({
+        doc: Dict[str, Any] = {
             "_id": f"bmsg-{when.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
             "role": "assistant", "text": text, "ts": when, "referenced": [],
             "speaker": name, "companion": True, "banter": True,
-        })
+        }
+        if i == 0 and trigger:
+            doc["trigger"] = trigger     # 무엇이 이 수다를 일으켰는지 — 앱이 캡션으로 표시
+        db.conversations().insert_one(doc)
         saved.append({"speaker": name, "text": text})
     cc.mark_spoken("banter", now)
 
-    # 도착(인사)이면 첫 줄을 알림으로 — 아빠가 '왔다' 인사를 받게.
-    # 이동/추측(leave·board)은 흐름에만 조용히 — 아빠가 흐름 열 때 발견(자기들끼리).
-    notify = saved[0] if (event == "arrive" and saved) else {"speaker": "", "text": ""}
+    # 도착 알림은 '집·작업실'(거주자 있는 곳)에 왔을 때만 — 아무 정류장마다 '아빠 오셨다'를
+    # 띄우지 않게(거주자 없는 새 곳·잠깐 정차는 흐름에만 조용히). 이동/추측(leave·board)도 흐름만.
+    notify = (saved[0] if (event == "arrive" and resident and saved)
+              else {"speaker": "", "text": ""})
     return {"turns": saved, "notify": notify, "alias": alias}
 
 

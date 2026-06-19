@@ -20,6 +20,24 @@ def ep_companion_say(body: SayIn):
     return companion.say(body.event, body.place, body.speaker)
 
 
+class AskPlaceIn(BaseModel):
+    lat: float
+    lng: float
+
+
+@router.post("/companion/askplace")
+def ep_askplace(body: AskPlaceIn):
+    """새 곳 15분+ 체류 — '여기 어디?' 물어봄 + 좌표 보관(답하면 임시 장소로 저장)."""
+    import db
+    from datetime import datetime
+    db.settings().update_one(
+        {"_id": "pending_place"},
+        {"$set": {"lat": body.lat, "lng": body.lng, "ts": datetime.now()}},
+        upsert=True)
+    from agent import companion
+    return companion.say("askplace")
+
+
 class BanterIn(BaseModel):
     event: str                      # arrive | leave | board
     place: Optional[str] = None     # 장소명(선택) — 도착이면 그곳 주인이 맞이
