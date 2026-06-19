@@ -12,6 +12,22 @@ import visits as visits_mod
 router = APIRouter()
 
 
+@router.get("/collector-records")
+def ep_collector_records(limit: int = 100):
+    """수집기가 저장한 기록 전체 — 여정(방문)·주차·신호(최신순). 어드민 '수집 기록' 페이지."""
+    import parking as parking_mod
+    import signals as signals_mod
+    try:
+        signals = signals_mod.recent(brief_limit=1, signal_limit=limit).get("signals", [])
+    except Exception:
+        signals = []
+    return {
+        "visits": visits_mod.recent(limit),
+        "parking": parking_mod.recent(60),
+        "signals": signals,
+    }
+
+
 class VisitEnd(BaseModel):
     place: Optional[str] = None    # 'home' | 'office' | 장소 이름 | None(새 장소)
     lat: float

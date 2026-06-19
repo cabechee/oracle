@@ -22,6 +22,8 @@ def report(data: Dict[str, Any]) -> Dict[str, Any]:
         "place": str(data.get("place") or ""),
         "visit_on": bool(data.get("visit_on")),
         "bt": str(data.get("bt") or ""),
+        "lat": data.get("lat"),     # 현재 GPS(앵커) — 차 이동 중에도 1분마다 갱신
+        "lng": data.get("lng"),
         "logs": logs,
         "updated_at": datetime.now(),
     }
@@ -39,6 +41,8 @@ def view() -> Dict[str, Any]:
         "place": d.get("place", ""),
         "visit_on": bool(d.get("visit_on")),
         "bt": d.get("bt", ""),
+        "lat": d.get("lat"),
+        "lng": d.get("lng"),
         "logs": d.get("logs", []),
         "updated_at": up.isoformat() if isinstance(up, datetime) else None,
         "age_sec": (int((datetime.now() - up).total_seconds())

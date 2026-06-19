@@ -44,3 +44,13 @@ def latest() -> Optional[Dict[str, Any]]:
     ts = d.get("ts")
     return {"id": d["_id"], "lat": d.get("lat"), "lng": d.get("lng"),
             "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts}
+
+
+def recent(limit: int = 50):
+    """최근 주차 기록 (최신순) — 수집 기록 페이지용."""
+    out = []
+    for d in db.parking().find().sort("ts", -1).limit(limit):
+        ts = d.get("ts")
+        out.append({"id": d["_id"], "lat": d.get("lat"), "lng": d.get("lng"),
+                    "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts})
+    return out

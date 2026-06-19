@@ -110,6 +110,10 @@ async function loadStats(){
     <span>📡 수집기</span></a>`;
   $('#nav').innerHTML += `<a data-c="__dismissed__" class="${CUR==='__dismissed__'?'active':''}">
     <span>🗂 확인한 항목</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__calendar__" class="${CUR==='__calendar__'?'active':''}">
+    <span>📅 캘린더</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__collected__" class="${CUR==='__collected__'?'active':''}">
+    <span>📥 수집 기록</span></a>`;
   document.querySelectorAll('nav a').forEach(a =>
     a.onclick = () => { CUR=a.dataset.c; SKIP=0; Q=''; render(); });
 }
@@ -145,6 +149,8 @@ async function render(){
   if(CUR==='__places__') return renderPlaces();
   if(CUR==='__collector__') return renderCollector();
   if(CUR==='__dismissed__') return renderDismissed();
+  if(CUR==='__calendar__') return renderCalendar();
+  if(CUR==='__collected__') return renderCollected();
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
   let data;
@@ -406,7 +412,7 @@ async function renderPlaces(){
     <label>📡 수집기 현재 상태 <span class="hint">${fresh}</span></label>
     ${st ? `<div class="hint" style="margin-bottom:8px;line-height:1.8">
       현재 WiFi: <b>${curWifi?esc(curWifi):'(연결 없음/미상)'}</b><br>
-      위치: <b>${place}</b> · 차 BT: <b>${st.bt?esc(st.bt)+' 연결됨':'끊김'}</b></div>` : ''}
+      위치: <b>${place}</b> · 차 BT: <b>${st.bt?esc(st.bt)+' 연결됨':'끊김'}</b>${(st.lat!=null&&st.lng!=null)?` · GPS <a href="https://maps.google.com/?q=${st.lat},${st.lng}" target="_blank">${st.lat.toFixed(5)}, ${st.lng.toFixed(5)} 🗺</a>`:''}</div>` : ''}
     ${logBox}
     <div class="row" style="margin-top:6px"><button onclick="renderPlaces()">새로고침 ↻</button></div>
   </div>`;
@@ -422,22 +428,23 @@ async function renderPlaces(){
   const add = `<div class="pf">
     <label>장소 추가 <span class="hint">새 장소를 직접 추가 (집·작업실 WiFi는 아래 각 장소에서 바로 수정)</span></label>
     <input id="npName" placeholder="이름 (예: 단골 카페)" style="${inStyle}">
-    <input id="npWifi" placeholder="WiFi 이름(SSID) — 선택" style="${inStyle}">
-    <input id="npBt" placeholder="블루투스 기기명 (예: 차량오디오) — 연결되면 그 장소로 · 선택" style="${inStyle}">
+    <input id="npWifi" placeholder="WiFi (여러 개는 쉼표로 — 하나라도 잡히면 여기)" style="${inStyle}">
+    <input id="npBt" placeholder="블루투스 기기명 (여러 개는 쉼표로) · 선택" style="${inStyle}">
     <textarea id="npDesc" placeholder="설명 — 동반자가 맥락으로 씀 (예: 주말마다 작업하는 조용한 곳)"
       style="${inStyle};min-height:56px;font-family:inherit"></textarea>
     <div class="row"><button class="accent" onclick="addPlace(this)">추가</button></div>
   </div>`;
   const rows = items.length ? items.map(p => `
     <div class="pf" data-id="${p.id}" data-name="${esc(p.name)}">
-      <label>${KIND_LABEL[p.kind]||p.kind} · ${esc(p.name)} <span class="hint">${coords(p)}</span></label>
-      <input data-wifi value="${esc(p.wifi||'')}" placeholder="WiFi 이름(SSID)" style="${inStyle}">
-      <input data-bt value="${esc(p.bt||'')}" placeholder="블루투스 기기명 (차 등) — 선택" style="${inStyle}">
+      <label>${KIND_LABEL[p.kind]||p.kind} <span class="hint">${coords(p)}</span></label>
+      <input data-name value="${esc(p.name)}" placeholder="장소 이름" style="${inStyle}">
+      <input data-wifi value="${esc((p.wifis||[]).join(', '))}" placeholder="WiFi (여러 개는 쉼표로, OR 매칭)" style="${inStyle}">
+      <input data-bt value="${esc((p.bts||[]).join(', '))}" placeholder="블루투스 기기명 (여러 개는 쉼표로, OR 매칭)" style="${inStyle}">
       <textarea data-desc placeholder="설명 (동반자 맥락)"
         style="${inStyle};min-height:52px;font-family:inherit">${esc(p.description||'')}</textarea>
       <div class="row">
         <button class="accent" onclick="savePlace('${p.id}', this)">저장</button>
-        ${curWifi ? `<button data-wc="${esc(curWifi)}" onclick="registerWifi('${p.id}', this)">현재 WiFi 등록</button>` : ''}
+        ${curWifi ? `<button data-wc="${esc(curWifi)}" onclick="registerWifi('${p.id}', this)">현재 WiFi 추가</button>` : ''}
         <button class="danger" onclick="delPlace('${p.id}')">삭제</button>
       </div>
     </div>`).join('')
@@ -462,48 +469,52 @@ async function saveSensing(btn){
   }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
 }
 
+const splitList = v => (v||'').split(',').map(s=>s.trim()).filter(Boolean);
+
 async function addPlace(btn){
   const name = document.getElementById('npName').value.trim();
   if(!name){ alert('이름을 적어주세요'); return; }
-  const wifi = document.getElementById('npWifi').value.trim();
-  const bt = document.getElementById('npBt').value.trim();
+  const wifis = splitList(document.getElementById('npWifi').value);
+  const bts = splitList(document.getElementById('npBt').value);
   const description = document.getElementById('npDesc').value;
   btn.disabled = true;
   try{
     await places('', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name, wifi: wifi||null, bt: bt||null, description, kind:'place'})});
+      body: JSON.stringify({name, wifis, bts, description, kind:'place'})});
     renderPlaces();
   }catch(e){ alert('추가 실패: '+e.message); btn.disabled=false; }
 }
 
 async function savePlace(id, btn){
   const pf = btn.closest('.pf');
-  const name = pf.dataset.name;
+  const name = (pf.querySelector('[data-name]')||{value:''}).value.trim() || pf.dataset.name;
   const description = pf.querySelector('[data-desc]').value;
-  // WiFi·BT는 빈 문자열로 보내면 해제(서버 ''→None), 값 있으면 설정. (입력칸은 현재값 프리필)
-  const wifi = (pf.querySelector('[data-wifi]')||{value:''}).value.trim();
-  const bt = (pf.querySelector('[data-bt]')||{value:''}).value.trim();
+  // WiFi·BT는 쉼표로 여러 개 — 빈 리스트면 해제. (입력칸은 현재 목록 프리필)
+  const wifis = splitList((pf.querySelector('[data-wifi]')||{value:''}).value);
+  const bts = splitList((pf.querySelector('[data-bt]')||{value:''}).value);
   btn.disabled = true;
   try{
     await places('', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, name, description, wifi, bt})});
+      body: JSON.stringify({id, name, description, wifis, bts})});
     btn.textContent = '저장됨 ✓';
     setTimeout(() => { btn.textContent='저장'; btn.disabled=false; }, 1200);
   }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
 }
 
-// 수집기가 보고한 '현재 WiFi'를 이 장소에 한 번에 등록(집·작업실 WiFi 빠른 지정).
+// 수집기가 보고한 '현재 WiFi'를 이 장소의 WiFi 목록에 **추가**(OR 매칭 — 기존 것 유지).
 async function registerWifi(id, btn){
   const wifi = btn.dataset.wc;
   if(!wifi) return;
   const pf = btn.closest('.pf');
-  if(!confirm('현재 WiFi "'+wifi+'"를 \''+pf.dataset.name+'\'에 등록할까요?')) return;
+  if(!confirm('현재 WiFi "'+wifi+'"를 \''+pf.dataset.name+'\'에 추가할까요?')) return;
+  const wifis = splitList((pf.querySelector('[data-wifi]')||{value:''}).value);
+  if(!wifis.includes(wifi)) wifis.push(wifi);
   btn.disabled = true;
   try{
     await places('', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, name: pf.dataset.name, wifi})});
+      body: JSON.stringify({id, name: pf.dataset.name, wifis})});
     renderPlaces();
-  }catch(e){ alert('등록 실패: '+e.message); btn.disabled=false; }
+  }catch(e){ alert('추가 실패: '+e.message); btn.disabled=false; }
 }
 
 async function delPlace(id){
@@ -542,6 +553,87 @@ async function undismiss(btn){
     pf.style.opacity = 0.45;
     btn.textContent = '되돌림 ✓ — 데스크에 다시 뜸';
   }catch(e){ alert('실패: '+e.message); btn.disabled=false; }
+}
+
+// ── 캘린더 (구글 워크스페이스) ──
+function fmtEvent(e){
+  if(!e.start) return '';
+  const d = new Date(e.start);
+  if(isNaN(d)) return e.start;
+  return e.all_day
+    ? d.toLocaleDateString('ko',{month:'numeric',day:'numeric',weekday:'short'})
+    : d.toLocaleString('ko',{month:'numeric',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'});
+}
+async function renderCalendar(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let st;
+  try{ st = await (await fetch('/calendar/status')).json(); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  let body;
+  if(st.authed){
+    let evs = [];
+    try{ evs = ((await (await fetch('/calendar/upcoming?days=14')).json()).items)||[]; }catch(e){}
+    const rows = evs.length ? evs.map(e => `
+      <div class="pf">
+        <div style="margin-bottom:2px"><b>${esc(e.title)}</b>${e.all_day?' · 종일':''}</div>
+        <div class="hint">${esc(fmtEvent(e))}${e.location?(' · '+esc(e.location)):''}</div>
+      </div>`).join('') : '<div class="empty">앞으로 14일 일정이 없어요</div>';
+    body = `<div class="pf"><label>연동됨 ✓ <span class="hint">${esc(st.account||st.calendar_id||'')}</span></label></div>` + rows;
+  } else {
+    const step = st.has_client
+      ? `클라이언트 파일(gcal_credentials.json)은 준비됐어요. <b>scripts/gcal_auth.py</b>만 실행하면 됩니다.`
+      : `아직 OAuth 클라이언트(<b>gcal_credentials.json</b>)가 없어요.`;
+    body = `<div class="pf">
+      <label>아직 연동 안 됨</label>
+      <div class="hint" style="line-height:1.9;margin-top:6px">
+        ${step}<br><br>
+        <b>인증 절차 (한 번만):</b><br>
+        1. Google Cloud Console → 프로젝트 → ‘Google Calendar API’ 사용 설정<br>
+        2. OAuth 동의화면(테스트 사용자=본인) + OAuth 클라이언트 ID(<b>데스크톱 앱</b>) 생성 → JSON 다운로드<br>
+        3. 그 파일을 <code>~/projects/oracle/gcal_credentials.json</code> 로 저장<br>
+        4. <code>cd ~/projects/oracle &amp;&amp; backend/.venv/bin/python scripts/gcal_auth.py</code><br>
+        5. 브라우저 동의 → <code>gcal_token.json</code> 생성 → 끝(이 페이지 새로고침)
+      </div>
+      <div class="row" style="margin-top:8px"><button onclick="renderCalendar()">상태 새로고침 ↻</button></div>
+    </div>`;
+  }
+  m.innerHTML = `<div class="bar"><h2>캘린더</h2>
+    <span class="total">구글 캘린더 — 일정이 데스크·동반자 맥락에 들어가요</span></div>` + body;
+}
+
+// ── 수집 기록 (수집기가 저장한 여정·주차·신호 전체) ──
+const SKIND = {sms:'문자', missed_call:'부재중', notification:'앱 알림'};
+function mapsLink(la, lo){
+  return (la!=null && lo!=null) ? ` <a href="https://maps.google.com/?q=${la},${lo}" target="_blank">🗺</a>` : '';
+}
+function hm(iso){ const d=new Date(iso); return isNaN(d)?'':d.toLocaleTimeString('ko',{hour:'2-digit',minute:'2-digit'}); }
+async function renderCollected(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let d;
+  try{ d = await (await fetch('/collector-records?limit=150')).json(); }
+  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  const v = d.visits||[], pk = d.parking||[], sg = d.signals||[];
+  const rowStyle = 'padding:7px 12px;border-bottom:1px solid var(--hair)';
+  const visitRows = v.length ? v.map(x => `<div style="${rowStyle}">
+      <b>${esc(x.name||'(새 곳)')}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span></div>`).join('')
+    : '<div class="empty">여정 기록 없음</div>';
+  const parkRows = pk.length ? pk.map(x => `<div style="${rowStyle}">
+      🅿 <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span></div>`).join('')
+    : '<div class="empty">주차 기록 없음</div>';
+  const sigRows = sg.length ? sg.map(x => `<div style="${rowStyle}">
+      <span class="hint">[${SKIND[x.kind]||x.kind}] ${fmtWhen(x.ts)}</span> <b>${esc(x.sender||'')}</b> ${esc((x.body||'').slice(0,60))}</div>`).join('')
+    : '<div class="empty">신호 없음</div>';
+  m.innerHTML = `<div class="bar"><h2>수집 기록</h2>
+      <span class="total">수집기가 저장한 것 전체 — 여정·주차·신호 (최신순)</span></div>
+    <div class="pf"><label>🚶 여정 / 방문 <span class="hint">${v.length}건</span></label>
+      <div style="margin-top:4px">${visitRows}</div></div>
+    <div class="pf"><label>🅿 주차 <span class="hint">${pk.length}건</span></label>
+      <div style="margin-top:4px">${parkRows}</div></div>
+    <div class="pf"><label>📨 신호 (문자·부재중·앱) <span class="hint">${sg.length}건</span></label>
+      <div style="margin-top:4px">${sigRows}</div></div>
+    <div class="row" style="margin-top:8px"><button onclick="renderCollected()">새로고침 ↻</button></div>`;
 }
 
 // ── 수집기 설정 (Android 네이티브 수집기가 매 사이클 fetch해 적용) ──

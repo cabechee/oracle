@@ -57,6 +57,8 @@ def _place_name(v: Dict[str, Any]) -> str:
         return "집"
     if p == "office":
         return "작업실"
+    if p:                       # 수집기가 장소 '이름'으로 보냄(차·집·단골카페 등)
+        return str(p)
     return v.get("label") or "어떤 곳"
 
 
@@ -75,6 +77,23 @@ def visits_for_day(target: date) -> List[Dict[str, Any]]:
             if isinstance(v.get("start"), datetime) else "",
             "end": v["end"].strftime("%H:%M")
             if isinstance(v.get("end"), datetime) else "",
+        })
+    return out
+
+
+def recent(limit: int = 100) -> List[Dict[str, Any]]:
+    """최근 방문/여정 구간 (최신순) — 수집 기록 페이지용. 좌표·기간 포함."""
+    out: List[Dict[str, Any]] = []
+    for v in db.visits().find().sort("start", -1).limit(limit):
+        s, e = v.get("start"), v.get("end")
+        out.append({
+            "id": v["_id"],
+            "place": v.get("place"),
+            "name": _place_name(v),
+            "minutes": v.get("minutes", 0),
+            "lat": v.get("lat"), "lng": v.get("lng"),
+            "start": s.isoformat() if isinstance(s, datetime) else None,
+            "end": e.isoformat() if isinstance(e, datetime) else None,
         })
     return out
 

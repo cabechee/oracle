@@ -1,6 +1,6 @@
 """장소 레지스트리 + 위치 센싱 설정 라우터 — 폰 캡처 + 어드민 관리 공용."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
@@ -16,8 +16,10 @@ class PlaceIn(BaseModel):
     kind: Optional[str] = None         # home | office | place
     lat: Optional[float] = None
     lng: Optional[float] = None
-    wifi: Optional[str] = None
-    bt: Optional[str] = None           # 블루투스 기기명(차 등) — 연결되면 그 장소로
+    wifi: Optional[str] = None         # 단일(하위호환)
+    bt: Optional[str] = None
+    wifis: Optional[List[str]] = None  # WiFi 여러 개 — 하나라도 잡히면 이 장소(OR)
+    bts: Optional[List[str]] = None    # 블루투스 기기 여러 개 — 하나라도 연결되면 이 장소(OR)
     description: Optional[str] = None
     id: Optional[str] = None           # 주면 그 문서 수정(어드민 설명 편집 등)
 
@@ -35,7 +37,8 @@ def ep_upsert_place(body: PlaceIn):
         raise HTTPException(400, "name 비어있음")
     return places_mod.upsert(
         body.name, kind=body.kind, lat=body.lat, lng=body.lng,
-        wifi=body.wifi, bt=body.bt, description=body.description, place_id=body.id)
+        wifi=body.wifi, bt=body.bt, wifis=body.wifis, bts=body.bts,
+        description=body.description, place_id=body.id)
 
 
 @router.delete("/places/{place_id}")

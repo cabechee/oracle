@@ -37,15 +37,28 @@ def _pid(name: str, kind: str, wifi: Optional[str], lat: Optional[float],
     return "place-" + hashlib.sha1(f"{name}|{base}".encode()).hexdigest()[:10]
 
 
+def _as_list(p: Dict[str, Any], plural: str, single: str) -> List[str]:
+    """다중 필드(wifis/bts) 우선, 없으면 구 단일 필드(wifi/bt)를 1-원소 리스트로 마이그레이션."""
+    v = p.get(plural)
+    if isinstance(v, list):
+        return [str(x).strip() for x in v if str(x).strip()]
+    s = p.get(single)
+    return [str(s).strip()] if s and str(s).strip() else []
+
+
 def _view(p: Dict[str, Any]) -> Dict[str, Any]:
+    wifis = _as_list(p, "wifis", "wifi")
+    bts = _as_list(p, "bts", "bt")
     return {
         "id": p["_id"],
         "name": p.get("name", ""),
         "kind": p.get("kind", "place"),
         "lat": p.get("lat"),
         "lng": p.get("lng"),
-        "wifi": p.get("wifi"),
-        "bt": p.get("bt"),            # 블루투스 기기명(차 등) — 연결되면 그 장소로
+        "wifis": wifis,               # WiFi 여러 개 — 하나라도 잡히면 이 장소(OR)
+        "bts": bts,                   # 블루투스 기기 여러 개(차 등) — 하나라도 연결되면 이 장소(OR)
+        "wifi": wifis[0] if wifis else None,   # 하위호환(구 단일)
+        "bt": bts[0] if bts else None,
         "description": p.get("description", ""),
     }
 
@@ -53,30 +66,44 @@ def _view(p: Dict[str, Any]) -> Dict[str, Any]:
 def upsert(name: Optional[str] = None, kind: Optional[str] = None,
            lat: Optional[float] = None, lng: Optional[float] = None,
            wifi: Optional[str] = None, description: Optional[str] = None,
-           bt: Optional[str] = None,
-           place_id: Optional[str] = None) -> Dict[str, Any]:
+           bt: Optional[str] = None, place_id: Optional[str] = None,
+           wifis: Optional[List[str]] = None,
+           bts: Optional[List[str]] = None) -> Dict[str, Any]:
     """장소 등록/수정 — 명시한 필드만 바꾸고 나머진 보존(설명만 편집 등).
 
-    place_id 주면 그 문서 갱신, 아니면 이름+kind+(BT/WiFi/좌표)로 멱등 id. 집·작업실은 하나씩.
+    WiFi·BT는 **여러 개**(wifis/bts 리스트) 등록 가능 — 하나라도 잡히면 그 장소(OR 매칭).
+    단일 wifi/bt도 받음(1-원소 리스트로). place_id 주면 그 문서 갱신, 아니면 멱등 id.
     """
     now = datetime.now()
     eff_kind = kind if kind in KINDS else None
+    rep_wifi = (wifis[0].strip() if wifis else "") or (wifi or "").strip() or None
+    rep_bt = (bts[0].strip() if bts else "") or (bt or "").strip() or None
     pid = place_id or _pid((name or "").strip() or "이름 없는 곳",
-                           eff_kind or "place", (wifi or "").strip() or None,
-                           lat, lng, (bt or "").strip() or None)
+                           eff_kind or "place", rep_wifi, lat, lng, rep_bt)
     existing = db.places().find_one({"_id": pid})
     doc: Dict[str, Any] = dict(existing) if existing else {
         "_id": pid, "created": now, "name": "이름 없는 곳",
-        "kind": "place", "wifi": None, "bt": None, "description": "",
+        "kind": "place", "description": "",
     }
+    # 기존 구 단일 필드 → 리스트로 일원화(부분 수정 시 유실 방지)
+    if "wifis" not in doc:
+        doc["wifis"] = _as_list(doc, "wifis", "wifi")
+    if "bts" not in doc:
+        doc["bts"] = _as_list(doc, "bts", "bt")
+    doc.pop("wifi", None)
+    doc.pop("bt", None)
     if name is not None and name.strip():
         doc["name"] = name.strip()
     if eff_kind:
         doc["kind"] = eff_kind
-    if wifi is not None:
-        doc["wifi"] = wifi.strip() or None
-    if bt is not None:
-        doc["bt"] = bt.strip() or None
+    if wifis is not None:
+        doc["wifis"] = [w.strip() for w in wifis if w and w.strip()]
+    elif wifi is not None:
+        doc["wifis"] = [wifi.strip()] if wifi.strip() else []
+    if bts is not None:
+        doc["bts"] = [b.strip() for b in bts if b and b.strip()]
+    elif bt is not None:
+        doc["bts"] = [bt.strip()] if bt.strip() else []
     if description is not None:
         doc["description"] = description.strip()
     if lat is not None:
