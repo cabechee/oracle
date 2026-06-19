@@ -125,6 +125,13 @@ def feed() -> Dict[str, Any]:
     import reminders as reminders_mod
     reminder_list = reminders_mod.list_items()
 
+    # 2d) 일정 — 구글 캘린더 다가오는 일정(미인증/실패면 빈 리스트, 캐시로 빠름)
+    try:
+        import gcal
+        calendar_events = gcal.upcoming(days=7)
+    except Exception:
+        calendar_events = []
+
     # 3) 오래 못 챙긴 사람 — silent thread (확인 안 한 것만)
     import threads as threads_mod
     pending: List[Dict[str, Any]] = []
@@ -152,6 +159,7 @@ def feed() -> Dict[str, Any]:
         "digest": digest,            # 대신 읽어드림 (발신자별 누적 요약)
         "ledger": today_ledger,      # 가계부 (오늘 결제)
         "reminders": reminder_list,  # 자체 리마인더
+        "calendar": calendar_events,  # 구글 캘린더 다가오는 일정
         "pending_people": pending,
         "today": today_stats,
         "counts": {"actions": len(actions), "pending": len(pending),

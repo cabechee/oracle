@@ -6,3 +6,7 @@ pymongo
 python-multipart
 Pillow
 numpy
+# Google Workspace (캘린더) — OAuth2 + Calendar API v3
+google-api-python-client
+google-auth
+google-auth-oauthlib

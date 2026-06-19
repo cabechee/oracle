@@ -117,11 +117,19 @@ MONGO_DB = os.getenv("MONGO_DB", "oracle")
 
 
 # ── 정본 Vault 경로 ─────────────────────────────────────────────
-_default_vault = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "corpus",
-)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_default_vault = os.path.join(_PROJECT_ROOT, "corpus")
 VAULT_DIR = os.getenv("VAULT_DIR", _default_vault)
+
+
+# ── Google Workspace (캘린더) ───────────────────────────────────
+# OAuth2 Installed/Desktop 앱. credentials.json(클라이언트)·token.json(동의 후) 모두
+# 프로젝트 루트(.env 옆, gitignored). 인증은 scripts/gcal_auth.py 1회. 비밀은 커밋 금지.
+GCAL_CREDS_PATH = os.getenv(
+    "GCAL_CREDS_PATH", os.path.join(_PROJECT_ROOT, "gcal_credentials.json"))
+GCAL_TOKEN_PATH = os.getenv(
+    "GCAL_TOKEN_PATH", os.path.join(_PROJECT_ROOT, "gcal_token.json"))
+GCAL_CALENDAR_ID = os.getenv("GCAL_CALENDAR_ID", "primary")
 
 
 # ── 서버 ────────────────────────────────────────────────────────

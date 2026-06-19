@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
+# Google OAuth 비밀 — 커밋 금지(.env와 동급)
+gcal_credentials.json
+gcal_token.json
+
 # vault content — 개인 데이터, 별도 동기화(Obsidian/git private 등)
 corpus/
 digest/

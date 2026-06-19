@@ -30,3 +30,15 @@ def ep_chat(body: ChatReq):
 def ep_chat_history(limit: int = 200):
     """최근 대화 메시지(최신순) — 앱이 record 타임라인과 merge."""
     return {"items": chat_mod.history(limit)}
+
+
+@router.post("/chat/action/{message_id}/confirm")
+def ep_action_confirm(message_id: str):
+    """제안된 액션 확인 → 실행(캘린더 일정 등록). 미인증/실패면 ok=False·reason."""
+    return chat_mod.confirm_action(message_id)
+
+
+@router.post("/chat/action/{message_id}/cancel")
+def ep_action_cancel(message_id: str):
+    """제안된 액션 취소(생성 안 함)."""
+    return chat_mod.cancel_action(message_id)

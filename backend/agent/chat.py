@@ -69,6 +69,18 @@ def chat(message: str, mention_ids: Optional[List[str]] = None,
     user_msg = _msg_doc("user", message, now, mentions=mention_ids or [])
     db.conversations().insert_one(user_msg)
 
+    # 액션 감지 — '일정 넣어줘' 류면 일반 응답 대신 '제안+확인' 메시지. 생성은 confirm 때.
+    from . import actions
+    proposal = actions.detect_calendar(message, now)
+    if proposal:
+        asst = _msg_doc(
+            "assistant", f"「{proposal['preview']}」 — 캘린더에 넣을까요?",
+            datetime.now())
+        asst["action"] = proposal
+        db.conversations().insert_one(asst)
+        return {"messages": [_normalize(dict(user_msg)), _normalize(dict(asst))],
+                "alias": ""}
+
     if not alias:
         reply = "(chat alias 미설정 — Nest에 enabled 모델 없음)"
         referenced: List[str] = []
@@ -114,7 +126,7 @@ def chat(message: str, mention_ids: Optional[List[str]] = None,
 
     asst_msg = _msg_doc("assistant", reply, datetime.now(), referenced)
     # 쿠키 첨언 — 베르 답에 한마디 거듦 (대화에도 동일). 실패/미설정이면 생략.
-    asst_msg["quick"] = _chat_quick(message, reply)
+    asst_msg["quick"] = _chat_quick(message, reply, now)
     db.conversations().insert_one(asst_msg)
 
     return {
@@ -123,14 +135,17 @@ def chat(message: str, mention_ids: Optional[List[str]] = None,
     }
 
 
-def _chat_quick(message: str, reply: str) -> Optional[Dict[str, str]]:
-    """대화에 쿠키 한마디 — 베르 답을 보고 거듦."""
+def _chat_quick(message: str, reply: str,
+                now: Optional[datetime] = None) -> Optional[Dict[str, str]]:
+    """대화에 쿠키 한마디 — 베르 답을 보고 거듦. 베르와 동일한 맥락(워킹메모리)도 받음."""
     alias = task_alias("quick") or ""
     if not alias or not reply or reply.startswith("("):
         return None
     try:
+        context = memory_mod.working_memory(now or datetime.now())
         text = quick_mod.say(
-            alias, user_input=f"아빠: {message}\n[베르의 답] {reply}")
+            alias, user_input=f"오빠: {message}\n[베르의 답] {reply}",
+            context=context)
         return {"alias": alias, "text": text} if text else None
     except Exception:
         return None
@@ -140,3 +155,32 @@ def history(limit: int = 200) -> List[Dict[str, Any]]:
     """최근 대화 메시지 (최신순) — 앱이 record 타임라인과 merge."""
     cur = db.conversations().find().sort("ts", -1).limit(limit)
     return [_normalize(m) for m in cur]
+
+
+def confirm_action(message_id: str) -> Dict[str, Any]:
+    """제안된 액션 확인 → 실행(캘린더 생성). 메시지의 action.status를 done으로 갱신.
+
+    멱등: 이미 done/취소면 다시 실행하지 않음(중복 일정 방지).
+    """
+    from . import actions
+    msg = db.conversations().find_one({"_id": message_id})
+    if not msg or not isinstance(msg.get("action"), dict):
+        return {"ok": False, "reason": "액션 없음"}
+    action = msg["action"]
+    if action.get("status") != "proposed":
+        return {"ok": False, "reason": f"이미 {action.get('status')}"}
+    res = actions.run(action)
+    if not res.get("ok"):
+        return res
+    db.conversations().update_one(
+        {"_id": message_id},
+        {"$set": {"action.status": "done", "action.created": res["event"]}})
+    return {"ok": True, "event": res["event"]}
+
+
+def cancel_action(message_id: str) -> Dict[str, Any]:
+    """제안된 액션 취소 — 생성 안 하고 status를 cancelled로."""
+    res = db.conversations().update_one(
+        {"_id": message_id, "action.status": "proposed"},
+        {"$set": {"action.status": "cancelled"}})
+    return {"ok": res.matched_count > 0}
