@@ -332,6 +332,8 @@ class _DeskScreenState extends State<DeskScreen>
               for (final a in actions) _actionRow(a),
               const SizedBox(height: OracleSpace.section),
             ],
+            // 1b) 일정 — 구글 캘린더 다가오는 일정
+            ..._calendarSection(),
             // 2) 리마인더 — 자체 할 일
             ..._reminderSection(),
             // 3) 오늘 받은 알림 — 발신자별 누적 요약 (대신 읽어드림)
@@ -503,6 +505,53 @@ class _DeskScreenState extends State<DeskScreen>
         ),
       ),
     );
+  }
+
+  // ── 일정 (구글 캘린더) ──────────────────────────────────────
+  List<Widget> _calendarSection() {
+    final events =
+        (_data?['calendar'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    if (events.isEmpty) return [];   // 미연동/일정 없음 → 조용히(어드민서 연동)
+    return [
+      _sectionLabel('일정', count: events.length),
+      const SizedBox(height: 12),
+      for (final e in events.take(6)) _calendarRow(e),
+      const SizedBox(height: OracleSpace.section),
+    ];
+  }
+
+  Widget _calendarRow(Map<String, dynamic> e) {
+    final title = e['title'] as String? ?? '';
+    final allDay = e['all_day'] == true;
+    final loc = (e['location'] as String?)?.trim() ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          width: 70,
+          child: Text(_fmtEventWhen(e['start'] as String?, allDay),
+              style: OracleType.label.copyWith(color: OracleColors.gray)),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: OracleType.userBody),
+            if (loc.isNotEmpty)
+              Text(loc,
+                  style:
+                      OracleType.marginalia.copyWith(color: OracleColors.gray)),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  String _fmtEventWhen(String? start, bool allDay) {
+    if (start == null || start.isEmpty) return '';
+    final d = DateTime.tryParse(start);
+    if (d == null) return start;
+    if (allDay) return DateFormat('M/d').format(d);   // 종일 — tz 변환 안 함
+    return DateFormat('M/d HH:mm').format(d.toLocal());
   }
 
   // ── 오늘 받은 알림 (digest) ─────────────────────────────────

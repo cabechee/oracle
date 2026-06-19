@@ -217,6 +217,8 @@ class ChatMessage {
   final String? quickText;         // 쿠키 첨언 (assistant)
   final String? speaker;           // 동반자 화자 (베르|쿠키) — companion 선제 멘트
   final bool isCompanion;          // 동반자가 먼저 건 말 (대화 응답과 구분)
+  final Map<String, dynamic>? action;  // 실행 제안(일정 등록 등) — 확인 카드 렌더
+  final String? trigger;           // 이 수다를 일으킨 계기 (예: '집에 도착했다.') — 캡션
 
   ChatMessage({
     required this.id,
@@ -227,6 +229,8 @@ class ChatMessage {
     this.quickText,
     this.speaker,
     this.isCompanion = false,
+    this.action,
+    this.trigger,
   });
 
   bool get isUser => role == 'user';
@@ -243,6 +247,10 @@ class ChatMessage {
             ? (j['speaker'] as String).trim()
             : null,
         isCompanion: j['companion'] == true,
+        action: (j['action'] as Map?)?.cast<String, dynamic>(),
+        trigger: (j['trigger'] as String?)?.trim().isNotEmpty == true
+            ? (j['trigger'] as String).trim()
+            : null,
       );
 }
 

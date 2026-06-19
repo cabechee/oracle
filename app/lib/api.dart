@@ -422,6 +422,30 @@ class OracleApi {
     }
   }
 
+  /// 대화 제안 액션 확인 → 실행(일정 등록). 반환 {ok, event?|reason?}.
+  Future<Map<String, dynamic>> confirmChatAction(String messageId) async {
+    final resp = await _req(
+        'POST /chat/action/confirm',
+        () => http.post(
+            Uri.parse(
+                '$baseUrl/chat/action/${Uri.encodeComponent(messageId)}/confirm'),
+            headers: {...authHeaders}));
+    if (resp.statusCode != 200) {
+      throw Exception('확인 실패: ${resp.statusCode}');
+    }
+    return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// 대화 제안 액션 취소(생성 안 함).
+  Future<void> cancelChatAction(String messageId) async {
+    await _req(
+        'POST /chat/action/cancel',
+        () => http.post(
+            Uri.parse(
+                '$baseUrl/chat/action/${Uri.encodeComponent(messageId)}/cancel'),
+            headers: {...authHeaders}));
+  }
+
   /// companion 한마디 — event(checkin/arrive_home 등) → {speaker, text, alias}.
   Future<Map<String, dynamic>> companionSay(String event,
       {String? place, String? speaker}) async {
