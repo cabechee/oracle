@@ -206,30 +206,77 @@ def _log_companion(speaker: Optional[str], text: str,
 
 
 def car_departure(lat: float, lng: float, ts: Any = None,
-                  speaker: Optional[str] = None) -> Dict[str, Any]:
+                  speaker: Optional[str] = None, recheck: bool = False) -> Dict[str, Any]:
     """출차(주차중→운전중) — 테슬라로 목적지 확인 후 한마디 + 운행 스레드 시작.
 
-    내비 목적지가 있으면 집/회사로 매칭해 '회사 가는구나'(질문 X), 없으면 '어디 가?'.
-    테슬라 미연결/자는차/상한이면 graceful — 기존 '어디 가?'로 폴백.
+    내비 목적지 있으면 집/회사로 매칭해 '회사 가는구나'(질문 X). 목적지 없으면 **즉답 보류** →
+    수집기가 car_dest_recheck_min(기본 3분) 뒤 recheck=True로 다시 부른다 → 그때도 없으면 '어디 가?'.
+    (운전 시작 후 내비 찍는 경우를 잡으려고.) 테슬라 미연결/자는차면 graceful.
     """
     tloc = _tesla_at_event()
     dest = _dest_name(tloc)
+    print(f"[car] 출차{'(재확인)' if recheck else ''} — tesla: shift={(tloc or {}).get('shift')} "
+          f"dest={dest!r} loc=({(tloc or {}).get('lat')},{(tloc or {}).get('lng')}) "
+          f"phone=({lat},{lng})", flush=True)
+
+    if not recheck:
+        # 첫 호출 — 운행 시작 기록(출발 시각). 목적지 없으면 즉답 보류하고 수집기 재확인 대기.
+        db.settings().update_one(
+            {"_id": "drive"},
+            {"$set": {"state": "driving", "departed_at": _ts_to_dt(ts), "destination": dest}},
+            upsert=True)
+        if not dest:
+            print("[car] 출차 — 목적지 미설정 → 즉답 보류, 수집기 재확인 대기", flush=True)
+            return {"speaker": "", "text": "", "alias": "", "recheck": True}
+
     if dest:
         situation = (f"아빠가 차 몰고 '{dest}' 쪽으로 가는 중이야(내비 목적지로 확인됨). 어디 "
                      f"가냐고 묻지 말고 '{dest} 가는구나' 하고 잘 다녀오라 가볍게 인사해 — 짧게.")
-    else:
-        situation = ("아빠가 방금 차를 몰고 어디론가 출발했어(세워둔 데서 한참 벗어나 움직이기 "
-                     "시작). 어디 가는지 궁금해서 가볍게 물어봐 — '어디 가?' 정도로 아주 짧게.")
+    else:   # 재확인에도 목적지 없음 → 어디 가?
+        situation = ("아빠가 차를 몰고 어디론가 가는 중이야. 어디 가는지 궁금해서 가볍게 물어봐 "
+                     "— '어디 가?' 정도로 아주 짧게.")
     r = _speak("car", situation, speaker)
-    doc: Dict[str, Any] = {"state": "driving", "departed_at": _ts_to_dt(ts)}
+    upd: Dict[str, Any] = {"state": "driving"}
     if dest:
-        doc["destination"] = dest             # 주차 때 '여기 잘 도착했어?' 매칭용
+        upd["destination"] = dest             # 주차 때 '여기 잘 도착했어?' 매칭용
     if (r.get("text") or "").strip():
-        doc["question_ts"] = datetime.now()
+        upd["question_ts"] = datetime.now()
         _log_companion(r.get("speaker"), r.get("text"),
                        trigger=(f"{dest}로 출발" if dest else "차로 출발"))
-    db.settings().update_one({"_id": "drive"}, {"$set": doc}, upsert=True)
+    db.settings().update_one({"_id": "drive"}, {"$set": upd}, upsert=True)
+    print(f"[car] 출차 멘트({'dest=' + dest if dest else '어디가'}): {(r.get('text') or '')!r}",
+          flush=True)
     return r
+
+
+def car_charging_check(lat: float, lng: float,
+                       speaker: Optional[str] = None) -> Dict[str, Any]:
+    """운전중 오래 정지(car_charge_check_min) — 테슬라로 충전 중인지 확인.
+
+    충전 중이면 '충전 중이구나' 한마디(+흐름), 아니면 침묵. 어느 쪽이든 상세 로그. 자는 차는 안 깨움.
+    """
+    try:
+        import tesla
+        if not tesla.is_authed() or not _tesla_budget_ok():
+            print("[car] 충전확인 — 테슬라 미연결/상한 → skip", flush=True)
+            return {"speaker": "", "text": "", "charging": None}
+        cs = tesla.charge()
+    except Exception as e:
+        print(f"[car] 충전확인 실패: {e}", flush=True)
+        return {"speaker": "", "text": "", "charging": None}
+    if not cs:
+        print("[car] 충전확인 — 차 오프라인/응답없음(안 깨움)", flush=True)
+        return {"speaker": "", "text": "", "charging": None}
+    print(f"[car] 충전확인 — state={cs.get('state')!r} charging={cs.get('charging')} "
+          f"level={cs.get('level')}% +{cs.get('added_kwh')}kWh", flush=True)
+    if not cs.get("charging"):
+        return {"speaker": "", "text": "", "charging": False}
+    situation = (f"아빠 차가 지금 충전 중이야(배터리 {cs.get('level')}%). 충전 중이라 한자리에 오래 "
+                 f"서 있는 거구나 — 가볍게 한마디, 짧게.")
+    r = _speak("car", situation, speaker)
+    if (r.get("text") or "").strip():
+        _log_companion(r.get("speaker"), r.get("text"), trigger="충전 중")
+    return {**r, "charging": True}
 
 
 def car_parking(lat: float, lng: float, ts: Any = None,
@@ -246,12 +293,15 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     plat = tloc["lat"] if (tloc and tloc.get("lat") is not None) else lat
     plng = tloc["lng"] if (tloc and tloc.get("lng") is not None) else lng
     parking_mod.record(plat, plng, ts)            # 위치는 항상 ('내 차 어디?' 회상용)
+    print(f"[car] 주차{'(안전망 silent)' if silent else ''} — tesla shift={(tloc or {}).get('shift')} "
+          f"기록좌표=({plat},{plng}) phone=({lat},{lng})", flush=True)
     drive = db.settings().find_one({"_id": "drive"}) or {}
     db.settings().update_one(
         {"_id": "drive"},
         {"$set": {"state": "parked", "question_ts": None, "destination": None}},
         upsert=True)
     if silent:
+        print("[car] 주차 — 안전망 조용히 리셋(말 X)", flush=True)
         return {"speaker": "", "text": "", "alias": ""}
     here = None                                   # 도착 장소(집/회사 등) 매칭
     try:
@@ -264,6 +314,7 @@ def car_parking(lat: float, lng: float, ts: Any = None,
         qts = drive.get("question_ts")
         if isinstance(qts, datetime):
             dest = _first_user_reply_after(qts)   # 아빠가 답한 목적지
+    print(f"[car] 주차 — 도착지매칭 here={here!r} 출발목적지 dest={dest!r}", flush=True)
     if here:
         situation = (f"아빠가 방금 '{here}'에 도착해서 차를 세웠어. '{here} 왔구나'처럼 가볍게 "
                      f"맞이해 — 짧게.")
@@ -277,6 +328,7 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     if (r.get("text") or "").strip():
         _log_companion(r.get("speaker"), r.get("text"),
                        trigger=(f"{here} 도착" if here else "차 세움"))
+    print(f"[car] 주차 멘트: {(r.get('text') or '')!r}", flush=True)
     return r
 
 

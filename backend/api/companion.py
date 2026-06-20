@@ -59,16 +59,31 @@ class CarDepartIn(BaseModel):
     lng: float
     ts: Optional[int] = None         # epoch ms (출발 순간)
     speaker: Optional[str] = None
+    recheck: bool = False            # 3분 뒤 목적지 재확인 호출이면 True (수집기가 보냄)
 
 
 @router.post("/car/departure")
 def ep_car_departure(body: CarDepartIn):
-    """출차(주차중→운전중) — '어디 가?' 한마디 + 운행 스레드 시작.
+    """출차(주차중→운전중) — 목적지 있으면 '회사 가는구나', 없으면 즉답 보류({recheck:true}).
 
-    상태전이 판정(BT 연결+200m)은 수집기가 끝내고 이 순간에만 부른다.
+    상태전이 판정(BT 연결+이동)은 수집기가 끝내고 이 순간에만 부른다. recheck=True면 3분 뒤
+    재확인(그때도 목적지 없으면 '어디 가?').
     """
     from agent import companion
-    return companion.car_departure(body.lat, body.lng, body.ts, body.speaker)
+    return companion.car_departure(body.lat, body.lng, body.ts, body.speaker, body.recheck)
+
+
+class CarChargeIn(BaseModel):
+    lat: float
+    lng: float
+    speaker: Optional[str] = None
+
+
+@router.post("/car/charging")
+def ep_car_charging(body: CarChargeIn):
+    """운전중 오래 정지 — 테슬라로 충전 중인지 확인. 충전이면 '충전 중이네' 반환(아니면 빈 text)."""
+    from agent import companion
+    return companion.car_charging_check(body.lat, body.lng, body.speaker)
 
 
 class CarParkIn(BaseModel):

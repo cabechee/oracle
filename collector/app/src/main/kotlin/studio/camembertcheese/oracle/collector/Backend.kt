@@ -48,11 +48,19 @@ object Backend {
     }
 
     /// 출차(주차중→운전중) — '어디 가?' 한마디 + 운행 스레드 시작. {speaker,text} 반환(억제면 빈 text).
-    fun carDeparture(ctx: Context, lat: Double, lng: Double): JSONObject? {
+    fun carDeparture(ctx: Context, lat: Double, lng: Double,
+                     recheck: Boolean = false): JSONObject? {
         val body = JSONObject()
             .put("lat", lat).put("lng", lng)
             .put("ts", System.currentTimeMillis())
+            .put("recheck", recheck)
         return post(Prefs.baseUrl(ctx) + "/car/departure", body)
+    }
+
+    /// 운전중 오래 정지 — 테슬라로 충전중인지 확인. 충전이면 멘트(text) 채워짐, 아니면 빈 text.
+    fun carCharging(ctx: Context, lat: Double, lng: Double): JSONObject? {
+        val body = JSONObject().put("lat", lat).put("lng", lng)
+        return post(Prefs.baseUrl(ctx) + "/car/charging", body)
     }
 
     /// 주차(운전중→주차중) — 주차 위치 기록 + 질문('어디?'/답했으면 '잘 도착했어?').

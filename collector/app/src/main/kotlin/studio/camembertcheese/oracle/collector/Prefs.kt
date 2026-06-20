@@ -170,4 +170,14 @@ object Prefs {
     fun parkPendingTicks(ctx: Context): Int = sp(ctx).getInt("park_pending_ticks", 0)
     fun setParkPendingTicks(ctx: Context, v: Int) =
         sp(ctx).edit().putInt("park_pending_ticks", v).apply()
+
+    /// 출차 때 목적지 없으면 이 시각(ms) 이후 1회 재확인. 재확인 실행/주차 시 0으로.
+    fun destRecheckAt(ctx: Context): Long = sp(ctx).getLong("dest_recheck_at", 0L)
+    fun setDestRecheckAt(ctx: Context, v: Long) =
+        sp(ctx).edit().putLong("dest_recheck_at", v).apply()
+
+    /// 이번 정지구간에 충전확인을 한 시각(ms). driveLastMove보다 작으면 새 정지 → 다시 확인.
+    fun chargeCheckedAt(ctx: Context): Long = sp(ctx).getLong("charge_checked_at", 0L)
+    fun setChargeCheckedAt(ctx: Context, v: Long) =
+        sp(ctx).edit().putLong("charge_checked_at", v).apply()
 }

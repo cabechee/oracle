@@ -19,3 +19,4 @@ corpus/
 digest/
 index/
 journal/
+.wrangler/

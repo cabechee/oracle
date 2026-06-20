@@ -157,6 +157,29 @@ def location(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
     }
 
 
+def charge(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """충전 상태 — 운전중 정지 시 '충전 중인가' 확인용. 자는 차는 안 깨움(None)."""
+    vs = vehicles()
+    if not vs:
+        return None
+    v = next((x for x in vs if x.get("vin") == vin), vs[0]) if vin else vs[0]
+    if v.get("state") != "online":
+        return None   # asleep/offline — 안 깨움
+    data = vehicle_data(v.get("vin"))
+    if not data:
+        return None
+    cs = data.get("charge_state") or {}
+    state = cs.get("charging_state")          # Charging | Complete | Disconnected | Stopped | NoPower
+    return {
+        "vin": v.get("vin"),
+        "charging": state == "Charging",
+        "state": state,
+        "level": cs.get("battery_level"),
+        "added_kwh": cs.get("charge_energy_added"),
+        "mins_left": cs.get("minutes_to_full_charge"),
+    }
+
+
 def wake(vin: str) -> bool:
     """차 깨우기(잠든 차 vehicle_data 전에). 성공 추정 시 True."""
     at = _access_token()

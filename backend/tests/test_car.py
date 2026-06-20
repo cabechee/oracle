@@ -61,17 +61,30 @@ def _capture_speak(monkeypatch):
 
 
 # ── 출차: 운행 스레드 시작 ──
-def test_departure_starts_drive_thread(monkeypatch):
+def test_departure_no_dest_defers(monkeypatch):
+    # 목적지 없으면 즉답 보류({recheck:true}) — 운행 시작만 기록, 멘트 X.
     s = _FakeSettings()
     monkeypatch.setattr(companion.db, "settings", lambda: s)
     calls = _capture_speak(monkeypatch)
-    r = companion.car_departure(37.5, 127.0, 1718000000000)
-    assert r["text"] == "응 거기 어때?"
-    assert calls[0]["kind"] == "car"
-    assert "어디 가" in calls[0]["situation"]
+    r = companion.car_departure(37.5, 127.0, 1718000000000)  # autouse _tesla_at_event=None → 목적지 없음
+    assert r.get("recheck") is True and r["text"] == ""
+    assert calls == []                                  # 멘트 안 함(보류)
     drive = s.docs["drive"]
-    assert drive["state"] == "driving"
-    assert isinstance(drive["question_ts"], datetime)   # 질문했으니 답 매칭 기준 기록
+    assert drive["state"] == "driving" and "question_ts" not in drive
+
+
+def test_departure_recheck_asks(monkeypatch):
+    # 3분 재확인에도 목적지 없으면 '어디 가?' 멘트 + 흐름 저장.
+    s = _FakeSettings([{"_id": "drive", "state": "driving",
+                        "departed_at": datetime(2026, 6, 20, 10, 0)}])
+    cv = _FakeConvos()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    calls = _capture_speak(monkeypatch)
+    r = companion.car_departure(37.5, 127.0, recheck=True)
+    assert r["text"] == "응 거기 어때?" and "어디 가" in calls[0]["situation"]
+    assert isinstance(s.docs["drive"]["question_ts"], datetime)
+    assert len(cv.docs) == 1                             # 흐름 자동 저장
 
 
 def test_departure_gated_no_question_ts(monkeypatch):
@@ -170,16 +183,40 @@ def test_parking_tesla_here_and_precise(monkeypatch):
 
 
 # ── 흐름(conversations) 자동 저장: 탭 안 해도 차 멘트가 흐름에 남아야 ──
-def test_departure_logs_to_flow(monkeypatch):
+def test_departure_dest_logs_to_flow(monkeypatch):
+    # 목적지(회사) 있으면 즉답 '회사 가는구나' + 흐름 자동 저장(trigger='회사로 출발').
     s = _FakeSettings()
     cv = _FakeConvos()
     monkeypatch.setattr(companion.db, "settings", lambda: s)
     monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    monkeypatch.setattr(companion, "_tesla_at_event",
+                        lambda: {"dest_lat": 37.49, "dest_lng": 127.03, "dest": "X"})
+    monkeypatch.setattr(companion.places_mod, "nearest", lambda *a, **k: {"name": "회사"})
     _capture_speak(monkeypatch)
     companion.car_departure(37.5, 127.0)
     assert len(cv.docs) == 1
     assert cv.docs[0]["companion"] is True and cv.docs[0]["role"] == "assistant"
-    assert cv.docs[0]["text"] == "응 거기 어때?" and cv.docs[0].get("trigger") == "차로 출발"
+    assert cv.docs[0]["text"] == "응 거기 어때?" and cv.docs[0].get("trigger") == "회사로 출발"
+
+
+def test_charging_check(monkeypatch):
+    # 충전 중이면 '충전 중' 멘트 + 흐름; 아니면 침묵.
+    cv = _FakeConvos()
+    monkeypatch.setattr(companion.db, "settings", lambda: _FakeSettings())
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    import tesla
+    monkeypatch.setattr(tesla, "is_authed", lambda: True)
+    monkeypatch.setattr(companion, "_tesla_budget_ok", lambda: True)
+    monkeypatch.setattr(tesla, "charge", lambda vin=None: {"charging": True, "state": "Charging", "level": 62})
+    _capture_speak(monkeypatch)
+    r = companion.car_charging_check(37.49, 127.03)
+    assert r["charging"] is True and r["text"] == "응 거기 어때?"
+    assert len(cv.docs) == 1 and cv.docs[0]["trigger"] == "충전 중"
+    # 충전 아님 → 침묵
+    monkeypatch.setattr(tesla, "charge", lambda vin=None: {"charging": False, "state": "Disconnected"})
+    cv.docs.clear()
+    r2 = companion.car_charging_check(37.49, 127.03)
+    assert r2["charging"] is False and r2["text"] == "" and cv.docs == []
 
 
 def test_parking_logs_to_flow(monkeypatch):
@@ -256,7 +293,10 @@ def test_car_mark_spoken(monkeypatch):
 def test_car_thresholds_defaults(monkeypatch):
     monkeypatch.setattr(lc.db, "settings", lambda: _FakeSettings())
     cfg = lc.get_config()
-    assert cfg["car_depart_radius_m"] == 200
+    assert cfg["car_depart_radius_m"] == 50
+    assert cfg["car_stationary_reset_min"] == 120
+    assert cfg["car_charge_check_min"] == 10
+    assert cfg["car_dest_recheck_min"] == 3
     assert cfg["car_park_debounce_ticks"] == 2
 
 

@@ -15,19 +15,23 @@ DEFAULTS: Dict[str, Any] = {
     "poll_interval_sec": 60,        # 위치 확인 주기(초) — 폰 포그라운드 틱 간격
     "skip_on_known_wifi": True,     # 등록된 장소 WiFi에 물려 있으면 GPS 스킵(배터리·실내정확)
     # ── 차량 출차/주차 판정 임계값 (수집기 상태머신) ──
-    "car_depart_radius_m": 200,     # 출차: 차 BT 연결 채로 세운 데서 이만큼 벗어나면 운전중
+    "car_depart_radius_m": 50,      # 출차: 차 BT 연결 채로 세운 데서 이만큼 벗어나면 운전중
     "car_stationary_radius_m": 75,  # 안전망: 운전중 이 반경 안에 머물면 '정지'로 침
-    "car_stationary_reset_min": 30, # 안전망: 정지 이만큼 지속되면 조용히 주차중으로 리셋
+    "car_stationary_reset_min": 120,  # 안전망: 정지 이만큼 지속되면 조용히 주차중 리셋(충전 고려 2h)
     "car_park_debounce_ticks": 2,   # 주차: BT 해제가 연속 이만큼 틱이어야 확정(시동 깜빡임 흡수)
+    "car_charge_check_min": 10,     # 운전중 이만큼 정지하면 테슬라로 충전중인지 확인(1회)
+    "car_dest_recheck_min": 3,      # 출차 시 목적지 없으면 이만큼 뒤 1회 재확인 후 '어디 가?'
 }
 
 # 키별 정수 범위 (의미가 달라 클램프를 분리)
 _INT_RANGES = {
     "poll_interval_sec": (15, 3600),        # 15초 ~ 1시간
-    "car_depart_radius_m": (50, 5000),
+    "car_depart_radius_m": (20, 5000),
     "car_stationary_radius_m": (20, 1000),
-    "car_stationary_reset_min": (5, 240),
+    "car_stationary_reset_min": (5, 480),
     "car_park_debounce_ticks": (1, 10),
+    "car_charge_check_min": (1, 120),
+    "car_dest_recheck_min": (1, 60),
 }
 _INT_KEYS = tuple(_INT_RANGES)
 _BOOL_KEYS = ("skip_on_known_wifi",)

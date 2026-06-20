@@ -10,11 +10,13 @@ import org.json.JSONObject
 /// 수다는 이동(나섬)·도착(인사)에 흐름으로 건다. 시간 체크인(정시)과도 완전 별개.
 ///
 /// 차량(좌표 없는 BT 장소=차)은 별도 상태머신:
-///   주차중 ──[차 BT 연결 + 세운 데서 200m+ 이동]──▶ 운전중   ('어디 가?')
+///   주차중 ──[차 BT 연결 + 세운 데서 50m+ 이동]──▶ 운전중    (목적지 있으면 '회사 가는구나',
+///                                                           없으면 3분 뒤 재확인 후 '어디 가?')
 ///   운전중 ──[차 BT 해제(디바운스)]──▶ 주차중                ('어디?'/'잘 도착했어?')
-///   운전중 ──[한참 정지(안전망)]──▶ 주차중                  (조용히, 질문 X)
+///   운전중 ──[10분 정지]──▶ 충전 확인(충전이면 '충전 중', 상태 유지)
+///   운전중 ──[2시간 정지(안전망)]──▶ 주차중                  (조용히, 질문 X)
 /// 비대칭 근거: BT 해제 = 이미 차서 멀어짐(=주차). BT 연결 = 차 근처일 뿐(물건 꺼내기?) →
-/// 200m 게이트로 운전 확정. 물건 꺼내기는 BT 연결돼도 200m 안 → 출차 아님.
+/// 50m 게이트로 운전 확정. 물건 꺼내기는 BT 연결돼도 50m 안 → 출차 아님.
 object LocationCollector {
 
     private const val ARRIVE_RADIUS = 120.0
@@ -57,10 +59,12 @@ object LocationCollector {
     /// 차 상태를 한 틱 진행. 처리했으면(운전중이거나 전이 발생) true — 호출부가 체류머신 스킵.
     private fun carTick(ctx: Context, now: Long, onCar: Boolean,
                         carName: String?, locCfg: JSONObject?): Boolean {
-        val departR = (locCfg?.optInt("car_depart_radius_m", 200) ?: 200).toDouble()
+        val departR = (locCfg?.optInt("car_depart_radius_m", 50) ?: 50).toDouble()
         val statR = (locCfg?.optInt("car_stationary_radius_m", 75) ?: 75).toDouble()
-        val resetMs = (locCfg?.optInt("car_stationary_reset_min", 30) ?: 30) * 60_000L
+        val resetMs = (locCfg?.optInt("car_stationary_reset_min", 120) ?: 120) * 60_000L
         val debounce = (locCfg?.optInt("car_park_debounce_ticks", 2) ?: 2).coerceAtLeast(1)
+        val chargeMs = (locCfg?.optInt("car_charge_check_min", 10) ?: 10) * 60_000L
+        val recheckMs = (locCfg?.optInt("car_dest_recheck_min", 3) ?: 3) * 60_000L
 
         // 0) 재시작 직후 — 현재 BT(+지속 상태)로만 맞추고 이벤트 X.
         if (!carBaselined) {
@@ -95,7 +99,22 @@ object LocationCollector {
             }
             Prefs.setParkPendingTicks(ctx, 0)   // BT 유지/도로 잡힘 — 디바운스 리셋
 
-            // 2) 안전망 — 운전중인데 한참(reset 분) 정지 지속 → 조용히 주차중(질문 X).
+            // 2) 목적지 재확인 — 출차 때 목적지 없었으면 recheck분 뒤 1회 더(운전 시작 후 내비 찍기).
+            val recheckAt = Prefs.destRecheckAt(ctx)
+            if (recheckAt > 0L && now >= recheckAt) {
+                Prefs.setDestRecheckAt(ctx, 0L)   // 1회만
+                val rlat = loc?.latitude ?: Prefs.driveAnchor(ctx)?.first ?: 0.0
+                val rlng = loc?.longitude ?: Prefs.driveAnchor(ctx)?.second ?: 0.0
+                L.i("출차 목적지 재확인(${recheckMs / 60000}분 경과) — 재조회")
+                val r = Backend.carDeparture(ctx, rlat, rlng, recheck = true)
+                val text = r?.optString("text")?.trim() ?: ""
+                if (text.isNotEmpty()) {
+                    Notify.companion(ctx, r!!.optString("speaker"), text)
+                    L.i("목적지 재확인 멘트: $text")
+                } else L.i("목적지 재확인 — 여전히 목적지 없음/멘트 게이팅")
+            }
+
+            // 3) 안전망 — 운전중 정지: chargeMs 정지면 충전확인(1회), resetMs 정지면 조용히 주차중.
             if (loc != null) {
                 val da = Prefs.driveAnchor(ctx)
                 if (da == null) {
@@ -105,9 +124,24 @@ object LocationCollector {
                         .toDouble()
                     if (moved > statR) {
                         Prefs.setDriveAnchor(ctx, loc.latitude, loc.longitude, now) // 움직임 — 타이머 리셋
-                    } else if (now - Prefs.driveLastMove(ctx) >= resetMs) {
-                        L.i("안전망: 정지 ${resetMs / 60000}분 지속 — 조용히 주차중 리셋")
-                        doPark(ctx, loc, now, silent = true)
+                    } else {
+                        val still = now - Prefs.driveLastMove(ctx)
+                        // 10분+ 한자리 정지 & 이번 정지 아직 확인 안 함 → 충전중인지(자는차면 무응답).
+                        if (still >= chargeMs && Prefs.chargeCheckedAt(ctx) < Prefs.driveLastMove(ctx)) {
+                            Prefs.setChargeCheckedAt(ctx, now)
+                            L.i("운전중 ${still / 60000}분 정지 — 충전 확인 호출")
+                            val r = Backend.carCharging(ctx, loc.latitude, loc.longitude)
+                            val text = r?.optString("text")?.trim() ?: ""
+                            if (text.isNotEmpty()) {
+                                Notify.companion(ctx, r!!.optString("speaker"), text)
+                                L.i("충전 중 확인 — $text")
+                            } else L.i("충전 확인 — 충전 아님/무응답(운전중 유지)")
+                        }
+                        // 안전망 리셋(2시간) — 충전이든 멈춤이든 너무 오래면 조용히 주차중.
+                        if (still >= resetMs) {
+                            L.i("안전망: 정지 ${resetMs / 60000}분 지속 — 조용히 주차중 리셋")
+                            doPark(ctx, loc, now, silent = true)
+                        }
                     }
                 }
             }
@@ -126,7 +160,7 @@ object LocationCollector {
                     .toDouble()
                 if (moved >= departR) {
                     L.i("출차(BT 연결 + ${moved.toInt()}m ≥ ${departR.toInt()}m) — 주차중→운전중: '$carName'")
-                    doDepart(ctx, loc.latitude, loc.longitude, now, carName)
+                    doDepart(ctx, loc.latitude, loc.longitude, now, carName, recheckMs)
                 }
             }
             return true   // BT 연결 채 주차중 — 출차 감시 중, 체류머신 스킵(조기 leave 방지)
@@ -139,8 +173,9 @@ object LocationCollector {
         return false   // 주차중 — 체류머신 돌게
     }
 
-    /// 출차 — 머물던 곳(여정 silent) 마무리 + 운전중 진입 + '어디 가?' 질문.
-    private fun doDepart(ctx: Context, lat: Double, lng: Double, now: Long, carName: String?) {
+    /// 출차 — 머물던 곳(여정 silent) 마무리 + 운전중 진입 + 목적지 멘트(없으면 재확인 예약).
+    private fun doDepart(ctx: Context, lat: Double, lng: Double, now: Long,
+                         carName: String?, recheckMs: Long) {
         if (Prefs.visitOn(ctx)) {           // 머물던 곳(집 등)을 먼저 여정에 기록
             endStay(ctx, now)
             Prefs.setVisitOn(ctx, false)
@@ -150,9 +185,19 @@ object LocationCollector {
         Prefs.setCarName(ctx, carName ?: "차")
         Prefs.setDriveAnchor(ctx, lat, lng, now)
         Prefs.setParkPendingTicks(ctx, 0)
+        Prefs.setChargeCheckedAt(ctx, 0L)   // 새 운행 — 충전확인 리셋
+        Prefs.setDestRecheckAt(ctx, 0L)
         val r = Backend.carDeparture(ctx, lat, lng)
         val text = r?.optString("text")?.trim() ?: ""
-        if (text.isNotEmpty()) Notify.companion(ctx, r!!.optString("speaker"), text)
+        if (text.isNotEmpty()) {
+            Notify.companion(ctx, r!!.optString("speaker"), text)
+            L.i("출차 멘트(즉답): $text")
+        } else if (r?.optBoolean("recheck") == true) {
+            Prefs.setDestRecheckAt(ctx, now + recheckMs)   // 목적지 없음 → recheck분 뒤 1회 재확인
+            L.i("출차 — 목적지 미설정, ${recheckMs / 60000}분 뒤 재확인 예약")
+        } else {
+            L.i("출차 — 멘트 없음(게이팅/미연결)")
+        }
     }
 
     /// 주차 — 드라이브 구간(여정 silent) + 주차 위치 기록 + 질문(silent면 위치만). 주차중 진입.
@@ -165,7 +210,8 @@ object LocationCollector {
         Prefs.setCarName(ctx, "")
         Prefs.setParkPendingTicks(ctx, 0)
         Prefs.clearDriveAnchor(ctx)
-        // 새 주차 위치를 다음 출차의 200m 기준점으로.
+        Prefs.setDestRecheckAt(ctx, 0L)     // 주차 — 남은 목적지 재확인 취소
+        // 새 주차 위치를 다음 출차의 거리 기준점으로.
         if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude)
         val anchor = Prefs.departAnchor(ctx)
         val plat = loc?.latitude ?: anchor?.first ?: 0.0
