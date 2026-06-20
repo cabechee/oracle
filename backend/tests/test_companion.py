@@ -109,3 +109,44 @@ def test_record_asked(monkeypatch):
     assert isinstance(out["ts"], str)      # ISO 직렬화
     assert len(col.docs) == 1              # conversations에 1건 저장
     assert col.docs[0]["_id"].startswith("cmsg-")
+
+
+# ── 호칭 일관성: 계기·장면 속 '아빠'가 쿠키 프롬프트에 새지 않아야 ('오빠, 아빠…' 버그) ──
+def _capture_speak_prompt(monkeypatch, ctx=""):
+    cap = {}
+    monkeypatch.setattr(companion.personas, "current", lambda k: "SYS")
+    monkeypatch.setattr(companion, "task_alias", lambda k: "haiku")
+    monkeypatch.setattr(companion.cc, "should_speak", lambda *a, **k: True)
+    monkeypatch.setattr(companion.cc, "gather_context", lambda *a, **k: ctx)
+    monkeypatch.setattr(companion.cc, "mark_spoken", lambda *a, **k: None)
+    monkeypatch.setattr(companion.llm, "call",
+                        lambda alias, prompt, system=None: cap.update(prompt=prompt) or {"text": "ok"})
+    return cap
+
+
+def test_speak_cookie_no_appa_leak(monkeypatch):
+    # 쿠키면 계기·맥락의 '아빠'가 '오빠'로 치환 → 프롬프트에 '아빠' 안 남음(섞임 방지).
+    cap = _capture_speak_prompt(monkeypatch, ctx="아빠가 오늘 3곳 다녀옴")
+    companion._speak("car", "아빠가 차 몰고 회사 가는 중이야.", speaker="cookie")
+    assert "아빠" not in cap["prompt"] and "오빠" in cap["prompt"]
+
+
+def test_speak_berr_keeps_appa(monkeypatch):
+    # 베르면 '아빠' 유지(치환 안 함).
+    cap = _capture_speak_prompt(monkeypatch, ctx="아빠가 오늘 3곳 다녀옴")
+    companion._speak("car", "아빠가 차 몰고 회사 가는 중이야.", speaker="berr")
+    assert "아빠" in cap["prompt"]
+
+
+def test_banter_scene_neutralized(monkeypatch):
+    # banter 장면 서술의 '아빠'는 '그분'으로 중립화(쿠키가 베껴 '아빠' 쓰는 것 방지).
+    cap = {}
+    monkeypatch.setattr(companion.personas, "current", lambda k: "SYS")
+    monkeypatch.setattr(companion, "task_alias", lambda k: "haiku")
+    monkeypatch.setattr(companion.cc, "should_speak", lambda *a, **k: True)
+    monkeypatch.setattr(companion.places_mod, "lookup", lambda p: {"name": p, "kind": "office"})
+    monkeypatch.setattr(companion.llm, "call",
+                        lambda alias, prompt, system=None: cap.update(prompt=prompt) or {"text": "[]"})
+    companion.banter("arrive", "작업실")
+    scene_part = cap["prompt"].split("[지금 상황]")[1].split("\n\n")[0]
+    assert "아빠" not in scene_part and "그분" in scene_part   # 장면 서술 중립화

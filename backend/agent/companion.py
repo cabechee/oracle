@@ -87,10 +87,14 @@ def _speak(kind: str, situation: str,
         return {"speaker": name, "text": "", "alias": ""}
     # 실제 맥락(쌓인 신호·오늘 기록/방문·시간대) — 자연스러우면 하나만 슬쩍 녹이게.
     real_ctx = cc.gather_context(now)
+    term = "오빠" if who == "cookie" else "아빠"   # 쿠키는 '오빠', 베르는 '아빠'로 부른다
+    # 계기·맥락 텍스트는 '아빠'로 서술돼 있음 — 쿠키면 호칭 일관 치환(안 하면 '오빠, 아빠…' 섞임).
+    if term != "아빠":
+        situation = situation.replace("아빠", term)
+        real_ctx = real_ctx.replace("아빠", term)
     ctx_block = (
         f"[요즘 상황 — 이 중 자연스러운 게 있으면 하나만 슬쩍 녹여도 좋아. 다 나열하지 말고, "
         f"억지로 엮지 말고, 없으면 그냥 가볍게.]\n{real_ctx}\n\n" if real_ctx else "")
-    term = "오빠" if who == "cookie" else "아빠"   # 쿠키는 '오빠', 베르는 '아빠'로 부른다
     prompt = (
         f"지금은 네가 **먼저** {term}에게 톡 말을 거는 상황이야. {term}가 너한테 무슨 말을 한 게 "
         f"아니라({term}는 아직 아무 말도 안 했어), {term} 생각이 나서 네가 문득 말 거는 거야.\n\n"
@@ -425,22 +429,25 @@ def banter(event: str, place: Optional[str] = None,
     scene, resident = _banter_scene(event, info)
     if minutes:
         scene += f" (아빠는 거기 약 {minutes}분 있었어)"
+    scene = scene.replace("아빠", "그분")   # 서술의 '아빠'는 중립화 — 쿠키가 베껴 '아빠' 쓰는 것 방지
 
     alias = task_alias("quick") or task_alias("insight") or task_alias("chat")
     if not alias:
         return {"turns": [], "notify": {"speaker": "", "text": ""}}
     system = (
-        "너희는 둘 다 아빠의 동반자야. 베르(berr)는 강아지 — 다정하고 차분한 편, "
-        "쿠키(cookie)는 오목눈이 새 — 발랄하고 장난스러운 편. 지금은 아빠한테 직접 "
+        "너희는 둘 다 한 사람(그분)의 동반자야. 베르(berr)는 강아지 — 다정하고 차분한 편, "
+        "쿠키(cookie)는 오목눈이 새 — 발랄하고 장난스러운 편. 지금은 그분한테 직접 "
         "거는 게 아니라, 너희 둘이 서로 도란도란 짧게 주고받는 대화야.\n"
-        "★호칭: **베르는 사용자를 '아빠', 쿠키는 '오빠'**라고 부른다(섞지 마).\n\n"
+        "★호칭: 그분을 **베르는 '아빠', 쿠키는 '오빠'**라고 부른다 — 절대 섞지 마"
+        "(쿠키 대사에 '아빠'가 나오면 틀린 거야).\n\n"
         f"[베르]\n{personas.current('berr_identity')}\n\n"
         f"[쿠키]\n{personas.current('cookie_identity')}")
     prompt = (
         f"[지금 상황] {scene}\n\n"
         "이 상황에 맞춰 베르와 쿠키가 **서로** 주고받는 짧은 대화를 써. "
-        "2~3턴(한 사람당 한두 마디), 각 줄은 아주 짧게 구어체로. 아빠한테 거는 게 "
-        "아니라 둘이 얘기하는 거야. 인사·이름표 없이 말만. "
+        "2~3턴(한 사람당 한두 마디), 각 줄은 아주 짧게 구어체로. 그분한테 거는 게 "
+        "아니라 둘이 얘기하는 거야. **상황 속 '그분'을 베르는 '아빠', 쿠키는 '오빠'로 부른다 — "
+        "섞지 마.** 인사·이름표 없이 말만. "
         '결과는 JSON 배열만: [{"who":"berr","text":"..."},{"who":"cookie","text":"..."}]')
     try:
         r = llm.call(alias, prompt, system=system)
