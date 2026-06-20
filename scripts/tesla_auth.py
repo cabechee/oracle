@@ -67,14 +67,16 @@ def main() -> int:
         "state": state,
     })
     srv = http.server.HTTPServer(("localhost", PORT), _Handler)
-    t = threading.Thread(target=srv.handle_request)
-    t.start()
+    srv.timeout = 1   # handle_request가 1초마다 깨어나 code 도착 여부 확인
     print("브라우저에서 테슬라 로그인·동의:\n ", url)
     try:
         webbrowser.open(url)
     except Exception:
         pass
-    t.join(timeout=300)
+    # 콜백(/callback?code=...)까지 대기 — 잡요청(favicon 등)은 무시하고 계속. 15분 창.
+    deadline = time.time() + 900
+    while not _result.get("code") and time.time() < deadline:
+        srv.handle_request()
     srv.server_close()
 
     if not _result.get("code"):
