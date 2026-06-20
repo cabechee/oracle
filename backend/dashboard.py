@@ -132,14 +132,10 @@ def feed() -> Dict[str, Any]:
     except Exception:
         calendar_events = []
 
-    # 3) 오래 못 챙긴 사람 — silent thread (확인 안 한 것만)
-    import threads as threads_mod
+    # 3) 오래 못 챙긴 사람 — **비활성**. silent thread(=주제)를 '사람'으로 띄우던 버그라 일단 끔.
+    #    제대로 된 '사람' 소스(연락처/신호 발신자)는 연락처 연동 때 재구현 예정.
+    #    (silent_threads 자체는 색인 화면 '묵힌 주제 환기'에서 계속 씀 — /threads/silent.)
     pending: List[Dict[str, Any]] = []
-    for t in threads_mod.silent_threads(_PENDING_MIN, _PENDING_MAX):
-        key = _pending_key(t["id"])
-        if key in dismissed:
-            continue
-        pending.append({**t, "key": key})
 
     # 4) 오늘 정리 — 내 활동을 데이터로 (기록·사진·이번 주·신호)
     t0, t1 = _day_range(today)
