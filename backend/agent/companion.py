@@ -181,6 +181,30 @@ def _dest_name(tloc: Optional[Dict[str, Any]]) -> Optional[str]:
     return d or None
 
 
+def _log_companion(speaker: Optional[str], text: str,
+                   trigger: Optional[str] = None,
+                   when: Optional[datetime] = None) -> None:
+    """차 출차/주차 멘트를 흐름(conversations)에 자동 저장 — banter처럼 탭 안 해도 흐름에 남게.
+
+    (record_asked가 같은 멘트를 또 저장하지 않게 그쪽에서 최근 동일건은 스킵.)
+    """
+    text = (text or "").strip()
+    if not text:
+        return
+    when = when or datetime.now()
+    doc = {
+        "_id": f"cmsg-{when.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
+        "role": "assistant", "text": text, "ts": when, "referenced": [],
+        "speaker": (speaker or "").strip(), "companion": True,
+    }
+    if trigger:
+        doc["trigger"] = trigger            # 흐름 캡션(예: '집 도착', '회사로 출발')
+    try:
+        db.conversations().insert_one(doc)
+    except Exception as e:
+        print(f"[companion] 흐름 저장 실패: {e}", flush=True)
+
+
 def car_departure(lat: float, lng: float, ts: Any = None,
                   speaker: Optional[str] = None) -> Dict[str, Any]:
     """출차(주차중→운전중) — 테슬라로 목적지 확인 후 한마디 + 운행 스레드 시작.
@@ -202,6 +226,8 @@ def car_departure(lat: float, lng: float, ts: Any = None,
         doc["destination"] = dest             # 주차 때 '여기 잘 도착했어?' 매칭용
     if (r.get("text") or "").strip():
         doc["question_ts"] = datetime.now()
+        _log_companion(r.get("speaker"), r.get("text"),
+                       trigger=(f"{dest}로 출발" if dest else "차로 출발"))
     db.settings().update_one({"_id": "drive"}, {"$set": doc}, upsert=True)
     return r
 
@@ -247,7 +273,11 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     else:
         situation = ("아빠가 방금 차를 세웠어(도착·주차). 어디 도착했는지·어디 세웠는지 가볍게 "
                      "물어봐 — 짧게, 나중에 차 둔 데 기억하게.")
-    return _speak("car", situation, speaker)
+    r = _speak("car", situation, speaker)
+    if (r.get("text") or "").strip():
+        _log_companion(r.get("speaker"), r.get("text"),
+                       trigger=(f"{here} 도착" if here else "차 세움"))
+    return r
 
 
 # ── 동반자끼리 수다(banter) ─────────────────────────────────────────────
@@ -416,13 +446,27 @@ def record_asked(speaker: str, text: str, ts: Any = None) -> Dict[str, Any]:
     반환: 앱이 흐름에 바로 꽂을 메시지(ChatMessage shape).
     """
     when = _ts_to_dt(ts)
+    txt = (text or "").strip()
+    sp = (speaker or "").strip()
+    # 차 출차/주차 멘트는 _log_companion이 흐름에 이미 자동 저장 — 탭해 답할 때 중복 방지.
+    try:
+        dup = db.conversations().find_one({
+            "speaker": sp, "text": txt, "companion": True,
+            "ts": {"$gte": when - timedelta(minutes=20)}})
+    except Exception:
+        dup = None
+    if dup:
+        out = dict(dup)
+        dts = out.get("ts")
+        out["ts"] = dts.isoformat() if hasattr(dts, "isoformat") else dts
+        return out
     doc = {
         "_id": f"cmsg-{when.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
         "role": "assistant",
-        "text": (text or "").strip(),
+        "text": txt,
         "ts": when,
         "referenced": [],
-        "speaker": (speaker or "").strip(),   # 베르 | 쿠키
+        "speaker": sp,                        # 베르 | 쿠키
         "companion": True,                    # 선제 말걸기 (대화 응답과 구분)
     }
     db.conversations().insert_one(doc)

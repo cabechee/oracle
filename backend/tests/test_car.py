@@ -15,6 +15,7 @@ def _default_no_tesla(monkeypatch):
     (보강 테스트는 각자 override)."""
     monkeypatch.setattr(companion, "_tesla_at_event", lambda: None)
     monkeypatch.setattr(companion.places_mod, "nearest", lambda *a, **k: None)
+    monkeypatch.setattr(companion.db, "conversations", lambda: _FakeConvos())  # 흐름 저장 흡수
 
 
 class _FakeSettings:
@@ -42,6 +43,9 @@ class _FakeConvos:
                 if d.get("role") == role and (after is None or d["ts"] > after)]
         cand.sort(key=lambda d: d["ts"])
         return dict(cand[0]) if cand else None
+
+    def insert_one(self, doc):
+        self.docs.append(doc)
 
 
 def _capture_speak(monkeypatch):
@@ -163,6 +167,43 @@ def test_parking_tesla_here_and_precise(monkeypatch):
     companion.car_parking(99.9, 99.9)                 # 폰 좌표 엉뚱해도 테슬라 우선
     assert recorded == [(37.493, 127.031)]            # 테슬라 정밀 좌표로 기록
     assert "집" in calls[0]["situation"]
+
+
+# ── 흐름(conversations) 자동 저장: 탭 안 해도 차 멘트가 흐름에 남아야 ──
+def test_departure_logs_to_flow(monkeypatch):
+    s = _FakeSettings()
+    cv = _FakeConvos()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    _capture_speak(monkeypatch)
+    companion.car_departure(37.5, 127.0)
+    assert len(cv.docs) == 1
+    assert cv.docs[0]["companion"] is True and cv.docs[0]["role"] == "assistant"
+    assert cv.docs[0]["text"] == "응 거기 어때?" and cv.docs[0].get("trigger") == "차로 출발"
+
+
+def test_parking_logs_to_flow(monkeypatch):
+    s = _FakeSettings([{"_id": "drive", "state": "driving"}])
+    cv = _FakeConvos()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    import parking
+    monkeypatch.setattr(parking, "record", lambda *a, **k: None)
+    _capture_speak(monkeypatch)
+    companion.car_parking(37.49, 127.03)
+    assert len(cv.docs) == 1 and cv.docs[0]["text"] == "응 거기 어때?"
+    assert cv.docs[0]["companion"] is True
+
+
+def test_parking_silent_no_flow_log(monkeypatch):
+    s = _FakeSettings([{"_id": "drive", "state": "driving"}])
+    cv = _FakeConvos()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    import parking
+    monkeypatch.setattr(parking, "record", lambda *a, **k: None)
+    companion.car_parking(37.49, 127.03, silent=True)
+    assert cv.docs == []          # 안전망 침묵 → 흐름에도 안 남김
 
 
 def test_first_user_reply_after(monkeypatch):
