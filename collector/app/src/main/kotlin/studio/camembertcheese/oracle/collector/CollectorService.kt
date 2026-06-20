@@ -20,6 +20,7 @@ import android.net.NetworkRequest
 import android.net.wifi.WifiInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -30,6 +31,8 @@ class CollectorService : Service() {
 
     @Volatile private var running = false
     private var worker: Thread? = null
+    // 상시 CPU 깨움 — Doze에 Thread.sleep이 늘어나 틱이 밀리는 걸 막음(서비스 도는 내내 보유).
+    private var wakeLock: PowerManager.WakeLock? = null
     private var btWatcher: BtWatcher? = null
     // BT 프로필 프록시(차 오디오 연결 감지) — ACL_CONNECTED 브로드캐스트가 기기따라 안 와서
     // (특히 삼성/안드14) 매 루프 폴링으로 보강. 연결되면 그 기기명을 Prefs에.
@@ -53,6 +56,7 @@ class CollectorService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Prefs.setCollecting(applicationContext, true)   // 대시보드 토글 — 시작됨
         startForegroundNotif()
+        acquireWake()
         if (!running) {
             running = true
             worker = Thread { loop() }.also { it.start() }
@@ -60,9 +64,25 @@ class CollectorService : Service() {
         return START_STICKY
     }
 
+    /// partial wake lock 획득 — CPU를 안 재워 Doze에도 1분 틱이 제때 돈다(상태/차감지 안 밀림).
+    /// 배터리 더 씀(상시 깨움) 대신 신뢰성. 프로세스 죽으면 OS가 자동 해제(영구 누수 없음).
+    private fun acquireWake() {
+        if (wakeLock?.isHeld == true) return
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "oracle:collector")
+                .apply { setReferenceCounted(false); acquire() }
+            L.i("wake lock 획득 — Doze에도 틱 유지")
+        } catch (e: Exception) {
+            L.i("wake lock 실패: ${e.message}")
+        }
+    }
+
     override fun onDestroy() {
         running = false
         worker?.interrupt()
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+        wakeLock = null
         btWatcher?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
         closeBtProxies()
         wifiCb?.let {
