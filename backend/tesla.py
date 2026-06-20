@@ -125,24 +125,34 @@ def vehicle_data(vin: str) -> Optional[Dict[str, Any]]:
 
 
 def location(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """현재 위치·운행 요약 — 차 상태머신용. {vin,lat,lng,shift,speed,driving,ts} 또는 None."""
-    if not vin:
-        vs = vehicles()
-        if not vs:
-            return None
-        vin = vs[0].get("vin")
-    data = vehicle_data(vin) if vin else None
+    """현재 위치·운행·목적지 요약 — 차 상태머신 보강용(이벤트 시점 호출).
+
+    ⚠️ **자는 차는 안 깨운다**(state!=online이면 None) — wake가 제일 비싸서. 운전 중 차는
+    online이라 출차/주차 순간엔 그대로 읽힌다. 내비 켜져 있으면 목적지(dest_*)도 채워짐.
+    반환: {vin,lat,lng,shift,speed,driving,dest,dest_lat,dest_lng,eta_min,ts} 또는 None.
+    """
+    vs = vehicles()
+    if not vs:
+        return None
+    v = next((x for x in vs if x.get("vin") == vin), vs[0]) if vin else vs[0]
+    if v.get("state") != "online":
+        return None   # asleep/offline — 깨우지 않음(비용·배터리)
+    data = vehicle_data(v.get("vin"))
     if not data:
         return None
     ds = data.get("drive_state") or {}
     shift = ds.get("shift_state")
     return {
-        "vin": vin,
+        "vin": v.get("vin"),
         "lat": ds.get("latitude"),
         "lng": ds.get("longitude"),
         "shift": shift,                       # P | D | R | N | None
         "speed": ds.get("speed"),
         "driving": shift in ("D", "R", "N"),  # P/None = 정차로 본다
+        "dest": ds.get("active_route_destination"),       # 내비 목적지(켰을 때)
+        "dest_lat": ds.get("active_route_latitude"),
+        "dest_lng": ds.get("active_route_longitude"),
+        "eta_min": ds.get("active_route_minutes_to_arrival"),
         "ts": ds.get("timestamp"),
     }
 

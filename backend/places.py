@@ -7,10 +7,36 @@
 """
 
 import hashlib
+import math
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import db
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """두 좌표 거리(m)."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def nearest(lat: Optional[float], lng: Optional[float],
+            radius_m: float = 150.0) -> Optional[Dict[str, Any]]:
+    """좌표에서 반경 내 가장 가까운 등록 장소(집·회사 등). 없으면 None. (차 목적지/주차 매칭)."""
+    if lat is None or lng is None:
+        return None
+    best, best_d = None, float(radius_m)
+    for p in list_places():
+        if p.get("lat") is None or p.get("lng") is None:
+            continue
+        d = _haversine_m(float(lat), float(lng), float(p["lat"]), float(p["lng"]))
+        if d <= best_d:
+            best, best_d = p, d
+    return best
 
 KINDS = ("home", "office", "place")
 

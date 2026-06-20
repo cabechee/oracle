@@ -148,6 +148,8 @@ TESLA_TOKEN_PATH = os.getenv(
     "TESLA_TOKEN_PATH", os.path.join(_PROJECT_ROOT, "tesla_token.json"))
 TESLA_PRIVATE_KEY_PATH = os.getenv(
     "TESLA_PRIVATE_KEY_PATH", os.path.join(_PROJECT_ROOT, "tesla-private-key.pem"))
+# 비용 가드 — 하루 테슬라 호출 상한(버그·루프 대비). 이벤트 전용이라 평소 ~수십 회 미만.
+TESLA_DAILY_CAP = int(os.getenv("TESLA_DAILY_CAP", "50"))
 
 
 # ── 서버 ────────────────────────────────────────────────────────

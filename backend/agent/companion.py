@@ -138,18 +138,70 @@ def _first_user_reply_after(after: datetime) -> Optional[str]:
     return (d.get("text") or "").strip() if d else None
 
 
+def _tesla_budget_ok() -> bool:
+    """테슬라 호출 일일 상한(비용 가드). 오늘 카운트<cap이면 +1 후 True, 초과면 False."""
+    import config as _cfg
+    cap = int(getattr(_cfg, "TESLA_DAILY_CAP", 50))
+    today = datetime.now().strftime("%Y-%m-%d")
+    st = db.settings().find_one({"_id": "tesla_usage"}) or {}
+    if st.get("date") != today:
+        db.settings().update_one({"_id": "tesla_usage"},
+                                 {"$set": {"date": today, "count": 0}}, upsert=True)
+        st = {"date": today, "count": 0}
+    if int(st.get("count", 0)) >= cap:
+        return False
+    db.settings().update_one({"_id": "tesla_usage"}, {"$inc": {"count": 1}}, upsert=True)
+    return True
+
+
+def _tesla_at_event() -> Optional[Dict[str, Any]]:
+    """이벤트 시점 차 상태(위치·운행·목적지). 미인증·상한초과·자는차·실패면 None(graceful)."""
+    try:
+        import tesla
+        if not tesla.is_authed() or not _tesla_budget_ok():
+            return None
+        return tesla.location()   # 자는 차는 안 깨움(tesla.location 내부 가드)
+    except Exception as e:
+        print(f"[companion] tesla 조회 실패: {e}", flush=True)
+        return None
+
+
+def _dest_name(tloc: Optional[Dict[str, Any]]) -> Optional[str]:
+    """테슬라 목적지 → 등록 장소 이름(집/회사 등) 매칭. 없으면 목적지 문자열, 그도 없으면 None."""
+    if not tloc:
+        return None
+    if tloc.get("dest_lat") is not None and tloc.get("dest_lng") is not None:
+        try:
+            np = places_mod.nearest(tloc["dest_lat"], tloc["dest_lng"], 200)
+            if np and np.get("name"):
+                return np["name"]
+        except Exception:
+            pass
+    d = (tloc.get("dest") or "").strip()
+    return d or None
+
+
 def car_departure(lat: float, lng: float, ts: Any = None,
                   speaker: Optional[str] = None) -> Dict[str, Any]:
-    """출차(주차중→운전중) — '어디 가?' 한마디 + 운행 스레드 시작.
+    """출차(주차중→운전중) — 테슬라로 목적지 확인 후 한마디 + 운행 스레드 시작.
 
-    질문을 실제로 했을 때만 question_ts를 적어, 주차 때 답 매칭의 기준으로 쓴다.
+    내비 목적지가 있으면 집/회사로 매칭해 '회사 가는구나'(질문 X), 없으면 '어디 가?'.
+    테슬라 미연결/자는차/상한이면 graceful — 기존 '어디 가?'로 폴백.
     """
-    situation = ("아빠가 방금 차를 몰고 어디론가 출발했어(세워둔 데서 한참 벗어나 움직이기 "
-                 "시작). 어디 가는지 궁금해서 가볍게 물어봐 — '어디 가?' 정도로 아주 짧게.")
+    tloc = _tesla_at_event()
+    dest = _dest_name(tloc)
+    if dest:
+        situation = (f"아빠가 차 몰고 '{dest}' 쪽으로 가는 중이야(내비 목적지로 확인됨). 어디 "
+                     f"가냐고 묻지 말고 '{dest} 가는구나' 하고 잘 다녀오라 가볍게 인사해 — 짧게.")
+    else:
+        situation = ("아빠가 방금 차를 몰고 어디론가 출발했어(세워둔 데서 한참 벗어나 움직이기 "
+                     "시작). 어디 가는지 궁금해서 가볍게 물어봐 — '어디 가?' 정도로 아주 짧게.")
     r = _speak("car", situation, speaker)
     doc: Dict[str, Any] = {"state": "driving", "departed_at": _ts_to_dt(ts)}
+    if dest:
+        doc["destination"] = dest             # 주차 때 '여기 잘 도착했어?' 매칭용
     if (r.get("text") or "").strip():
-        doc["question_ts"] = datetime.now()   # '어디 가?'를 실제로 물은 순간
+        doc["question_ts"] = datetime.now()
     db.settings().update_one({"_id": "drive"}, {"$set": doc}, upsert=True)
     return r
 
@@ -157,26 +209,41 @@ def car_departure(lat: float, lng: float, ts: Any = None,
 def car_parking(lat: float, lng: float, ts: Any = None,
                 silent: bool = False,
                 speaker: Optional[str] = None) -> Dict[str, Any]:
-    """주차(운전중→주차중) — 주차 위치(GPS) 기록 + 질문. 운행 스레드 닫음.
+    """주차(운전중→주차중) — 테슬라로 정밀 위치·도착지 확인 + 질문. 운행 스레드 닫음.
 
-    silent=True(안전망: 오래 정지해 조용히 리셋)면 위치만 남기고 말은 안 건다.
-    아빠가 출발 때 '어디 가?'에 답했으면 '거기 잘 도착했어?', 아니면 '어디 세웠어?'.
+    silent=True(안전망)면 자는 차 깨우기 회피로 테슬라 호출 안 하고 위치만 남기고 침묵.
+    도착지가 집/회사면 '집 왔구나', 출발 목적지를 알면 '회사 잘 도착했어?', 아니면 '어디 세웠어?'.
     """
     import parking as parking_mod
-    parking_mod.record(lat, lng, ts)            # 위치는 항상 ('내 차 어디?' 회상용)
+    tloc = None if silent else _tesla_at_event()
+    # 주차 위치 — 테슬라 차 GPS가 있으면 더 정확(폰보다, 특히 실내). 없으면 폰 좌표.
+    plat = tloc["lat"] if (tloc and tloc.get("lat") is not None) else lat
+    plng = tloc["lng"] if (tloc and tloc.get("lng") is not None) else lng
+    parking_mod.record(plat, plng, ts)            # 위치는 항상 ('내 차 어디?' 회상용)
     drive = db.settings().find_one({"_id": "drive"}) or {}
-    db.settings().update_one({"_id": "drive"},
-                             {"$set": {"state": "parked", "question_ts": None}},
-                             upsert=True)
+    db.settings().update_one(
+        {"_id": "drive"},
+        {"$set": {"state": "parked", "question_ts": None, "destination": None}},
+        upsert=True)
     if silent:
         return {"speaker": "", "text": "", "alias": ""}
-    dest = None
-    qts = drive.get("question_ts")
-    if isinstance(qts, datetime):
-        dest = _first_user_reply_after(qts)
-    if dest:
-        situation = (f"아빠가 출발할 때 '어디 가?'라고 물으니 '{dest}'라고 했었어. 이제 도착해서 "
-                     f"차를 세웠어. 거기('{dest}') 잘 도착했는지 가볍게 안부 물어봐 — 짧게.")
+    here = None                                   # 도착 장소(집/회사 등) 매칭
+    try:
+        np = places_mod.nearest(plat, plng, 150)
+        here = np.get("name") if np else None
+    except Exception:
+        here = None
+    dest = drive.get("destination")               # 출발 때 테슬라가 준 목적지
+    if not dest:
+        qts = drive.get("question_ts")
+        if isinstance(qts, datetime):
+            dest = _first_user_reply_after(qts)   # 아빠가 답한 목적지
+    if here:
+        situation = (f"아빠가 방금 '{here}'에 도착해서 차를 세웠어. '{here} 왔구나'처럼 가볍게 "
+                     f"맞이해 — 짧게.")
+    elif dest:
+        situation = (f"아빠가 출발할 때 '{dest}' 간다고 했었어. 이제 도착해서 차를 세웠어. "
+                     f"'{dest} 잘 도착했어?' 하고 가볍게 안부 물어봐 — 짧게.")
     else:
         situation = ("아빠가 방금 차를 세웠어(도착·주차). 어디 도착했는지·어디 세웠는지 가볍게 "
                      "물어봐 — 짧게, 나중에 차 둔 데 기억하게.")

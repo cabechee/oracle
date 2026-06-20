@@ -91,21 +91,32 @@ def test_partner_token_spec(monkeypatch):
     assert body["client_secret"] == "sec"
 
 
-# ── location 파싱: 운행/정차 판정 ──
-def test_location_driving(monkeypatch):
-    monkeypatch.setattr(tesla, "vehicles", lambda: [{"vin": "VIN1"}])
+# ── location 파싱: 운행/정차 판정 + 목적지 + 자는차 회피 ──
+def test_location_driving_with_dest(monkeypatch):
+    monkeypatch.setattr(tesla, "vehicles", lambda: [{"vin": "VIN1", "state": "online"}])
     monkeypatch.setattr(tesla, "vehicle_data", lambda vin: {
         "drive_state": {"latitude": 37.5, "longitude": 127.0,
-                        "shift_state": "D", "speed": 40, "timestamp": 1}})
+                        "shift_state": "D", "speed": 40, "timestamp": 1,
+                        "active_route_destination": "회사",
+                        "active_route_latitude": 37.49, "active_route_longitude": 127.03,
+                        "active_route_minutes_to_arrival": 12}})
     loc = tesla.location()
-    assert loc["lat"] == 37.5 and loc["lng"] == 127.0
-    assert loc["shift"] == "D" and loc["driving"] is True
+    assert loc["lat"] == 37.5 and loc["shift"] == "D" and loc["driving"] is True
+    assert loc["dest"] == "회사" and loc["dest_lat"] == 37.49 and loc["eta_min"] == 12
 
 
 def test_location_parked(monkeypatch):
-    monkeypatch.setattr(tesla, "vehicles", lambda: [{"vin": "V"}])
+    monkeypatch.setattr(tesla, "vehicles", lambda: [{"vin": "V", "state": "online"}])
     monkeypatch.setattr(tesla, "vehicle_data", lambda vin: {"drive_state": {"shift_state": "P"}})
     assert tesla.location()["driving"] is False
+
+
+def test_location_asleep_no_wake(monkeypatch):
+    # 자는 차(online 아님)는 vehicle_data를 부르지 않고 None — wake 회피(비용).
+    monkeypatch.setattr(tesla, "vehicles", lambda: [{"vin": "V", "state": "asleep"}])
+    monkeypatch.setattr(tesla, "vehicle_data",
+                        lambda vin: (_ for _ in ()).throw(AssertionError("자는차 깨우면 안 됨")))
+    assert tesla.location() is None
 
 
 def test_location_no_vehicle(monkeypatch):

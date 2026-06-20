@@ -2,9 +2,19 @@
 
 from datetime import datetime, timedelta
 
+import pytest
+
 import companion_config as cc
 import location_config as lc
 from agent import companion
+
+
+@pytest.fixture(autouse=True)
+def _default_no_tesla(monkeypatch):
+    """기본: 테슬라 비활성 + 장소매칭 None — 테스트가 실 API/Mongo를 안 때리게.
+    (보강 테스트는 각자 override)."""
+    monkeypatch.setattr(companion, "_tesla_at_event", lambda: None)
+    monkeypatch.setattr(companion.places_mod, "nearest", lambda *a, **k: None)
 
 
 class _FakeSettings:
@@ -119,6 +129,40 @@ def test_parking_silent_no_question(monkeypatch):
     assert r["text"] == ""
     assert recorded == [(37.49, 127.03)]              # 위치는 남김(내 차 어디)
     assert s.docs["drive"]["state"] == "parked"
+
+
+# ── 테슬라 보강(Phase 1): 목적지·정밀위치·장소매칭 ──
+def test_departure_tesla_destination(monkeypatch):
+    s = _FakeSettings()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    # 테슬라가 내비 목적지 좌표를 줌 → places가 '회사'로 매칭
+    monkeypatch.setattr(companion, "_tesla_at_event",
+                        lambda: {"lat": 37.5, "lng": 127.0, "driving": True,
+                                 "dest_lat": 37.49, "dest_lng": 127.03, "dest": "Gangnam"})
+    monkeypatch.setattr(companion.places_mod, "nearest",
+                        lambda lat, lng, r=150: {"name": "회사"})
+    calls = _capture_speak(monkeypatch)
+    companion.car_departure(37.5, 127.0)
+    assert "회사" in calls[0]["situation"] and "가는구나" in calls[0]["situation"]
+    assert s.docs["drive"]["destination"] == "회사"   # 주차 매칭용 저장
+
+
+def test_parking_tesla_here_and_precise(monkeypatch):
+    s = _FakeSettings([{"_id": "drive", "state": "driving"}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    # 테슬라 정밀 좌표 + 도착지 '집' 매칭
+    monkeypatch.setattr(companion, "_tesla_at_event",
+                        lambda: {"lat": 37.493, "lng": 127.031})
+    monkeypatch.setattr(companion.places_mod, "nearest",
+                        lambda lat, lng, r=150: {"name": "집"})
+    import parking
+    recorded = []
+    monkeypatch.setattr(parking, "record",
+                        lambda lat, lng, ts=None: recorded.append((lat, lng)))
+    calls = _capture_speak(monkeypatch)
+    companion.car_parking(99.9, 99.9)                 # 폰 좌표 엉뚱해도 테슬라 우선
+    assert recorded == [(37.493, 127.031)]            # 테슬라 정밀 좌표로 기록
+    assert "집" in calls[0]["situation"]
 
 
 def test_first_user_reply_after(monkeypatch):
