@@ -18,7 +18,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import db
 
-_AMOUNT = re.compile(r"([\d][\d,]{1,})\s*원")
+_AMOUNT = re.compile(r"(\d[\d,]*)\s*원")          # 1원~ 한 자리도(작은 건 parse에서 노이즈로 거름)
+# 잔액/잔고(running balance) — 거래 금액 아님. 금액 추출 전에 떼낸다.
+_BALANCE = re.compile(r"(?:잔액|잔고|balance)\s*[:\s]*[\d,]+\s*원", re.I)
 _INCOME = re.compile(r"입금|급여|월급|상여|들어왔|받았")            # 돈 들어옴(수입)
 _OUT = re.compile(r"승인|결제|출금|구매|결제완료|납부|송금")        # 돈 나감(지출); 이체는 방향 따로
 # 비지출 오탐(적립·쿠폰·환급·광고 등) — 실제 입금은 '입금'으로 따로 들어옴
@@ -99,6 +101,19 @@ def _merchant_of(summary: str) -> str:
     return ""
 
 
+def _amount_of(summary: str, text: str) -> Optional[int]:
+    """거래 금액 — '잔액/잔고'(running balance)는 빼고 첫 금액. 못 찾으면 None.
+    예) '예금이자 4원 입금됨, 잔액 19,237원' → 4 (잔액 19,237 아님)."""
+    for src in (summary, text):
+        m = _AMOUNT.search(_BALANCE.sub(" ", src or ""))
+        if m:
+            try:
+                return int(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+    return None
+
+
 # ── 파싱: 신호 한 줄 → 수입/지출 구조 ────────────────────────────
 def parse_payment(sender: str, summary: str) -> Optional[Dict[str, Any]]:
     """신호 한 줄에서 수입/지출을 추출. 아니면 None.
@@ -123,11 +138,8 @@ def parse_payment(sender: str, summary: str) -> Optional[Dict[str, Any]]:
         is_income = False
     else:
         return None                          # 결제·입출금 신호 아님
-    m = _AMOUNT.search(summary) or _AMOUNT.search(text)
-    if not m:
-        return None
-    amount = int(m.group(1).replace(",", ""))
-    if amount < 100:                       # 너무 작으면 노이즈
+    amount = _amount_of(summary, text)     # 잔액 제외, 한 자리도 인식
+    if amount is None or amount < 100:     # 못 찾거나 너무 작으면(예금이자 등 노이즈)
         return None
     if not is_income and not _PAYMENT_HINT.search(text):
         return None

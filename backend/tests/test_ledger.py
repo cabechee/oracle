@@ -87,6 +87,14 @@ def test_parse_bank_in_out():
     assert ledger.parse_payment("국민은행", "이체 100,000원")["kind"] == "expense"  # 이체출금=지출
 
 
+def test_parse_excludes_balance():
+    # 잔액(running balance)을 거래금액으로 잡지 않음 — 예금이자 4원은 <100이라 노이즈
+    assert ledger.parse_payment("신한카드", "예금이자 4원 입금됨, 잔액 19,237원") is None
+    p = ledger.parse_payment("신한은행", "급여 입금 2,500,000원, 잔액 3,000,000원")
+    assert p["kind"] == "income" and p["amount"] == 2500000        # 잔액 3,000,000 아님
+    assert ledger.parse_payment("신한카드", "출금 50,000원 잔액 19,237원")["amount"] == 50000
+
+
 def test_parse_needs_merchant():
     p = ledger.parse_payment("현대카드", "the Pink 19,000원 승인")
     assert p["kind"] == "expense" and p["merchant"] == "" and p["needs"] == ["merchant"]
