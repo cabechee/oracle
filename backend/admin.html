@@ -727,16 +727,30 @@ async function renderLedger(){
         const desc = it.merchant || it.memo || (inc2?'입금':'결제');
         const tag = (it.needs&&it.needs.length)?' <span style="color:var(--vermilion);font-size:11px">확인필요</span>':'';
         const cat = it.category?` <span style="color:var(--faint);font-size:11px">${it.category}</span>`:'';
+        const imgs = it.receipt_images||[];
         const parts = it.amount_parts||[];
-        const sumTag = parts.length>1?` <span style="color:var(--vermilion);font-size:11px" title="여러 영수증 합산 — diff 확인하고 틀리면 수정">⚠합산</span>`:'';
-        const breakdown = parts.length>1?`<div style="color:var(--faint);font-size:10.5px;white-space:nowrap">${parts.map(won).join(' + ')}</div>`:'';
-        const views = (it.receipt_images||[]).map((im,k)=>` <a href="/photos/${im}" target="_blank" title="영수증 ${k+1} 보기" style="text-decoration:none">📷</a>`).join('');
-        const rcpt = ` <label style="cursor:pointer" title="이 건에 영수증 올리기">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`+views;
-        return `<tr>
+        const diffTag = it.diff?` <span style="color:#fff;background:var(--vermilion);font-size:10.5px;padding:1px 5px;border-radius:3px" title="영수증 금액 불일치 — 펼쳐서 판독">🔺 금액다름</span>`:'';
+        const hasDetail = (it.items&&it.items.length) || imgs.length || it.diff;
+        const chev = hasDetail?`<span id="cv-${it.id}" style="color:var(--faint);display:inline-block;width:12px">▸</span> `:'<span style="display:inline-block;width:12px"></span> ';
+        const cam = imgs.length?` <span style="color:var(--faint);font-size:11px">📷${imgs.length}</span>`:'';
+        const rcptBtn = ` <label style="cursor:pointer" title="이 건에 영수증 올리기" onclick="event.stopPropagation()">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`;
+        const main = `<tr style="cursor:${hasDetail?'pointer':'default'}" ${hasDetail?`onclick="toggleDetail('${it.id}')"`:''}>
           <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
-          <td style="${TD}">${desc}${sumTag}${tag}${cat}${rcpt}</td>
+          <td style="${TD}">${chev}${desc}${diffTag}${tag}${cat}${cam}${rcptBtn}</td>
           <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
-          <td style="${TD};${R};color:${inc2?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}${breakdown}</td></tr>`;
+          <td style="${TD};${R};color:${(inc2||it.diff)?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
+        let detail='';
+        if(hasDetail){
+          const itemsTxt = (it.items&&it.items.length)?`<div style="font-size:12.5px;margin-bottom:7px"><span style="color:var(--faint)">내역</span>&nbsp; ${it.items.join(', ')}</div>`:'';
+          const thumbs = imgs.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px">${imgs.map(im=>`<img src="/photos/${im}" onclick="lightbox('/photos/${im}')" loading="lazy" style="width:64px;height:64px;object-fit:cover;border:1px solid var(--hair);border-radius:4px;cursor:zoom-in" title="크게 보기">`).join('')}</div>`:'';
+          const diffUI = it.diff?`<div style="background:#FBEEEC;border:1px solid var(--vermilion);border-radius:5px;padding:8px 10px;font-size:12.5px">
+              <div style="margin-bottom:6px">🔺 <b>영수증마다 금액이 달라요</b> — 맞는 금액을 고르거나 입력하세요:</div>
+              ${parts.map(p=>`<button onclick="resolveDiff('${it.id}',${p})" style="margin:2px 5px 2px 0">${won(p)}</button>`).join('')}
+              <input id="df-${it.id}" type="number" placeholder="직접 입력" style="width:110px">
+              <button onclick="resolveDiff('${it.id}',document.getElementById('df-${it.id}').value)">확정</button></div>`:'';
+          detail = `<tr id="det-${it.id}" style="display:none"><td colspan="4" style="padding:2px 12px 12px 28px;border-top:none">${itemsTxt}${thumbs}${diffUI}</td></tr>`;
+        }
+        return main+detail;
       }).join('')
     : `<tr><td style="${TD};color:var(--faint)" colspan="4">거래내역 없음</td></tr>`;
   const needs=(inc.items||[]).length
@@ -799,6 +813,32 @@ async function dropReceipt(e){
       setTimeout(renderLedger, 1500);
     } else { msg.textContent = '✗ '+(r.reason||'인식 실패')+(r.pages?` (${r.pages}쪽)`:''); }
   }catch(err){ msg.textContent='✗ 업로드 실패: '+err.message; }
+}
+// 거래내역 펼침/접기
+function toggleDetail(id){
+  const d=document.getElementById('det-'+id), cv=document.getElementById('cv-'+id);
+  if(!d) return;
+  const open=d.style.display==='none';
+  d.style.display=open?'table-row':'none';
+  if(cv) cv.textContent=open?'▾':'▸';
+}
+// 영수증 썸네일 클릭 → 크게(라이트박스)
+function lightbox(src){
+  let o=document.getElementById('lbx');
+  if(!o){ o=document.createElement('div'); o.id='lbx';
+    o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out';
+    o.onclick=()=>o.remove(); document.body.appendChild(o); }
+  o.innerHTML='<img src="'+src+'" style="max-width:92vw;max-height:92vh;box-shadow:0 4px 36px rgba(0,0,0,.5)">';
+}
+// 금액 불일치(diff) 판독 — 고른 금액으로 확정
+async function resolveDiff(id, amount){
+  const amt=parseInt(amount,10);
+  if(!amt||amt<=0){ alert('금액을 확인하세요'); return; }
+  try{
+    await fetch('/ledger/'+encodeURIComponent(id)+'/amount', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({amount:amt})});
+    renderLedger();
+  }catch(e){ alert('확정 실패: '+e.message); }
 }
 async function fillLedger(id){
   const el = document.getElementById('mc-'+id);

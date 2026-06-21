@@ -147,6 +147,16 @@ async def ep_entry_receipt(pay_id: str, file: UploadFile = File(...)):
     return {"ok": True, "item": row, "recognized": bool(recognized)}
 
 
+class AmountIn(BaseModel):
+    amount: int
+
+
+@router.post("/ledger/{pay_id}/amount")
+def ep_resolve_diff(pay_id: str, body: AmountIn):
+    """금액 불일치(diff) 판독 — 고른 금액으로 확정, diff 해제."""
+    return {"ok": ledger_mod.resolve_diff(pay_id, body.amount)}
+
+
 class FieldsIn(BaseModel):
     merchant: Optional[str] = None
     category: Optional[str] = None

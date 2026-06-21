@@ -219,17 +219,22 @@ def _parts_of(doc: Dict[str, Any]) -> List[int]:
 
 
 def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any],
-                  sum_amount: bool = False) -> Dict[str, Any]:
+                  by_approval: bool = False) -> Dict[str, Any]:
     """두 결제 합치기 — 빈 필드를 채운다. 영수증의 가맹점·품목·카테고리 우선.
 
-    sum_amount=True(승인번호 매칭): 금액을 더하고 합산 내역(amount_parts) 보존 — 잘못되면
-    어드민에서 부분 금액들이 diff로 보여 직접 판독. False(금액+날짜): 같은 거래라 금액 유지.
+    by_approval=True(승인번호 매칭): 같은 승인번호 영수증들을 한 건으로 묶음. 금액이 같으면
+    그대로 1건, **다르면 diff=True**(쇼핑몰 vs 카드 금액 불일치) → 어드민서 직접 판독.
+    False(금액+날짜): 같은 거래라 금액 유지.
     """
     out: Dict[str, Any] = {}
-    if sum_amount:
-        parts = _parts_of(existing) + _parts_of(incoming)
-        out["amount_parts"] = parts
-        out["amount"] = sum(parts)
+    if by_approval:
+        amts: List[int] = []
+        for a in _parts_of(existing) + _parts_of(incoming):
+            if a not in amts:                  # 같은 금액=같은 거래(중복), 다른 금액만 모음
+                amts.append(a)
+        out["amount_parts"] = amts
+        out["amount"] = max(amts) if amts else int(existing.get("amount") or 0)
+        out["diff"] = len(amts) > 1            # 금액 불일치 → 직접 판독 필요
     for f in ("merchant", "category"):
         v = incoming.get(f) or existing.get(f)
         if v:
@@ -274,7 +279,7 @@ def _merge_or_insert(doc: Dict[str, Any]) -> str:
         cand = db.ledger().find_one({"approval_no": appr, "_id": {"$ne": doc["_id"]}})
         if cand:
             db.ledger().update_one({"_id": cand["_id"]},
-                                   {"$set": _merge_fields(cand, doc, sum_amount=True)})
+                                   {"$set": _merge_fields(cand, doc, by_approval=True)})
             return "merged"
     # 2) 금액 + 날짜(±1일) — 승인번호 없을 때 폴백.
     try:
@@ -385,7 +390,8 @@ def _row_view(r: Dict[str, Any]) -> Dict[str, Any]:
         "source": r.get("source", "notification"),
         "receipt_images": _images_of(r),               # 여러 장 — /photos/{경로}로 열람
         "approval_no": r.get("approval_no", ""),
-        "amount_parts": [int(x) for x in (r.get("amount_parts") or []) if x],  # 합산 내역(diff)
+        "amount_parts": [int(x) for x in (r.get("amount_parts") or []) if x],  # 승인번호 묶음 금액들
+        "diff": bool(r.get("diff")),                   # 금액 불일치(직접 판독 필요)
         "ts": r["ts"].isoformat() if isinstance(r.get("ts"), datetime) else None,
     }
 
@@ -440,6 +446,19 @@ def set_fields(pay_id: str, fields: Dict[str, Any]) -> bool:
     upd["needs"] = needs
     upd["complete"] = not needs
     db.ledger().update_one({"_id": pay_id}, {"$set": upd})
+    return True
+
+
+def resolve_diff(pay_id: str, amount: int) -> bool:
+    """금액 불일치(diff) 판독 — 사용자가 고른 금액으로 확정하고 diff 해제."""
+    try:
+        amt = int(amount)
+    except (TypeError, ValueError):
+        return False
+    if amt <= 0 or not db.ledger().find_one({"_id": pay_id}):
+        return False
+    db.ledger().update_one({"_id": pay_id},
+                           {"$set": {"amount": amt, "amount_parts": [amt], "diff": False}})
     return True
 
 

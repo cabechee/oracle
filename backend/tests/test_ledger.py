@@ -205,12 +205,12 @@ def test_merge_by_approval(monkeypatch):
     assert r == "merged" and len(fake.docs) == 1
     d = fake.docs[0]
     assert d["merchant"] == "쿠팡" and d["approval_no"] == "12345678"
-    assert d["amount"] == 100000 and d["amount_parts"] == [50000, 50000]   # 무조건 합산
+    assert d["amount"] == 50000 and d["diff"] is False        # 같은 금액=같은 거래, 1건(합산 X)
     assert "images/card.png" in d["receipt_images"] and "images/shop.png" in d["receipt_images"]
 
 
-def test_approval_sum_distinct_amounts(monkeypatch):
-    # 같은 승인번호·다른 금액(쇼핑몰 vs 카드 총액 차이) → 합산 + 부분 금액 보존(diff 판독용)
+def test_approval_diff_on_mismatch(monkeypatch):
+    # 같은 승인번호·다른 금액(쇼핑몰 8천 vs 카드 1만) → 합산 아님. diff 플래그 + 직접 판독
     fake = _FakeLedger([{
         "_id": "pay-1", "date": "2026-06-20", "kind": "expense", "amount": 10000,
         "merchant": "쿠팡", "approval_no": "999", "source": "receipt",
@@ -220,8 +220,11 @@ def test_approval_sum_distinct_amounts(monkeypatch):
     ledger.from_receipt("rec-z", datetime(2026, 6, 21, 9, 0), {
         "amount": 8000, "merchant": "쿠팡", "approval": "999", "image": "images/b.png"})
     d = fake.docs[0]
-    assert d["amount"] == 18000 and d["amount_parts"] == [10000, 8000]
+    assert d["diff"] is True and sorted(d["amount_parts"]) == [8000, 10000]
+    assert d["amount"] == 10000          # 판독 전 잠정 최대값
     assert d["receipt_images"] == ["images/a.png", "images/b.png"]
+    assert ledger.resolve_diff("pay-1", 8000)        # 8천으로 확정
+    assert d["amount"] == 8000 and d["diff"] is False and d["amount_parts"] == [8000]
 
 
 def test_amount_date_merge_does_not_sum(monkeypatch):
