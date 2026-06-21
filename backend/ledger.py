@@ -224,20 +224,23 @@ def _parts_of(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
             a = int(p.get("amount") or 0)
             if a:
                 out.append({"amount": a, "rtype": p.get("rtype") or "shop",
+                            "merchant": p.get("merchant") or "",
                             "key": p.get("key") or f"{p.get('rtype') or 'shop'}-{a}"})
         return out
     a = doc.get("amount")
     if not a:
         return []
     rt = doc.get("rtype") or "shop"
-    return [{"amount": int(a), "rtype": rt, "key": doc.get("_id") or f"{rt}-{int(a)}"}]
+    return [{"amount": int(a), "rtype": rt, "merchant": doc.get("merchant") or "",
+             "key": doc.get("_id") or f"{rt}-{int(a)}"}]
 
 
 def _recompute_amount(parts: List[Dict[str, Any]]):
     """부분 영수증들 → (대표금액, diff여부, 중복제거 parts).
 
-    쇼핑몰 영수증끼리는 **합산**(여러 판매처=한 주문). 카드전표가 있으면 그게 진실 —
-    쇼핑몰 합계와 다르면 **diff**(직접 판독). 같은 영수증(key) 재처리는 멱등.
+    - **판매처가 여럿**이면 멀티셀러 한 주문 → 전부 **합산**(rtype 오분류에 강함).
+    - 같은 판매처에 **카드전표**가 있으면 그게 진실 — 쇼핑몰 금액과 다르면 **diff**(직접 판독).
+    - 그 외(쇼핑몰만) → 합산. 같은 영수증(key) 재처리는 멱등.
     """
     seen, uniq = set(), []
     for p in parts:
@@ -246,6 +249,9 @@ def _recompute_amount(parts: List[Dict[str, Any]]):
             continue
         seen.add(k)
         uniq.append(p)
+    merchants = {p.get("merchant") for p in uniq if p.get("merchant")}
+    if len(merchants) > 1:                     # 여러 판매처 = 멀티셀러 한 주문 → 합산
+        return sum(p["amount"] for p in uniq), False, uniq
     shop = [p["amount"] for p in uniq if p.get("rtype") != "card"]
     card = [p["amount"] for p in uniq if p.get("rtype") == "card"]
     if card:
@@ -403,7 +409,7 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         "record_id": record_id,
         "approval_no": str(fields.get("approval") or "").strip(),   # 승인번호 — 강력 매칭키
         "rtype": rtype,                                             # card 전표 / shop 쇼핑몰
-        "parts": [{"amount": int(amount), "rtype": rtype, "key": record_id}],
+        "parts": [{"amount": int(amount), "rtype": rtype, "merchant": merchant, "key": record_id}],
         "receipt_images": [im] if (im := (fields.get("image") or "").strip()) else [],
     }
     return _merge_or_insert(doc)

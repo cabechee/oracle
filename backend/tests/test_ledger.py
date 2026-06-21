@@ -194,8 +194,22 @@ def test_approval_extraction():
 def _shop_entry(_id, amount, merchant, approval, key, img):
     return {"_id": _id, "date": "2026-06-21", "kind": "expense", "amount": amount,
             "merchant": merchant, "approval_no": approval, "source": "receipt", "rtype": "shop",
-            "parts": [{"amount": amount, "rtype": "shop", "key": key}], "receipt_images": [img],
-            "needs": [], "complete": True}
+            "parts": [{"amount": amount, "rtype": "shop", "merchant": merchant, "key": key}],
+            "receipt_images": [img], "needs": [], "complete": True}
+
+
+def test_multimerchant_sums_despite_rtype(monkeypatch):
+    # 비전이 rtype을 card로 오분류해도 판매처가 여럿이면 멀티셀러 한 주문 → 합산
+    fake = _FakeLedger([_shop_entry("pay-1", 19800, "딩전과학기술", "403880", "r1", "a.png")])
+    fake.docs[0]["rtype"] = "card"
+    fake.docs[0]["parts"][0]["rtype"] = "card"
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.from_receipt("r2", datetime(2026, 6, 21, 9, 0), {
+        "amount": 72000, "merchant": "승우전자", "approval": "403880", "rtype": "card", "image": "b.png"})
+    ledger.from_receipt("r3", datetime(2026, 6, 21, 9, 0), {
+        "amount": 5820, "merchant": "쿠팡", "approval": "403880", "rtype": "card", "image": "c.png"})
+    d = fake.docs[0]
+    assert d["amount"] == 97620 and d["diff"] is False     # 19800+72000+5820, card여도 합산
 
 
 def test_approval_shop_sum(monkeypatch):
