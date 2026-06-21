@@ -702,10 +702,9 @@ let LP = 'month';
 async function renderLedger(){
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
-  let s, inc, list;
+  let s, list;
   try{
     s = await (await fetch(`/ledger/settlement?period=${LP}`)).json();
-    inc = await (await fetch('/ledger/incomplete')).json();
     list = await (await fetch(`/ledger/list?period=${LP}`)).json();
   }catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
   const won = n => (Number(n)||0).toLocaleString('ko')+'원';
@@ -756,10 +755,12 @@ async function renderLedger(){
         return main+detail;
       }).join('')
     : `<tr><td style="${TD};color:var(--faint)" colspan="4">거래내역 없음</td></tr>`;
-  const needs=(inc.items||[]).length
-    ? inc.items.map(it=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
-        <span style="color:var(--faint)">${fmtWhen(it.ts)}</span>
-        <b>${won(it.amount)}</b> <span style="color:var(--gray)">${it.method||''}</span>
+  // 확인필요 = 거래내역(이번 기간)에서 needs 있는 것 그대로 — 위 태그와 정확히 일치
+  const incItems=(list.items||[]).filter(it=>it.needs&&it.needs.length).slice().reverse();
+  const needs= incItems.length
+    ? incItems.map(it=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
+        <span style="color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</span>
+        <b style="white-space:nowrap">${won(it.amount)}</b> <span style="color:var(--gray)">${it.method||''}</span>
         <input id="mc-${it.id}" placeholder="가맹점" style="width:130px;margin-left:auto">
         <button onclick="fillLedger('${it.id}')">저장</button>
         <label style="cursor:pointer" title="영수증 올려서 채우기">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label></div>`).join('')
@@ -798,7 +799,7 @@ async function renderLedger(){
       <th style="${TD};text-align:left">날짜</th><th style="${TD};text-align:left">내역</th>
       <th style="${TD};text-align:left">결제수단</th><th style="${TD};${R}">금액</th></tr></thead>
       <tbody>${txRows}</tbody></table>
-    <h3 style="margin:22px 0 6px">지출내역 확인필요 ${(inc.items||[]).length?`(${inc.items.length})`:''}</h3>
+    <h3 style="margin:22px 0 6px">지출내역 확인필요 ${incItems.length?`(${incItems.length})`:''}</h3>
     ${needs}`;
 }
 async function dropReceipt(e){
