@@ -81,6 +81,12 @@ def test_parse_income():
     assert p["kind"] == "income" and p["amount"] == 3200000 and p["needs"] == []
 
 
+def test_parse_bank_in_out():
+    assert ledger.parse_payment("케이뱅크", "입금 500,000원 홍길동")["kind"] == "income"
+    assert ledger.parse_payment("토스뱅크", "출금 200,000원 월세")["kind"] == "expense"
+    assert ledger.parse_payment("국민은행", "이체 100,000원")["kind"] == "expense"  # 이체출금=지출
+
+
 def test_parse_needs_merchant():
     p = ledger.parse_payment("현대카드", "the Pink 19,000원 승인")
     assert p["kind"] == "expense" and p["merchant"] == "" and p["needs"] == ["merchant"]

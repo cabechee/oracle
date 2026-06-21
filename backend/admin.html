@@ -702,10 +702,11 @@ let LP = 'month';
 async function renderLedger(){
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
-  let s, inc;
+  let s, inc, list;
   try{
     s = await (await fetch(`/ledger/settlement?period=${LP}`)).json();
     inc = await (await fetch('/ledger/incomplete')).json();
+    list = await (await fetch(`/ledger/list?period=${LP}`)).json();
   }catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
   const won = n => (Number(n)||0).toLocaleString('ko')+'원';
   const R='text-align:right;font-variant-numeric:tabular-nums';
@@ -719,6 +720,20 @@ async function renderLedger(){
     : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
   const kv=(label,val)=>`<div style="margin:4px 0;font-size:12.5px"><b style="color:var(--gray)">${label}</b> ${val||'—'}</div>`;
   const join=(arr,f)=>(arr||[]).map(f).join(' · ');
+  // 거래내역(장부) — 최신순
+  const txRows = (list.items||[]).length
+    ? list.items.slice().reverse().map(it=>{
+        const inc2 = it.kind==='income';
+        const desc = it.merchant || it.memo || (inc2?'입금':'결제');
+        const tag = (it.needs&&it.needs.length)?' <span style="color:var(--vermilion);font-size:11px">확인필요</span>':'';
+        const cat = it.category?` <span style="color:var(--faint);font-size:11px">${it.category}</span>`:'';
+        return `<tr>
+          <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
+          <td style="${TD}">${desc}${tag}${cat}</td>
+          <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
+          <td style="${TD};${R};color:${inc2?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
+      }).join('')
+    : `<tr><td style="${TD};color:var(--faint)" colspan="4">거래내역 없음</td></tr>`;
   const needs=(inc.items||[]).length
     ? inc.items.map(it=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
         <span style="color:var(--faint)">${fmtWhen(it.ts)}</span>
@@ -726,9 +741,16 @@ async function renderLedger(){
         <input id="mc-${it.id}" placeholder="가맹점" style="width:130px;margin-left:auto">
         <button onclick="fillLedger('${it.id}')">저장</button></div>`).join('')
     : '<div style="color:var(--faint);font-size:13px">없음 — 다 확인됨 👍</div>';
+  const drop = `<div id="rcptdrop"
+    ondragover="event.preventDefault();this.style.background='#F2F0EB'"
+    ondragleave="this.style.background=''" ondrop="dropReceipt(event)"
+    style="border:1.5px dashed var(--hair);border-radius:6px;padding:16px;text-align:center;
+           color:var(--gray);font-size:13px;margin:6px 0">
+    📄 영수증을 여기로 드래그&드랍 — 알아서 인식해서 결제내역에 매칭합니다
+    <div id="rcptmsg" style="color:var(--faint);font-size:12px;margin-top:6px"></div></div>`;
   const netColor = s.net>=0 ? 'var(--vermilion)' : '#999';
   m.innerHTML = `
-    <div class="bar"><h2>가계부 · ${LP==='month'?'이번 달':'이번 주'} 결산</h2>
+    <div class="bar"><h2>가계부 · ${LP==='month'?'이번 달':'이번 주'}</h2>
       <span class="hint">${s.start} ~ ${s.end} · ${s.count}건</span>
       <button onclick="LP='week';renderLedger()" ${LP==='week'?'disabled':''}>주간</button>
       <button onclick="LP='month';renderLedger()" ${LP==='month'?'disabled':''}>월간</button></div>
@@ -746,8 +768,30 @@ async function renderLedger(){
     ${kv('결제수단', join(s.by_method, x=>`${x.name} ${won(x.amount)}`))}
     ${kv('많이 쓴 곳', join(s.top_merchants, x=>`${x.name} ${won(x.amount)}`))}
     ${kv('정기결제(추정)', join(s.recurring, x=>`${x.merchant} ${won(x.amount)}`))}
-    <h3 style="margin:20px 0 6px">지출내역 확인필요 ${(inc.items||[]).length?`(${inc.items.length})`:''}</h3>
+    <h3 style="margin:22px 0 6px">거래내역 (장부 · ${(list.items||[]).length}건)</h3>
+    <table style="${TB}"><thead><tr>
+      <th style="${TD};text-align:left">날짜</th><th style="${TD};text-align:left">내역</th>
+      <th style="${TD};text-align:left">결제수단</th><th style="${TD};${R}">금액</th></tr></thead>
+      <tbody>${txRows}</tbody></table>
+    <h3 style="margin:22px 0 6px">지출내역 확인필요 ${(inc.items||[]).length?`(${inc.items.length})`:''}</h3>
+    ${drop}
     ${needs}`;
+}
+async function dropReceipt(e){
+  e.preventDefault();
+  const z = document.getElementById('rcptdrop'); if(z) z.style.background='';
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  const msg = document.getElementById('rcptmsg');
+  if(!file){ return; }
+  msg.textContent = '인식 중… ('+file.name+')';
+  const fd = new FormData(); fd.append('file', file);
+  try{
+    const r = await (await fetch('/ledger/receipt', {method:'POST', body: fd})).json();
+    if(r.ok){
+      msg.textContent = `✓ ${r.merchant||'가맹점?'} ${(Number(r.amount)||0).toLocaleString('ko')}원 — ${r.result==='merged'?'기존 결제에 매칭됨':'새로 기록'}`;
+      setTimeout(renderLedger, 1400);
+    } else { msg.textContent = '✗ '+(r.reason||'인식 실패'); }
+  }catch(err){ msg.textContent='✗ 업로드 실패: '+err.message; }
 }
 async function fillLedger(id){
   const el = document.getElementById('mc-'+id);

@@ -1,9 +1,13 @@
-"""가계부 라우터 — 조회 · 결산 · 확인필요 채우기 · 오기록 삭제."""
+"""가계부 라우터 — 조회 · 결산 · 거래내역(장부) · 영수증 드롭 · 확인필요 채우기 · 삭제."""
 
+import datetime
+import hashlib
+import os
+import tempfile
 from datetime import date as _date
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 import ledger as ledger_mod
@@ -23,7 +27,7 @@ def ep_today(date: Optional[str] = None):
 
 @router.get("/ledger/settlement")
 def ep_settlement(period: str = "month", date: Optional[str] = None):
-    """주/월 결산 — 수입·지출·순액 + 카테고리/결제수단/상위가맹점/반복 (대차대조표용)."""
+    """주/월 결산 — 수입·지출·순액 + 카테고리/결제수단/상위가맹점/반복 (대차대조표 요약)."""
     try:
         target = _date.fromisoformat(date) if date else None
     except ValueError:
@@ -31,10 +35,57 @@ def ep_settlement(period: str = "month", date: Optional[str] = None):
     return ledger_mod.settlement(period, target)
 
 
+@router.get("/ledger/list")
+def ep_list(period: str = "month", date: Optional[str] = None):
+    """기간 전체 거래내역(장부, 시간순) — 어드민 대차대조표 상세."""
+    try:
+        target = _date.fromisoformat(date) if date else None
+    except ValueError:
+        raise HTTPException(400, "date must be YYYY-MM-DD")
+    return {"items": ledger_mod.entries(period, target)}
+
+
 @router.get("/ledger/incomplete")
 def ep_incomplete():
     """정보 부족(가맹점 등) 항목 — 데스크 '지출내역 확인필요'."""
     return {"items": ledger_mod.incomplete()}
+
+
+@router.post("/ledger/receipt")
+async def ep_receipt(file: UploadFile = File(...)):
+    """영수증 이미지 드롭 → 비전 인식 → 가계부 매칭(merge). 어드민 드래그&드랍용.
+
+    같은 금액·날짜의 카드알림이 있으면 합쳐 보강, 없으면 새 항목.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "빈 파일")
+    suffix = os.path.splitext(file.filename or "")[1] or ".jpg"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        tmp.write(data)
+        tmp.close()
+        import ingest
+        import nest_client
+        from agent import vision
+        alias = ingest._resolve_alias("vision", None, prefer_vision=True,
+                                      fallback_key="insight")
+        images = nest_client.images_from_paths([tmp.name])
+        f = vision.extract_receipt(alias, images)
+        if not (isinstance(f, dict) and f.get("is_receipt") and f.get("total")):
+            return {"ok": False, "reason": "영수증으로 인식하지 못했어요", "extracted": f}
+        h = hashlib.sha1(data).hexdigest()[:12]
+        res = ledger_mod.from_receipt(f"receipt-drop-{h}", datetime.datetime.now(), {
+            "amount": f.get("total"), "merchant": f.get("merchant"),
+            "items": f.get("items"), "date": f.get("date"), "method": f.get("method"),
+        })
+        return {"ok": True, "result": res, "merchant": f.get("merchant"),
+                "amount": f.get("total"), "method": f.get("method"), "items": f.get("items")}
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
 
 class FieldsIn(BaseModel):

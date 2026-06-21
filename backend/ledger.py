@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import db
 
 _AMOUNT = re.compile(r"([\d][\d,]{1,})\s*원")
-_APPROVE = re.compile(r"승인|결제|출금|구매|결제완료|납부")
-_INCOME = re.compile(r"입금|급여|월급|상여|정산\s*입금|이체\s*입금|들어왔|받았")
+_INCOME = re.compile(r"입금|급여|월급|상여|들어왔|받았")            # 돈 들어옴(수입)
+_OUT = re.compile(r"승인|결제|출금|구매|결제완료|납부|송금")        # 돈 나감(지출); 이체는 방향 따로
 # 비지출 오탐(적립·쿠폰·환급·광고 등) — 실제 입금은 '입금'으로 따로 들어옴
 _NON_SPEND = re.compile(r"적립|쿠폰|환급|할인|광고|이벤트|당첨|포인트")
 # 카드 청구서·명세(개별 결제 아닌 합계 통지) — 이중계상 방지로 제외
@@ -112,9 +112,17 @@ def parse_payment(sender: str, summary: str) -> Optional[Dict[str, Any]]:
     text = f"{sender} {summary}"
     if _NON_SPEND.search(text) or _STATEMENT.search(text):
         return None
-    is_income = bool(_INCOME.search(text)) and not _APPROVE.search(summary)
-    if not is_income and not _APPROVE.search(text):
-        return None
+    # 수입/지출 방향 — 은행 입/출금·이체도 포함. 입금=수입, 출금·결제·송금=지출,
+    # 이체는 입금이면 수입 아니면 지출.
+    has_in = bool(_INCOME.search(text))
+    has_out = bool(_OUT.search(text))
+    transfer = "이체" in text
+    if has_in and not has_out:
+        is_income = True
+    elif has_out or (transfer and not has_in):
+        is_income = False
+    else:
+        return None                          # 결제·입출금 신호 아님
     m = _AMOUNT.search(summary) or _AMOUNT.search(text)
     if not m:
         return None
@@ -305,6 +313,16 @@ def today(target: Optional[date] = None) -> Dict[str, Any]:
         "count": len(rows),
         "items": [_row_view(r) for r in rows],
     }
+
+
+def entries(period: str = "month", target: Optional[date] = None) -> List[Dict[str, Any]]:
+    """기간 전체 거래내역(시간순) — 어드민 장부/대차대조표용."""
+    target = target or date.today()
+    period = "week" if period == "week" else "month"
+    start, end = _period_range(period, target)
+    rows = list(db.ledger().find(
+        {"date": {"$gte": start.isoformat(), "$lt": end.isoformat()}}).sort("ts", 1))
+    return [_row_view(r) for r in rows]
 
 
 def incomplete(within_days: int = 14, limit: int = 20) -> List[Dict[str, Any]]:
