@@ -283,6 +283,8 @@ class CollectorService : Service() {
                         LocationCollector.tick(applicationContext, skip, loc)
                         sleepMs = ((loc?.optInt("poll_interval_sec", 60) ?: 60)
                             .coerceAtLeast(15)) * 1000L
+                        // 운전 중엔 10초마다 — Tesla GPS 메인으로 촘촘히 추적(차 깨어있어 비용 적음).
+                        if (Prefs.carState(applicationContext) == "driving") sleepMs = 10_000L
                     } else {
                         sleepMs = syncMin * 60_000L
                     }

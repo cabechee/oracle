@@ -1,6 +1,7 @@
 package studio.camembertcheese.oracle.collector
 
 import android.content.Context
+import android.location.Location
 import org.json.JSONObject
 
 /// 위치 체류·이동 감지 → **여정 기록**(집→차→사무실→차→집) + 베르·쿠키 수다(banter)
@@ -56,6 +57,26 @@ object LocationCollector {
     }
 
     // ── 차량 상태머신 ────────────────────────────────────────────────
+    /// 운전 중엔 Tesla 차 GPS를 메인(폰보다 정확 — 폰은 운전 중 틀리게 찍히기도), 폰은 보조(로그).
+    /// 그 외(주차·도보)엔 폰. 둘 다 받아 로그엔 남기고 메인만 상태머신에 쓴다.
+    private fun bestLoc(ctx: Context, driving: Boolean): Location? {
+        val phone = Geo.currentLocation(ctx)
+        if (driving) {
+            val t = Backend.carLocation(ctx)
+            if (t != null) {
+                val p = if (phone != null) " · 폰(%.5f,%.5f)".format(phone.latitude, phone.longitude) else " · 폰없음"
+                L.i("운전중 위치 Tesla 메인(%.5f,%.5f)".format(t.first, t.second) + p)
+                return Location("tesla").apply {
+                    latitude = t.first; longitude = t.second; accuracy = 5f
+                    time = System.currentTimeMillis()
+                    elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+                }
+            }
+            L.i("운전중 위치 Tesla 없음 → 폰 폴백")
+        }
+        return phone
+    }
+
     /// 차 상태를 한 틱 진행. 처리했으면(운전중이거나 전이 발생) true — 호출부가 체류머신 스킵.
     private fun carTick(ctx: Context, now: Long, onCar: Boolean,
                         carName: String?, locCfg: JSONObject?): Boolean {
@@ -71,7 +92,7 @@ object LocationCollector {
             carBaselined = true
             Prefs.setParkPendingTicks(ctx, 0)
             if (onCar && Prefs.carState(ctx) == "driving") {
-                val loc = Geo.currentLocation(ctx)
+                val loc = bestLoc(ctx, driving = true)   // 운전중 — Tesla GPS 메인
                 if (loc != null) Prefs.setDriveAnchor(ctx, loc.latitude, loc.longitude, now)
                 L.i("차 상태 기준선: 운전중 유지(재시작)")
                 return true
@@ -84,7 +105,7 @@ object LocationCollector {
         }
 
         if (Prefs.carState(ctx) == "driving") {
-            val loc = Geo.currentLocation(ctx)
+            val loc = bestLoc(ctx, driving = true)   // 운전중 — Tesla GPS 메인(폰보다 정확), 폰 보조
             // 1) 주차 — 차 BT 해제(연속 debounce 틱). 시동 잠깐 껐다 켜기는 흡수.
             if (!onCar) {
                 val pend = Prefs.parkPendingTicks(ctx) + 1

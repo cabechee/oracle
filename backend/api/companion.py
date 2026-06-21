@@ -104,6 +104,19 @@ def ep_car_parking(body: CarParkIn):
     return companion.car_parking(body.lat, body.lng, body.ts, body.silent, body.speaker)
 
 
+@router.get("/car/location")
+def ep_car_location():
+    """차 현재 GPS — 운전 중 수집기가 메인 위치로 사용(폰 GPS보다 정확).
+
+    자는 차는 안 깨우고 None(tesla.location이 online 아니면 None) — 운전 중만 좌표가 온다.
+    """
+    import tesla
+    loc = tesla.location()
+    if not loc or loc.get("lat") is None or loc.get("lng") is None:
+        return {"lat": None, "lng": None}
+    return {"lat": loc["lat"], "lng": loc["lng"], "driving": bool(loc.get("driving"))}
+
+
 class AskedIn(BaseModel):
     speaker: str = ""               # 베르 | 쿠키 (표시명)
     text: str                       # 동반자가 먼저 건 멘트

@@ -28,6 +28,14 @@ object Backend {
     fun fetchLocationConfig(ctx: Context): JSONObject? =
         get(Prefs.baseUrl(ctx) + "/location-config")?.optJSONObject("config")
 
+    /// 차 현재 GPS(Tesla) — 운전 중 메인 위치용. 자는 차/미연동이면 null.
+    fun carLocation(ctx: Context): Pair<Double, Double>? {
+        val r = get(Prefs.baseUrl(ctx) + "/car/location") ?: return null
+        val lat = r.optDouble("lat", Double.NaN)
+        val lng = r.optDouble("lng", Double.NaN)
+        return if (lat.isNaN() || lng.isNaN()) null else Pair(lat, lng)
+    }
+
     /// 장소 레지스트리(집·작업실·자주 가는 곳, WiFi/BT/좌표/설명). 실패면 null.
     fun listPlaces(ctx: Context): JSONArray? =
         get(Prefs.baseUrl(ctx) + "/places")?.optJSONArray("items")
