@@ -224,7 +224,13 @@ object LocationCollector {
     /// 주차 — 드라이브 구간(여정 silent) + 주차 위치 기록 + 질문(silent면 위치만). 주차중 진입.
     private fun doPark(ctx: Context, loc: android.location.Location?, now: Long, silent: Boolean) {
         val board = Prefs.btBoardTime(ctx)
-        recordSegment(ctx, Prefs.carName(ctx).ifBlank { "차" }, 0.0, 0.0,
+        // 새 주차 위치를 다음 출차의 거리 기준점으로 + 운행 구간 좌표로.
+        if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude)
+        val anchor = Prefs.departAnchor(ctx)
+        val plat = loc?.latitude ?: anchor?.first ?: 0.0
+        val plng = loc?.longitude ?: anchor?.second ?: 0.0
+        // 운행 구간('차')을 여정에 기록 — 도착(주차) 지점 좌표로(0,0 금지).
+        recordSegment(ctx, Prefs.carName(ctx).ifBlank { "차" }, plat, plng,
             if (board > 0L) board else now, now)
         Prefs.setCarState(ctx, "parked")
         Prefs.setBtBoardTime(ctx, 0L)
@@ -232,11 +238,6 @@ object LocationCollector {
         Prefs.setParkPendingTicks(ctx, 0)
         Prefs.clearDriveAnchor(ctx)
         Prefs.setDestRecheckAt(ctx, 0L)     // 주차 — 남은 목적지 재확인 취소
-        // 새 주차 위치를 다음 출차의 거리 기준점으로.
-        if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude)
-        val anchor = Prefs.departAnchor(ctx)
-        val plat = loc?.latitude ?: anchor?.first ?: 0.0
-        val plng = loc?.longitude ?: anchor?.second ?: 0.0
         val r = Backend.carParking(ctx, plat, plng, silent)
         if (!silent) {
             val text = r?.optString("text")?.trim() ?: ""
@@ -251,7 +252,7 @@ object LocationCollector {
             val ssid = Geo.wifiSsid(ctx)
             val wifiPlace = if (ssid != null) PlacesCache.byWifi(places, ssid) else null
             if (wifiPlace != null) {
-                onPlaceImmediate(ctx, wifiPlace, now)
+                onPlaceImmediate(ctx, places, wifiPlace, now)
                 return
             }
         }
@@ -298,15 +299,18 @@ object LocationCollector {
     }
 
     /// WiFi로 확정된 장소 — 다른 곳서 왔으면 이전 체류를 여정에 기록 후 도착 말 걸기.
-    private fun onPlaceImmediate(ctx: Context, place: String, now: Long) {
+    private fun onPlaceImmediate(ctx: Context, places: org.json.JSONArray, place: String, now: Long) {
         val visitOn = Prefs.visitOn(ctx)
         val lastPlace = Prefs.visitPlace(ctx)
         if (visitOn && lastPlace == place) return
         if (visitOn) endStay(ctx, now)
-        Prefs.setAnchor(ctx, 0.0, 0.0, now)
+        // WiFi로 확정된 장소 — 그 장소의 등록 좌표를 앵커로(0,0 금지). 좌표 없으면 GPS 1회.
+        val pc = PlacesCache.coordsOf(places, place)
+            ?: Geo.currentLocation(ctx)?.let { Pair(it.latitude, it.longitude) }
+        Prefs.setAnchor(ctx, pc?.first ?: 0.0, pc?.second ?: 0.0, now)
         Prefs.setVisitOn(ctx, true)
         Prefs.setVisitPlace(ctx, place)
-        L.i("WiFi 도착: '$place' — banter arrive")
+        L.i("WiFi 도착: '$place' (${pc?.let { "%.5f,%.5f".format(it.first, it.second) } ?: "좌표없음"}) — banter arrive")
         banterFlow(ctx, "arrive", place)
     }
 
