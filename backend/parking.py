@@ -31,7 +31,9 @@ def _place_of(d: Dict[str, Any]) -> Optional[str]:
         return d["place"]
     try:
         import places
-        np = places.nearest(d.get("lat"), d.get("lng"), 150)
+        # 주차장은 그 장소 등록점에서 수백 m 떨어질 수 있음(집은 WiFi 등록점과 주차 지점이 다름)
+        # → 방문/일반(150m)보다 넉넉한 300m로 매칭.
+        np = places.nearest(d.get("lat"), d.get("lng"), 300)
         return np.get("name") if np else None
     except Exception:
         return None

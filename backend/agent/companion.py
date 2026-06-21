@@ -296,9 +296,9 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     # 주차 위치 — 테슬라 차 GPS가 있으면 더 정확(폰보다, 특히 실내). 없으면 폰 좌표.
     plat = tloc["lat"] if (tloc and tloc.get("lat") is not None) else lat
     plng = tloc["lng"] if (tloc and tloc.get("lng") is not None) else lng
-    here = None                                   # 도착 장소(집/사무실 등) 매칭
+    here = None                                   # 도착 장소(집/사무실 등) 매칭 — 주차는 넉넉히 300m
     try:
-        np = places_mod.nearest(plat, plng, 150)
+        np = places_mod.nearest(plat, plng, 300)
         here = np.get("name") if np else None
     except Exception:
         here = None
