@@ -296,9 +296,15 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     # 주차 위치 — 테슬라 차 GPS가 있으면 더 정확(폰보다, 특히 실내). 없으면 폰 좌표.
     plat = tloc["lat"] if (tloc and tloc.get("lat") is not None) else lat
     plng = tloc["lng"] if (tloc and tloc.get("lng") is not None) else lng
-    parking_mod.record(plat, plng, ts)            # 위치는 항상 ('내 차 어디?' 회상용)
+    here = None                                   # 도착 장소(집/사무실 등) 매칭
+    try:
+        np = places_mod.nearest(plat, plng, 150)
+        here = np.get("name") if np else None
+    except Exception:
+        here = None
+    parking_mod.record(plat, plng, ts, place=here)   # 위치+도착지(집·사무실 등) 항상 기록
     print(f"[car] 주차{'(안전망 silent)' if silent else ''} — tesla shift={(tloc or {}).get('shift')} "
-          f"기록좌표=({plat},{plng}) phone=({lat},{lng})", flush=True)
+          f"장소={here!r} 기록좌표=({plat},{plng}) phone=({lat},{lng})", flush=True)
     drive = db.settings().find_one({"_id": "drive"}) or {}
     db.settings().update_one(
         {"_id": "drive"},
@@ -307,12 +313,6 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     if silent:
         print("[car] 주차 — 안전망 조용히 리셋(말 X)", flush=True)
         return {"speaker": "", "text": "", "alias": ""}
-    here = None                                   # 도착 장소(집/회사 등) 매칭
-    try:
-        np = places_mod.nearest(plat, plng, 150)
-        here = np.get("name") if np else None
-    except Exception:
-        here = None
     dest = drive.get("destination")               # 출발 때 테슬라가 준 목적지
     if not dest:
         qts = drive.get("question_ts")

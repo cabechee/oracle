@@ -642,12 +642,18 @@ async function renderCollected(){
   try{ d = await (await fetch('/collector-records?limit=150')).json(); }
   catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
   const v = d.visits||[], pk = d.parking||[], sg = d.signals||[];
-  const rowStyle = 'padding:7px 12px;border-bottom:1px solid var(--hair)';
+  const rowStyle = 'padding:7px 12px;border-bottom:1px solid var(--hair);display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+  // 위치 라벨: 좌표 있는 기록에 '이 자리를 장소로 등록' — 다음부터 자동 인식(집·사무실처럼)
+  const labelUI = (id, lat, lng) => (lat!=null && lng!=null)
+    ? `<span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center">
+        <input id="ll-${id}" placeholder="장소 라벨" style="width:108px;font-size:12px" onclick="event.stopPropagation()">
+        <button style="font-size:11px;padding:2px 7px" onclick="saveLocLabel('ll-${id}',${lat},${lng})">장소로 저장</button></span>`
+    : '';
   const visitRows = v.length ? v.map(x => `<div style="${rowStyle}">
-      <b>${esc(x.name||'(새 곳)')}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span></div>`).join('')
+      <b>${esc(x.name||'(새 곳)')}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span>${labelUI(x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">여정 기록 없음</div>';
   const parkRows = pk.length ? pk.map(x => `<div style="${rowStyle}">
-      🅿 <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span></div>`).join('')
+      🅿 <b>${x.place?esc(x.place):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span>${labelUI(x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">주차 기록 없음</div>';
   const sigRows = sg.length ? sg.map(x => `<div style="${rowStyle}">
       <span class="hint">[${SKIND[x.kind]||x.kind}] ${fmtWhen(x.ts)}</span> <b>${esc(x.sender||'')}</b> ${esc((x.body||'').slice(0,60))}</div>`).join('')
@@ -661,6 +667,18 @@ async function renderCollected(){
     <div class="pf"><label>📨 신호 (문자·부재중·앱) <span class="hint">${sg.length}건</span></label>
       <div style="margin-top:4px">${sigRows}</div></div>
     <div class="row" style="margin-top:8px"><button onclick="renderCollected()">새로고침 ↻</button></div>`;
+}
+// 수집기록의 한 위치를 '장소'로 등록 — 다음부터 그 자리 도착/주차가 이 이름으로 자동 인식
+async function saveLocLabel(inputId, lat, lng){
+  const el=document.getElementById(inputId);
+  const name=(el.value||'').trim();
+  if(!name){ alert('장소 이름을 입력하세요'); el.focus(); return; }
+  el.disabled=true;
+  try{
+    await fetch('/places',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name, kind:'place', lat, lng})});
+    renderCollected();
+  }catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
 }
 
 // ── 수집기 설정 (Android 네이티브 수집기가 매 사이클 fetch해 적용) ──

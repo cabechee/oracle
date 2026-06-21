@@ -111,7 +111,7 @@ def test_parking_links_destination(monkeypatch):
     import parking
     recorded = []
     monkeypatch.setattr(parking, "record",
-                        lambda lat, lng, ts=None: recorded.append((lat, lng)))
+                        lambda lat, lng, ts=None, place=None: recorded.append((lat, lng)))
     calls = _capture_speak(monkeypatch)
     companion.car_parking(37.49, 127.03, 1718000300000)
     assert recorded == [(37.49, 127.03)]              # 위치는 항상 기록
@@ -139,7 +139,7 @@ def test_parking_silent_no_question(monkeypatch):
     import parking
     recorded = []
     monkeypatch.setattr(parking, "record",
-                        lambda lat, lng, ts=None: recorded.append((lat, lng)))
+                        lambda lat, lng, ts=None, place=None: recorded.append((lat, lng)))
     monkeypatch.setattr(companion, "_speak",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("silent엔 말 X")))
     r = companion.car_parking(37.49, 127.03, silent=True)
@@ -175,10 +175,10 @@ def test_parking_tesla_here_and_precise(monkeypatch):
     import parking
     recorded = []
     monkeypatch.setattr(parking, "record",
-                        lambda lat, lng, ts=None: recorded.append((lat, lng)))
+                        lambda lat, lng, ts=None, place=None: recorded.append((lat, lng, place)))
     calls = _capture_speak(monkeypatch)
     companion.car_parking(99.9, 99.9)                 # 폰 좌표 엉뚱해도 테슬라 우선
-    assert recorded == [(37.493, 127.031)]            # 테슬라 정밀 좌표로 기록
+    assert recorded == [(37.493, 127.031, "집")]      # 테슬라 정밀 좌표 + 도착지 '집' 같이 기록
     assert "집" in calls[0]["situation"]
 
 

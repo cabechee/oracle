@@ -22,8 +22,31 @@ def _to_dt(ts: Any) -> datetime:
     return datetime.now()
 
 
-def record(lat: float, lng: float, ts: Any = None) -> Dict[str, Any]:
-    """주차 위치 1건 기록 — 최신이 곧 '내 차 위치'."""
+def _place_of(d: Dict[str, Any]) -> Optional[str]:
+    """이 주차의 장소명 — 기록 때 잡힌 게 있으면 그것, 없으면 지금 등록된 장소로 매칭(live).
+
+    live 매칭이라, 나중에 그 자리를 '장소'로 등록하면 옛 주차 기록도 그 이름으로 보인다.
+    """
+    if d.get("place"):
+        return d["place"]
+    try:
+        import places
+        np = places.nearest(d.get("lat"), d.get("lng"), 150)
+        return np.get("name") if np else None
+    except Exception:
+        return None
+
+
+def _view(d: Dict[str, Any]) -> Dict[str, Any]:
+    ts = d.get("ts")
+    return {"id": d["_id"], "lat": d.get("lat"), "lng": d.get("lng"),
+            "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts,
+            "place": _place_of(d)}
+
+
+def record(lat: float, lng: float, ts: Any = None,
+           place: Optional[str] = None) -> Dict[str, Any]:
+    """주차 위치 1건 기록 — 최신이 곧 '내 차 위치'. place=도착지 매칭(집·사무실 등, 있으면)."""
     when = _to_dt(ts)
     doc = {
         "_id": f"park-{when.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
@@ -31,26 +54,18 @@ def record(lat: float, lng: float, ts: Any = None) -> Dict[str, Any]:
         "lng": float(lng),
         "ts": when,
     }
+    if place:
+        doc["place"] = place                  # 집·사무실·등록장소면 그 이름 잡아둠
     db.parking().insert_one(doc)
-    return {"id": doc["_id"], "lat": doc["lat"], "lng": doc["lng"],
-            "ts": when.isoformat()}
+    return _view(doc)
 
 
 def latest() -> Optional[Dict[str, Any]]:
     """가장 최근 주차 위치 (없으면 None)."""
     d = db.parking().find_one(sort=[("ts", -1)])
-    if not d:
-        return None
-    ts = d.get("ts")
-    return {"id": d["_id"], "lat": d.get("lat"), "lng": d.get("lng"),
-            "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts}
+    return _view(d) if d else None
 
 
 def recent(limit: int = 50):
     """최근 주차 기록 (최신순) — 수집 기록 페이지용."""
-    out = []
-    for d in db.parking().find().sort("ts", -1).limit(limit):
-        ts = d.get("ts")
-        out.append({"id": d["_id"], "lat": d.get("lat"), "lng": d.get("lng"),
-                    "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts})
-    return out
+    return [_view(d) for d in db.parking().find().sort("ts", -1).limit(limit)]
