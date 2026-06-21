@@ -12,7 +12,7 @@ from typing import Any, Dict
 import db
 
 DEFAULTS: Dict[str, Any] = {
-    "poll_interval_sec": 60,        # 위치 확인 주기(초) — 폰 포그라운드 틱 간격
+    "poll_interval_sec": 30,        # 위치 확인 주기(초) — 폰 포그라운드 틱 간격(운전 중엔 10초로 자동)
     "skip_on_known_wifi": True,     # 등록된 장소 WiFi에 물려 있으면 GPS 스킵(배터리·실내정확)
     # ── 차량 출차/주차 판정 임계값 (수집기 상태머신) ──
     "car_depart_radius_m": 50,      # 출차: 차 BT 연결 채로 세운 데서 이만큼 벗어나면 운전중
