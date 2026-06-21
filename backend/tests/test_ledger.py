@@ -246,6 +246,33 @@ def test_approval_card_match_no_diff(monkeypatch):
     assert d["amount"] == 5820 and d["diff"] is False
 
 
+def test_reconcile_absorbs_card_note(monkeypatch):
+    # 영수증 그룹(쿠팡 97620) + 같은 금액 카드알림(확인필요·승인없음) → 알림 흡수, 이중계상 해소
+    fake = _FakeLedger([
+        {"_id": "grp", "date": "2026-06-21", "amount": 97620, "source": "merged",
+         "merchant": "쿠팡", "approval_no": "403880", "receipt_images": ["a", "b", "c"],
+         "method": "", "needs": [], "complete": True},
+        {"_id": "note", "date": "2026-06-21", "amount": 97620, "source": "notification",
+         "merchant": "", "method": "현대카드", "signal_ids": ["sig1"], "needs": ["merchant"]},
+    ])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    assert ledger.reconcile_card_notes(date(2026, 6, 21)) == 1
+    assert len(fake.docs) == 1 and fake.docs[0]["_id"] == "grp"     # 알림 흡수돼 1건
+    assert fake.docs[0]["method"] == "현대카드" and "sig1" in fake.docs[0]["signal_ids"]
+
+
+def test_reconcile_skips_ambiguous(monkeypatch):
+    # 같은 금액·날짜 알림이 둘이면 모호 → 흡수 안 함(수동 판독)
+    fake = _FakeLedger([
+        {"_id": "grp", "date": "2026-06-21", "amount": 5000, "source": "receipt",
+         "merchant": "투썸", "receipt_images": ["a"], "needs": [], "complete": True},
+        {"_id": "n1", "date": "2026-06-21", "amount": 5000, "source": "notification", "merchant": ""},
+        {"_id": "n2", "date": "2026-06-21", "amount": 5000, "source": "notification", "merchant": ""},
+    ])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    assert ledger.reconcile_card_notes(date(2026, 6, 21)) == 0 and len(fake.docs) == 3
+
+
 def test_redrop_no_double_legacy(monkeypatch):
     # 구 항목(parts 없음) 위에 같은 영수증 재드롭 → 내용(판매처+금액) dedup으로 이중합산 방지
     fake = _FakeLedger([{

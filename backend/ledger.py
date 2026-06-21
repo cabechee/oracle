@@ -414,7 +414,50 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         "parts": [{"amount": int(amount), "rtype": rtype, "merchant": merchant, "key": record_id}],
         "receipt_images": [im] if (im := (fields.get("image") or "").strip()) else [],
     }
-    return _merge_or_insert(doc)
+    res = _merge_or_insert(doc)
+    reconcile_card_notes(day)        # 그룹 총액과 같은 카드알림(확인필요) 있으면 흡수
+    return res
+
+
+def reconcile_card_notes(target: Optional[date] = None) -> int:
+    """승인번호 없는 카드알림(확인필요)을 같은 금액·날짜의 영수증 그룹에 흡수.
+
+    카드알림 총액 == 영수증 그룹 총액이면 같은 결제(영수증=그 알림의 상세). 그룹이 상세
+    (가맹점·영수증)를 가지므로, 알림의 결제수단·신호·시간만 그룹에 넘기고 알림 entry 삭제 —
+    이렇게 안 하면 같은 97,620원이 두 번 계상된다. 같은 금액·날짜에 그룹/알림이 각각 하나일
+    때만(1:1 명확) 처리 — 오매칭 방지.
+    """
+    target = target or date.today()
+    notes = list(db.ledger().find({
+        "source": "notification", "approval_no": {"$in": [None, ""]},
+        "date": {"$gte": (target - timedelta(days=35)).isoformat(),
+                 "$lt": (target + timedelta(days=2)).isoformat()},
+    }))
+    fixed = 0
+    for note in notes:
+        amt, d0 = note.get("amount"), note.get("date")
+        if not amt or not d0:
+            continue
+        near = [(date.fromisoformat(d0) + timedelta(days=k)).isoformat() for k in (-1, 0, 1)]
+        groups = [g for g in db.ledger().find({
+            "amount": amt, "date": {"$in": near}, "source": {"$in": ["receipt", "merged"]},
+        }) if g.get("merchant") and (g.get("receipt_images") or g.get("approval_no"))]
+        same_notes = [n for n in notes if n.get("amount") == amt and n.get("date") in near]
+        if len(groups) != 1 or len(same_notes) != 1:     # 모호하면 건너뜀(수동 판독)
+            continue
+        g = groups[0]
+        upd: Dict[str, Any] = {"source": "merged"}
+        if not g.get("method") and note.get("method"):
+            upd["method"] = note["method"]
+        sids = list({*(g.get("signal_ids") or []), *(note.get("signal_ids") or [])})
+        if sids:
+            upd["signal_ids"] = sids
+        if note.get("ts"):                               # 알림의 실제 결제 시각 반영
+            upd["ts"] = note["ts"]
+        db.ledger().update_one({"_id": g["_id"]}, {"$set": upd})
+        db.ledger().delete_one({"_id": note["_id"]})
+        fixed += 1
+    return fixed
 
 
 # ── 조회 ─────────────────────────────────────────────────────────
