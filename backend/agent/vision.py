@@ -184,3 +184,37 @@ def extract_receipts(alias: str, images: List[Dict[str, str]]) -> List[Dict[str,
     except Exception as e:
         print(f"[vision] 영수증(복수) 추출 실패: {e}", flush=True)
         return []
+
+
+CALENDAR_SYSTEM = """이미지(스크린샷·메시지·포스터·초대장·일정표 등)에서 일정/약속/이벤트를 **전부** 찾아 JSON으로.
+보이는 것만 채우고 추측은 최소화.
+{"events": [
+  {"title": "치과 예약", "date": "2026-06-25", "start": "14:30", "end": "15:30",
+   "location": "강남 ○○치과", "description": "", "all_day": false}
+]}
+규칙:
+- title과 date(YYYY-MM-DD)는 필수. 날짜를 못 정하면 그 일정은 빼라.
+- 시간이 보이면 start("HH:MM", 24시간제), 끝 시간 보이면 end. 시간이 없으면 all_day true(종일).
+- 연도가 안 보이면 가장 가까운 미래 연도로.
+- 상대 표현(내일·모레·다음 주 화요일 등)은 주어진 '오늘' 기준 실제 날짜로 환산.
+- 장소·설명은 보이면. 일정이 하나도 없으면 {"events": []}."""
+
+
+def extract_calendar_events(alias: str, images: List[Dict[str, str]],
+                            today: str = "") -> List[Dict[str, Any]]:
+    """이미지에서 일정/약속을 **전부** 추출 — 캘린더 등록용. [{title,date,start,end,location,...}, ...]."""
+    if not alias or not images:
+        return []
+    try:
+        prompt = "이미지에서 일정/약속/이벤트를 전부 찾아 JSON으로 뽑아줘."
+        if today:
+            prompt += f" 오늘은 {today}야 — 내일·다음 주 같은 상대 날짜는 이 기준으로 환산해."
+        r = llm.call(alias, prompt, images=images, system=CALENDAR_SYSTEM, expect_json=True)
+        out = r.get("json") or _parse_json(r.get("text") or "")
+        evs = out.get("events") if isinstance(out, dict) else None
+        if not isinstance(evs, list):
+            return []
+        return [x for x in evs if isinstance(x, dict) and x.get("title") and x.get("date")]
+    except Exception as e:
+        print(f"[vision] 일정 추출 실패: {e}", flush=True)
+        return []

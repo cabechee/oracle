@@ -582,7 +582,14 @@ async function renderCalendar(){
         <div style="margin-bottom:2px"><b>${esc(e.title)}</b>${e.all_day?' · 종일':''}</div>
         <div class="hint">${esc(fmtEvent(e))}${e.location?(' · '+esc(e.location)):''}</div>
       </div>`).join('') : '<div class="empty">앞으로 14일 일정이 없어요</div>';
-    body = `<div class="pf"><label>연동됨 ✓ <span class="hint">${esc(st.account||st.calendar_id||'')}</span></label></div>` + rows;
+    const drop = `<div id="caldrop"
+      ondragover="event.preventDefault();this.style.background='#F2F0EB'"
+      ondragleave="this.style.background=''" ondrop="dropCalendar(event)"
+      style="border:1.5px dashed var(--hair);border-radius:6px;padding:16px;text-align:center;color:var(--gray);font-size:13px;margin:8px 0">
+      📅 일정 스크린샷을 여기로 드래그&드랍 — 인식해서 캘린더에 추가합니다
+      <div style="color:var(--faint);font-size:11.5px;margin-top:3px">카톡·문자·포스터·초대장 등 (여러 일정도 OK)</div>
+      <div id="calmsg" style="color:var(--faint);font-size:12px;margin-top:6px"></div></div>`;
+    body = `<div class="pf"><label>연동됨 ✓ <span class="hint">${esc(st.account||st.calendar_id||'')}</span></label></div>` + drop + rows;
   } else {
     const step = st.has_client
       ? `클라이언트 파일(gcal_credentials.json)은 준비됐어요. <b>scripts/gcal_auth.py</b>만 실행하면 됩니다.`
@@ -603,6 +610,23 @@ async function renderCalendar(){
   }
   m.innerHTML = `<div class="bar"><h2>캘린더</h2>
     <span class="total">구글 캘린더 — 일정이 데스크·동반자 맥락에 들어가요</span></div>` + body;
+}
+// 일정 스크린샷 드롭 → 인식 → 캘린더 등록
+async function dropCalendar(e){
+  e.preventDefault();
+  const z=document.getElementById('caldrop'); if(z) z.style.background='';
+  const file=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+  const msg=document.getElementById('calmsg');
+  if(!file) return;
+  msg.textContent='인식 중… ('+file.name+')';
+  const fd=new FormData(); fd.append('file',file);
+  try{
+    const r=await (await fetch('/calendar/screenshot',{method:'POST',body:fd})).json();
+    if(r.ok){
+      msg.textContent='✓ 일정 '+r.count+'건 추가 — '+r.events.map(x=>x.title+' ('+x.date+(x.time?' '+x.time:' 종일')+')').join(', ');
+      setTimeout(renderCalendar, 1800);
+    } else { msg.textContent='✗ '+(r.reason||'인식 실패'); }
+  }catch(err){ msg.textContent='✗ 업로드 실패: '+err.message; }
 }
 
 // ── 수집 기록 (수집기가 저장한 여정·주차·신호 전체) ──
