@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -80,7 +81,9 @@ class OracleApp extends StatelessWidget {
         progressIndicatorTheme:
             const ProgressIndicatorThemeData(color: OracleColors.vermilion),
       ),
-      home: const HomePage(),
+      // 웹에선 모든 텍스트(흐름·일기·발행물) 선택·복사 가능하게 — 마우스 드래그 선택이라
+      // 폰의 길게눌러(재분류) 제스처와 충돌 없음. 폰은 그대로 둠.
+      home: kIsWeb ? SelectionArea(child: const HomePage()) : const HomePage(),
     );
   }
 }
