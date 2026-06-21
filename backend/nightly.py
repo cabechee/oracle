@@ -25,6 +25,14 @@ def run_nightly() -> Dict[str, Any]:
     """
     out: Dict[str, Any] = {}
     out["daily"] = run_daily(None)
+    try:                       # 가계부 분류 규칙 LLM 업그레이드(규칙 없는 가맹점 → 품목 보고 규칙화)
+        import category
+        import ingest
+        category.seed()
+        alias = ingest._resolve_alias("classify", None, prefer_vision=False, fallback_key="insight")
+        out["category"] = category.upgrade(alias)
+    except Exception as e:
+        out["category"] = {"ok": False, "error": str(e)}
     today = date.today()
     if today.weekday() == 0:   # 월요일 = 지난 주(월~일) 완료
         try:
