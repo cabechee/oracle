@@ -678,6 +678,18 @@ async function renderLedger(){
     : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
   const kv=(label,val)=>`<div style="margin:4px 0;font-size:12.5px"><b style="color:var(--gray)">${label}</b> ${val||'—'}</div>`;
   const join=(arr,f)=>(arr||[]).map(f).join(' · ');
+  const barList=(title,items,nameKey)=>{
+    const arr=(items||[]).slice(0,8), max=Math.max(1,...arr.map(x=>x.amount||0));
+    return `<div class="pf" style="flex:1;min-width:262px;margin-bottom:0">
+      <label style="margin-bottom:10px">${title}</label>
+      ${arr.length?arr.map(x=>`<div style="margin:7px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;margin-bottom:3px">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x[nameKey]||'미상')}</span>
+          <span style="font-variant-numeric:tabular-nums;color:var(--soft);white-space:nowrap">${won(x.amount)}</span></div>
+        <div style="height:5px;background:var(--hi);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${Math.round((x.amount||0)/max*100)}%;background:var(--vermilion);opacity:.5"></div></div></div>`).join('')
+        :'<div class="hint">—</div>'}</div>`;
+  };
   const txRows=(list.items||[]).length?list.items.slice().reverse().map(it=>{
       const inc2=it.kind==='income';
       const desc=it.merchant||it.memo||(inc2?'입금':'결제');
@@ -746,9 +758,12 @@ async function renderLedger(){
         <tbody>${expRows}</tbody><tfoot><tr><td style="${TD};font-weight:600">지출계</td><td style="${TD};${R};font-weight:600">${won(s.expense)}</td></tr></tfoot></table>
     </div>
     <div style="margin:14px 0;font-size:16px;font-weight:600;color:${netColor}">순액 ${s.net>=0?'+':''}${won(s.net)}</div>
-    ${kv('결제수단', join(s.by_method, x=>`${x.name} ${won(x.amount)}`))}
-    ${kv('많이 쓴 곳', join(s.top_merchants, x=>`${x.name} ${won(x.amount)}`))}
-    ${kv('정기결제(추정)', join(s.recurring, x=>`${x.merchant} ${won(x.amount)}`))}
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 14px">
+      ${barList('결제수단', s.by_method, 'name')}
+      ${barList('많이 쓴 곳', s.top_merchants, 'name')}
+    </div>
+    ${(s.recurring&&s.recurring.length)?`<div class="pf"><label>정기결제(추정)</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${s.recurring.map(x=>`<span style="border:1px solid var(--hair);border-radius:8px;padding:3px 9px;font-size:12.5px">${esc(x.merchant)} <b>${won(x.amount)}</b></span>`).join('')}</div></div>`:''}
     <h3 style="margin:22px 0 6px;font-size:14px">거래내역 (장부 · ${(list.items||[]).length}건)</h3>
     <table style="${TB}"><thead><tr><th style="${TD};text-align:left">날짜</th><th style="${TD};text-align:left">내역</th>
       <th style="${TD};text-align:left">분류</th><th style="${TD};text-align:left">결제수단</th><th style="${TD};${R}">금액</th></tr></thead>
