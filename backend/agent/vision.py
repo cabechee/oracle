@@ -137,7 +137,8 @@ RECEIPT_SYSTEM = """이미지가 영수증·카드전표·거래내역서면 정
   "items": ["아메리카노", "샌드위치"],   // 품목(보이면)
   "date": "2026-06-21",      // 영수증 날짜(YYYY-MM-DD, 보이면)
   "method": "현대카드",       // 결제수단(카드사·페이 등, 보이면)
-  "approval": "12345678"     // 승인번호(approval no, 보이면 숫자만)
+  "approval": "12345678",    // 승인번호(approval no, 보이면 숫자만)
+  "rtype": "shop"            // "card"=카드매출전표/카드사 영수증, "shop"=쇼핑몰·판매처 영수증/거래명세서(기본)
 }
 영수증/전표/거래내역이 아니면 {"is_receipt": false} 만 출력."""
 
@@ -160,10 +161,10 @@ RECEIPTS_SYSTEM = """이미지에서 영수증·카드전표·거래내역을 **
 한 장에 여러 건이 있으면 모두(묶음 영수증·여러 장 스캔 등). 보이는 것만 채우고 추측 금지.
 {"receipts": [
   {"merchant": "상호명", "total": 12000, "items": ["아메리카노"], "date": "2026-06-21",
-   "method": "현대카드", "approval": "12345678"}
+   "method": "현대카드", "approval": "12345678", "rtype": "shop"}
 ]}
 영수증이 하나도 없으면 {"receipts": []}. total(합계 금액)이 없는 건 빼라.
-approval(승인번호)은 보이면 숫자만 넣어라(없으면 생략)."""
+approval(승인번호)은 보이면 숫자만(없으면 생략). rtype은 "card"(카드매출전표/카드사) 또는 "shop"(쇼핑몰·판매처, 기본)."""
 
 
 def extract_receipts(alias: str, images: List[Dict[str, str]]) -> List[Dict[str, Any]]:

@@ -104,11 +104,14 @@ async def ep_receipt(file: UploadFile = File(...)):
     idx = 0
     for vault_rel, ap in pages:        # 페이지마다 영수증 전부 추출(한 장에 여러 건도)
         for rc in vision.extract_receipts(alias, nest_client.images_from_paths([ap])):
-            res = ledger_mod.from_receipt(f"receipt-drop-{h}-{idx}", now, {
+            # 안정적 id(승인번호+금액) — 같은 영수증 재처리해도 중복/이중합산 방지
+            rid = (f"drop-{rc.get('approval')}-{rc.get('total')}"
+                   if rc.get("approval") else f"drop-{h}-{idx}")
+            res = ledger_mod.from_receipt(rid, now, {
                 "amount": rc.get("total"), "merchant": rc.get("merchant"),
                 "items": rc.get("items"), "date": rc.get("date"),
                 "method": rc.get("method"), "approval": rc.get("approval"),
-                "image": vault_rel})
+                "rtype": rc.get("rtype"), "image": vault_rel})
             results.append({"merchant": rc.get("merchant"), "amount": rc.get("total"),
                             "result": res})
             idx += 1

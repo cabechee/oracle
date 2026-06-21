@@ -212,10 +212,46 @@ def _same_payment(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     return bool(am) and am == bm
 
 
-def _parts_of(doc: Dict[str, Any]) -> List[int]:
-    """이 항목을 이루는 부분 금액들(합산 내역). 없으면 [amount]."""
-    p = [int(x) for x in (doc.get("amount_parts") or []) if x]
-    return p or ([int(doc["amount"])] if doc.get("amount") else [])
+def _parts_of(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """이 항목을 이루는 영수증 부분들 [{amount, rtype, key}]. 구 문서는 amount로 합성.
+
+    rtype: 'card'(카드매출전표) | 'shop'(쇼핑몰·판매처, 기본). key: 영수증 식별(멱등 dedup용).
+    """
+    parts = doc.get("parts")
+    if isinstance(parts, list) and parts:
+        out = []
+        for p in parts:
+            a = int(p.get("amount") or 0)
+            if a:
+                out.append({"amount": a, "rtype": p.get("rtype") or "shop",
+                            "key": p.get("key") or f"{p.get('rtype') or 'shop'}-{a}"})
+        return out
+    a = doc.get("amount")
+    if not a:
+        return []
+    rt = doc.get("rtype") or "shop"
+    return [{"amount": int(a), "rtype": rt, "key": doc.get("_id") or f"{rt}-{int(a)}"}]
+
+
+def _recompute_amount(parts: List[Dict[str, Any]]):
+    """부분 영수증들 → (대표금액, diff여부, 중복제거 parts).
+
+    쇼핑몰 영수증끼리는 **합산**(여러 판매처=한 주문). 카드전표가 있으면 그게 진실 —
+    쇼핑몰 합계와 다르면 **diff**(직접 판독). 같은 영수증(key) 재처리는 멱등.
+    """
+    seen, uniq = set(), []
+    for p in parts:
+        k = p.get("key")
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(p)
+    shop = [p["amount"] for p in uniq if p.get("rtype") != "card"]
+    card = [p["amount"] for p in uniq if p.get("rtype") == "card"]
+    if card:
+        card_total = max(card)
+        return card_total, (bool(shop) and sum(shop) != card_total), uniq
+    return sum(shop), False, uniq
 
 
 def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any],
@@ -228,13 +264,11 @@ def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any],
     """
     out: Dict[str, Any] = {}
     if by_approval:
-        amts: List[int] = []
-        for a in _parts_of(existing) + _parts_of(incoming):
-            if a not in amts:                  # 같은 금액=같은 거래(중복), 다른 금액만 모음
-                amts.append(a)
-        out["amount_parts"] = amts
-        out["amount"] = max(amts) if amts else int(existing.get("amount") or 0)
-        out["diff"] = len(amts) > 1            # 금액 불일치 → 직접 판독 필요
+        amount, diff, uniq = _recompute_amount(_parts_of(existing) + _parts_of(incoming))
+        out["parts"] = uniq
+        out["amount_parts"] = [p["amount"] for p in uniq]
+        out["amount"] = amount
+        out["diff"] = diff
     for f in ("merchant", "category"):
         v = incoming.get(f) or existing.get(f)
         if v:
@@ -349,6 +383,7 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
     except (ValueError, TypeError):
         day = date.today()
     merchant = (fields.get("merchant") or "").strip()
+    rtype = "card" if (fields.get("rtype") or "shop").strip().lower() == "card" else "shop"
     doc = {
         "_id": f"pay-receipt-{record_id}",
         "date": day.isoformat(),
@@ -367,6 +402,8 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         "complete": bool(merchant),
         "record_id": record_id,
         "approval_no": str(fields.get("approval") or "").strip(),   # 승인번호 — 강력 매칭키
+        "rtype": rtype,                                             # card 전표 / shop 쇼핑몰
+        "parts": [{"amount": int(amount), "rtype": rtype, "key": record_id}],
         "receipt_images": [im] if (im := (fields.get("image") or "").strip()) else [],
     }
     return _merge_or_insert(doc)
@@ -458,7 +495,8 @@ def resolve_diff(pay_id: str, amount: int) -> bool:
     if amt <= 0 or not db.ledger().find_one({"_id": pay_id}):
         return False
     db.ledger().update_one({"_id": pay_id},
-                           {"$set": {"amount": amt, "amount_parts": [amt], "diff": False}})
+                           {"$set": {"amount": amt, "amount_parts": [amt], "diff": False,
+                                     "parts": [{"amount": amt, "rtype": "card", "key": "resolved"}]}})
     return True
 
 
