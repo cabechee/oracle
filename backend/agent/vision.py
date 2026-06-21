@@ -161,12 +161,13 @@ RECEIPTS_SYSTEM = """이미지에서 영수증·카드전표·거래내역을 **
 한 장에 여러 건이 있으면 모두(묶음 영수증·여러 장 스캔 등). 보이는 것만 채우고 추측 금지.
 {"receipts": [
   {"merchant": "상호명", "total": 12000, "items": ["아메리카노"], "date": "2026-06-21",
-   "method": "현대카드", "approval": "12345678", "rtype": "shop"}
+   "method": "현대카드", "approval": "12345678", "rtype": "shop", "platform": "쿠팡"}
 ]}
 영수증이 하나도 없으면 {"receipts": []}. total(합계 금액)이 없는 건 빼라.
 approval(승인번호)은 보이면 숫자만(없으면 생략).
 rtype: "card"는 **신용카드 매출전표**(POS 단말기 출력·카드번호·가맹점번호·단말기번호 표기)일 때만.
-쇼핑몰·인터넷 주문 영수증/거래명세서(주문번호·판매자·상품명)는 "shop"(기본). 애매하면 "shop"."""
+쇼핑몰·인터넷 주문 영수증/거래명세서(주문번호·판매자·상품명)는 "shop"(기본). 애매하면 "shop".
+platform: 영수증 어딘가에 보이는 **쇼핑몰/결제 플랫폼** 이름(쿠팡·coupang·11번가·네이버페이·G마켓 등). 없으면 생략."""
 
 
 def extract_receipts(alias: str, images: List[Dict[str, str]]) -> List[Dict[str, Any]]:

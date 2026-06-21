@@ -90,3 +90,38 @@ def ep_parking_latest():
     """가장 최근 주차 위치 — '내 차 어디?' 회상용."""
     import parking as parking_mod
     return {"parking": parking_mod.latest()}
+
+
+class LabelIn(BaseModel):
+    kind: str                      # "visit" | "parking"
+    id: str
+    name: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
+@router.post("/locations/label")
+def ep_label(body: LabelIn):
+    """수집기록의 한 위치에 라벨 — 그 기록을 이 이름으로 보이게 + 그 자리를 '장소'로 등록.
+
+    같은 이름 장소가 이미 있으면 **수정**(중복 안 만듦, GPS는 기존 유지). 없으면 그 좌표로 새로.
+    """
+    import db
+    import places as places_mod
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "name 비어있음")
+    if body.kind == "visit":
+        db.visits().update_one({"_id": body.id}, {"$set": {"label": name}})
+    elif body.kind == "parking":
+        db.parking().update_one({"_id": body.id}, {"$set": {"place": name}})
+    else:
+        raise HTTPException(400, "kind는 visit|parking")
+    existing = places_mod.lookup(name)            # 이름으로 dedup
+    if existing:
+        place = places_mod.upsert(name=name, place_id=existing["id"],
+                                  lat=existing.get("lat") or body.lat,
+                                  lng=existing.get("lng") or body.lng)
+    else:
+        place = places_mod.upsert(name=name, kind="place", lat=body.lat, lng=body.lng)
+    return {"ok": True, "place": place, "updated": bool(existing)}

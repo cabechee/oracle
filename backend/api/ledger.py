@@ -113,7 +113,7 @@ async def ep_receipt(file: UploadFile = File(...)):
                 "amount": rc.get("total"), "merchant": rc.get("merchant"),
                 "items": rc.get("items"), "date": rc.get("date"),
                 "method": rc.get("method"), "approval": rc.get("approval"),
-                "rtype": rc.get("rtype"), "image": vault_rel})
+                "rtype": rc.get("rtype"), "platform": rc.get("platform"), "image": vault_rel})
             results.append({"merchant": rc.get("merchant"), "amount": rc.get("total"),
                             "result": res})
             idx += 1

@@ -62,6 +62,28 @@ def _place_name(v: Dict[str, Any]) -> str:
     return v.get("label") or "어떤 곳"
 
 
+def _live_name(v: Dict[str, Any]) -> Optional[str]:
+    """장소명 — 기록값 우선, 없으면 지금 등록된 장소로 GPS 매칭(live). 못 찾으면 None(미지정).
+
+    live 매칭이라, 나중에 그 자리를 장소로 등록하면 옛 방문도 그 이름으로 보인다.
+    """
+    p = v.get("place")
+    if p == "home":
+        return "집"
+    if p == "office":
+        return "작업실"
+    if p:
+        return str(p)
+    if v.get("label"):
+        return v["label"]
+    try:
+        import places
+        np = places.nearest(v.get("lat"), v.get("lng"), 150)
+        return np.get("name") if np else None
+    except Exception:
+        return None
+
+
 def visits_for_day(target: date) -> List[Dict[str, Any]]:
     """그날 방문 목록(시간순) — 일기·타임라인 재료."""
     t0 = datetime.combine(target, dtime.min)
@@ -89,7 +111,7 @@ def recent(limit: int = 100) -> List[Dict[str, Any]]:
         out.append({
             "id": v["_id"],
             "place": v.get("place"),
-            "name": _place_name(v),
+            "name": _live_name(v),          # 등록 장소로 live 매칭 — 없으면 None(어드민 '미지정')
             "minutes": v.get("minutes", 0),
             "lat": v.get("lat"), "lng": v.get("lng"),
             "start": s.isoformat() if isinstance(s, datetime) else None,

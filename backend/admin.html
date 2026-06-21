@@ -612,21 +612,12 @@ async function renderCalendar(){
     <span class="total">구글 캘린더 — 일정이 데스크·동반자 맥락에 들어가요</span></div>` + body;
 }
 // 일정 스크린샷 드롭 → 인식 → 캘린더 등록
-async function dropCalendar(e){
+function dropCalendar(e){
   e.preventDefault();
   const z=document.getElementById('caldrop'); if(z) z.style.background='';
-  const file=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
-  const msg=document.getElementById('calmsg');
-  if(!file) return;
-  msg.textContent='인식 중… ('+file.name+')';
-  const fd=new FormData(); fd.append('file',file);
-  try{
-    const r=await (await fetch('/calendar/screenshot',{method:'POST',body:fd})).json();
-    if(r.ok){
-      msg.textContent='✓ 일정 '+r.count+'건 추가 — '+r.events.map(x=>x.title+' ('+x.date+(x.time?' '+x.time:' 종일')+')').join(', ');
-      setTimeout(renderCalendar, 1800);
-    } else { msg.textContent='✗ '+(r.reason||'인식 실패'); }
-  }catch(err){ msg.textContent='✗ 업로드 실패: '+err.message; }
+  [...((e.dataTransfer&&e.dataTransfer.files)||[])].forEach(file=>enqueueDrop({
+    file, msgEl:'calmsg', url:'/calendar/screenshot', after:renderCalendar,
+    done:(r,f)=>r.ok?`✓ ${f.name}: 일정 ${r.count}건 추가`:`✗ ${f.name}: ${r.reason||'인식 실패'}`}));
 }
 
 // ── 수집 기록 (수집기가 저장한 여정·주차·신호 전체) ──
@@ -644,16 +635,16 @@ async function renderCollected(){
   const v = d.visits||[], pk = d.parking||[], sg = d.signals||[];
   const rowStyle = 'padding:7px 12px;border-bottom:1px solid var(--hair);display:flex;gap:8px;align-items:center;flex-wrap:wrap';
   // 위치 라벨: 좌표 있는 기록에 '이 자리를 장소로 등록' — 다음부터 자동 인식(집·사무실처럼)
-  const labelUI = (id, lat, lng) => (lat!=null && lng!=null)
+  const labelUI = (kind, id, lat, lng) => (lat!=null && lng!=null)
     ? `<span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center">
-        <input id="ll-${id}" placeholder="장소 라벨" style="width:108px;font-size:12px" onclick="event.stopPropagation()">
-        <button style="font-size:11px;padding:2px 7px" onclick="saveLocLabel('ll-${id}',${lat},${lng})">장소로 저장</button></span>`
+        <input id="ll-${kind}-${id}" placeholder="장소 라벨" style="width:108px;font-size:12px" onclick="event.stopPropagation()">
+        <button style="font-size:11px;padding:2px 7px" onclick="saveLocLabel('${kind}','${id}','ll-${kind}-${id}',${lat},${lng})">장소로 저장</button></span>`
     : '';
   const visitRows = v.length ? v.map(x => `<div style="${rowStyle}">
-      <b>${esc(x.name||'(새 곳)')}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span>${labelUI(x.id,x.lat,x.lng)}</div>`).join('')
+      <b>${x.name?esc(x.name):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span>${labelUI('visit',x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">여정 기록 없음</div>';
   const parkRows = pk.length ? pk.map(x => `<div style="${rowStyle}">
-      🅿 <b>${x.place?esc(x.place):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span>${labelUI(x.id,x.lat,x.lng)}</div>`).join('')
+      🅿 <b>${x.place?esc(x.place):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span>${labelUI('parking',x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">주차 기록 없음</div>';
   const sigRows = sg.length ? sg.map(x => `<div style="${rowStyle}">
       <span class="hint">[${SKIND[x.kind]||x.kind}] ${fmtWhen(x.ts)}</span> <b>${esc(x.sender||'')}</b> ${esc((x.body||'').slice(0,60))}</div>`).join('')
@@ -669,14 +660,14 @@ async function renderCollected(){
     <div class="row" style="margin-top:8px"><button onclick="renderCollected()">새로고침 ↻</button></div>`;
 }
 // 수집기록의 한 위치를 '장소'로 등록 — 다음부터 그 자리 도착/주차가 이 이름으로 자동 인식
-async function saveLocLabel(inputId, lat, lng){
+async function saveLocLabel(kind, id, inputId, lat, lng){
   const el=document.getElementById(inputId);
   const name=(el.value||'').trim();
   if(!name){ alert('장소 이름을 입력하세요'); el.focus(); return; }
   el.disabled=true;
   try{
-    await fetch('/places',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name, kind:'place', lat, lng})});
+    const r=await (await fetch('/locations/label',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind, id, name, lat, lng})})).json();
     renderCollected();
   }catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
 }
@@ -886,21 +877,33 @@ async function delRule(id){
   try{ await fetch('/ledger/rules/'+encodeURIComponent(id),{method:'DELETE'}); renderLedger(); }
   catch(e){ alert('삭제 실패: '+e.message); }
 }
-async function dropReceipt(e){
+// 드롭 큐 — 여러 파일·연속 투입을 쌓아 하나씩 순차 처리(처리 중에 더 넣으면 대기열에).
+const DROPQ={items:[],busy:false};
+function enqueueDrop(job){ DROPQ.items.push(job); if(!DROPQ.busy) runDropQueue(); }
+async function runDropQueue(){
+  DROPQ.busy=true; let lastAfter=null;
+  while(DROPQ.items.length){
+    const job=DROPQ.items[0], msg=document.getElementById(job.msgEl), remain=DROPQ.items.length-1;
+    if(msg) msg.textContent=`처리 중: ${job.file.name}${remain?` · 대기 ${remain}건`:''}`;
+    let line;
+    try{
+      const fd=new FormData(); fd.append('file', job.file);
+      const r=await (await fetch(job.url,{method:'POST',body:fd})).json();
+      line=job.done(r, job.file);
+    }catch(err){ line=`✗ ${job.file.name}: ${err.message}`; }
+    DROPQ.items.shift(); lastAfter=job.after;
+    const m2=document.getElementById(job.msgEl);
+    if(m2) m2.textContent=line+(DROPQ.items.length?` · 대기 ${DROPQ.items.length}건`:'');
+  }
+  DROPQ.busy=false;
+  if(lastAfter) setTimeout(lastAfter, 1600);
+}
+function dropReceipt(e){
   e.preventDefault();
-  const z = document.getElementById('rcptdrop'); if(z) z.style.background='';
-  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  const msg = document.getElementById('rcptmsg');
-  if(!file){ return; }
-  msg.textContent = '인식 중… ('+file.name+')';
-  const fd = new FormData(); fd.append('file', file);
-  try{
-    const r = await (await fetch('/ledger/receipt', {method:'POST', body: fd})).json();
-    if(r.ok){
-      msg.textContent = `✓ 영수증 ${r.count}건 처리 (기존결제 매칭 ${r.merged}, 새로 ${r.count-r.merged})${r.pages>1?' · '+r.pages+'쪽 PDF':''}`;
-      setTimeout(renderLedger, 1500);
-    } else { msg.textContent = '✗ '+(r.reason||'인식 실패')+(r.pages?` (${r.pages}쪽)`:''); }
-  }catch(err){ msg.textContent='✗ 업로드 실패: '+err.message; }
+  const z=document.getElementById('rcptdrop'); if(z) z.style.background='';
+  [...((e.dataTransfer&&e.dataTransfer.files)||[])].forEach(file=>enqueueDrop({
+    file, msgEl:'rcptmsg', url:'/ledger/receipt', after:renderLedger,
+    done:(r,f)=>r.ok?`✓ ${f.name}: 영수증 ${r.count}건 (매칭 ${r.merged}, 새 ${r.count-r.merged})${r.pages>1?' ·'+r.pages+'쪽':''}`:`✗ ${f.name}: ${r.reason||'인식 실패'}`}));
 }
 // 거래내역 펼침/접기
 function toggleDetail(id){

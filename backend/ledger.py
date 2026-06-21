@@ -400,7 +400,8 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         day = date.today()
     merchant = (fields.get("merchant") or "").strip()
     items_list = [str(i).strip() for i in (fields.get("items") or []) if str(i).strip()][:30]
-    cres = category.classify(merchant, items_list, "")     # 규칙 분류 + 가맹점 보정(쿠팡(주)→쿠팡)
+    platform = (fields.get("platform") or "").strip()      # 영수증의 쇼핑몰(쿠팡 등) — 규칙에 태움
+    cres = category.classify(merchant, items_list, platform)   # 규칙 분류 + 가맹점 보정(쿠팡→쇼핑·가맹점 쿠팡)
     merchant = cres.get("merchant") or merchant
     rtype = "card" if (fields.get("rtype") or "shop").strip().lower() == "card" else "shop"
     # 거래 시점 = 영수증 날짜(있으면) — 없을 때만 올린 시각(ts). 정오로 둬 같은 날 정렬 안정.
@@ -419,6 +420,7 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         "installment": False,
         "memo": (fields.get("memo") or merchant or "영수증").strip(),
         "source": "receipt",
+        "sender": platform,                # 쇼핑몰 플랫폼 — 규칙 재적용·LLM 업그레이드용
         "recurring": False,
         "needs": [] if merchant else ["merchant"],
         "complete": bool(merchant),
