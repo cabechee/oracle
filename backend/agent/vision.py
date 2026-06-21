@@ -126,3 +126,30 @@ def process(
         "comment": (reasoning.get("comment") or "").strip(),
         "suggestion": (reasoning.get("suggestion") or "").strip(),
     }
+
+
+RECEIPT_SYSTEM = """이미지가 영수증·카드전표·거래내역서면 정보를 뽑아 JSON으로, 아니면 is_receipt false.
+보이는 것만 채우고 없는 값은 생략(추측 금지).
+{
+  "is_receipt": true,
+  "merchant": "가맹점/상호명",
+  "total": 12000,            // 총 결제(합계) 금액 — 숫자만
+  "items": ["아메리카노", "샌드위치"],   // 품목(보이면)
+  "date": "2026-06-21",      // 영수증 날짜(YYYY-MM-DD, 보이면)
+  "method": "현대카드"        // 결제수단(카드사·페이 등, 보이면)
+}
+영수증/전표/거래내역이 아니면 {"is_receipt": false} 만 출력."""
+
+
+def extract_receipt(alias: str, images: List[Dict[str, str]]) -> Dict[str, Any]:
+    """이미지에서 영수증/전표 정보 추출 — 가계부용. 영수증 아니면 {is_receipt: false}."""
+    if not alias or not images:
+        return {"is_receipt": False}
+    try:
+        r = llm.call(alias, "이 이미지가 영수증/카드전표/거래내역이면 정보를 JSON으로 뽑아줘.",
+                     images=images, system=RECEIPT_SYSTEM, expect_json=True)
+        out = r.get("json") or _parse_json(r.get("text") or "")
+        return out if isinstance(out, dict) else {"is_receipt": False}
+    except Exception as e:
+        print(f"[vision] 영수증 추출 실패: {e}", flush=True)
+        return {"is_receipt": False}

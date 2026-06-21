@@ -114,6 +114,8 @@ async function loadStats(){
     <span>📅 캘린더</span></a>`;
   $('#nav').innerHTML += `<a data-c="__collected__" class="${CUR==='__collected__'?'active':''}">
     <span>📥 수집 기록</span></a>`;
+  $('#nav').innerHTML += `<a data-c="__ledger__" class="${CUR==='__ledger__'?'active':''}">
+    <span>💰 가계부</span></a>`;
   document.querySelectorAll('nav a').forEach(a =>
     a.onclick = () => { CUR=a.dataset.c; SKIP=0; Q=''; render(); });
 }
@@ -151,6 +153,7 @@ async function render(){
   if(CUR==='__dismissed__') return renderDismissed();
   if(CUR==='__calendar__') return renderCalendar();
   if(CUR==='__collected__') return renderCollected();
+  if(CUR==='__ledger__') return renderLedger();
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
   let data;
@@ -692,6 +695,70 @@ async function del(id, ev){
   try{ await api(`/collection/${CUR}/${encodeURIComponent(id)}`, {method:'DELETE'});
     await loadStats(); render(); }
   catch(e){ alert('삭제 실패: '+e.message); }
+}
+
+// ── 💰 가계부 — 회계 대차대조표 스타일 ──
+let LP = 'month';
+async function renderLedger(){
+  const m = $('#main');
+  m.innerHTML = '<div class="empty">로딩…</div>';
+  let s, inc;
+  try{
+    s = await (await fetch(`/ledger/settlement?period=${LP}`)).json();
+    inc = await (await fetch('/ledger/incomplete')).json();
+  }catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  const won = n => (Number(n)||0).toLocaleString('ko')+'원';
+  const R='text-align:right;font-variant-numeric:tabular-nums';
+  const TB='border-collapse:collapse;width:100%;font-size:13px';
+  const TD='padding:5px 8px;border-bottom:1px solid var(--hair)';
+  const expRows = (s.by_category||[]).length
+    ? s.by_category.map(c=>`<tr><td style="${TD}">${c.name}</td><td style="${TD};${R}">${won(c.amount)}</td></tr>`).join('')
+    : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
+  const incRows = s.income
+    ? `<tr><td style="${TD}">수입(입금·급여 등)</td><td style="${TD};${R}">${won(s.income)}</td></tr>`
+    : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
+  const kv=(label,val)=>`<div style="margin:4px 0;font-size:12.5px"><b style="color:var(--gray)">${label}</b> ${val||'—'}</div>`;
+  const join=(arr,f)=>(arr||[]).map(f).join(' · ');
+  const needs=(inc.items||[]).length
+    ? inc.items.map(it=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
+        <span style="color:var(--faint)">${fmtWhen(it.ts)}</span>
+        <b>${won(it.amount)}</b> <span style="color:var(--gray)">${it.method||''}</span>
+        <input id="mc-${it.id}" placeholder="가맹점" style="width:130px;margin-left:auto">
+        <button onclick="fillLedger('${it.id}')">저장</button></div>`).join('')
+    : '<div style="color:var(--faint);font-size:13px">없음 — 다 확인됨 👍</div>';
+  const netColor = s.net>=0 ? 'var(--vermilion)' : '#999';
+  m.innerHTML = `
+    <div class="bar"><h2>가계부 · ${LP==='month'?'이번 달':'이번 주'} 결산</h2>
+      <span class="hint">${s.start} ~ ${s.end} · ${s.count}건</span>
+      <button onclick="LP='week';renderLedger()" ${LP==='week'?'disabled':''}>주간</button>
+      <button onclick="LP='month';renderLedger()" ${LP==='month'?'disabled':''}>월간</button></div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
+      <table style="${TB};flex:1;min-width:230px"><thead><tr>
+        <th style="${TD};text-align:left">수입</th><th style="${TD};${R}">금액</th></tr></thead>
+        <tbody>${incRows}</tbody>
+        <tfoot><tr><td style="${TD};font-weight:600">수입계</td><td style="${TD};${R};font-weight:600">${won(s.income)}</td></tr></tfoot></table>
+      <table style="${TB};flex:1;min-width:230px"><thead><tr>
+        <th style="${TD};text-align:left">지출 (분류별)</th><th style="${TD};${R}">금액</th></tr></thead>
+        <tbody>${expRows}</tbody>
+        <tfoot><tr><td style="${TD};font-weight:600">지출계</td><td style="${TD};${R};font-weight:600">${won(s.expense)}</td></tr></tfoot></table>
+    </div>
+    <div style="margin:14px 0;font-size:16px;font-weight:600;color:${netColor}">순액 ${s.net>=0?'+':''}${won(s.net)}</div>
+    ${kv('결제수단', join(s.by_method, x=>`${x.name} ${won(x.amount)}`))}
+    ${kv('많이 쓴 곳', join(s.top_merchants, x=>`${x.name} ${won(x.amount)}`))}
+    ${kv('정기결제(추정)', join(s.recurring, x=>`${x.merchant} ${won(x.amount)}`))}
+    <h3 style="margin:20px 0 6px">지출내역 확인필요 ${(inc.items||[]).length?`(${inc.items.length})`:''}</h3>
+    ${needs}`;
+}
+async function fillLedger(id){
+  const el = document.getElementById('mc-'+id);
+  const v = (el.value||'').trim();
+  if(!v) return;
+  el.disabled = true;
+  try{
+    await fetch('/ledger/'+encodeURIComponent(id), {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({merchant:v})});
+    renderLedger();
+  }catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
 }
 
 loadStats();

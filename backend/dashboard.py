@@ -117,9 +117,10 @@ def feed() -> Dict[str, Any]:
     import signals as signals_mod
     digest = signals_mod.today_digest()
 
-    # 2b) 가계부 — 오늘 결제(스마트 액션)
+    # 2b) 가계부 — 오늘 결제(스마트 액션) + 정보 부족분(가맹점 등 '확인필요')
     import ledger as ledger_mod
     today_ledger = ledger_mod.today()
+    ledger_needs = ledger_mod.incomplete()   # 데스크 '지출내역 확인필요'
 
     # 2c) 리마인더 — 자체(미완료)
     import reminders as reminders_mod
@@ -154,12 +155,13 @@ def feed() -> Dict[str, Any]:
         "actions": actions,
         "digest": digest,            # 대신 읽어드림 (발신자별 누적 요약)
         "ledger": today_ledger,      # 가계부 (오늘 결제)
+        "ledger_needs": ledger_needs,  # 지출내역 확인필요 (가맹점 등 부족분)
         "reminders": reminder_list,  # 자체 리마인더
         "calendar": calendar_events,  # 구글 캘린더 다가오는 일정
         "pending_people": pending,
         "today": today_stats,
         "counts": {"actions": len(actions), "pending": len(pending),
-                   "reminders": len(reminder_list)},
+                   "reminders": len(reminder_list), "ledger_needs": len(ledger_needs)},
     }
 
 

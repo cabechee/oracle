@@ -197,10 +197,12 @@ def run_weekly(target: Optional[date] = None) -> Dict[str, Any]:
 
     reactions = _sum_reactions(day_journals)
     record_count = sum(int(j.get("record_count") or 0) for j in day_journals)
+    import ledger as ledger_mod
+    settle = ledger_mod.settlement_material("week", monday)
     body = _make_period_journal(
         WEEKLY_JOURNAL_SYSTEM, f"# {label} 주간 회고",
         f"{label} ({monday.isoformat()}~{(end - timedelta(days=1)).date().isoformat()})",
-        day_journals, reactions, "weekly_journal",
+        day_journals, reactions, "weekly_journal", settle,
     )
     _write_period_vault(jid, body)
     embedded = _upsert_journal(jid, "week", label, start, end, body, record_count, reactions)
@@ -228,9 +230,11 @@ def run_monthly(target: Optional[date] = None) -> Dict[str, Any]:
 
     reactions = _sum_reactions(day_journals)
     record_count = sum(int(j.get("record_count") or 0) for j in day_journals)
+    import ledger as ledger_mod
+    settle = ledger_mod.settlement_material("month", month_first)
     body = _make_period_journal(
         MONTHLY_JOURNAL_SYSTEM, f"# {label} 월간 회고", label,
-        day_journals + week_journals, reactions, "monthly_journal",
+        day_journals + week_journals, reactions, "monthly_journal", settle,
     )
     _write_period_vault(jid, body)
     embedded = _upsert_journal(jid, "month", label, start, end, body, record_count, reactions)
@@ -267,8 +271,9 @@ def _make_period_journal(
     journals: List[Dict[str, Any]],
     reactions: Dict[str, int],
     alias_key: str,
+    settlement: str = "",
 ) -> str:
-    """일/주 저널 재료 → 주/월 회고 본문(header 포함)."""
+    """일/주 저널 재료 → 주/월 회고 본문(header 포함). settlement=가계부 결산(있으면 녹임)."""
     alias = resolve_alias(alias_key) or resolve_alias("daily_digest")
     if not alias:
         return f"{header}\n\n(회고 alias 미설정 — Nest에 enabled 모델 없음)\n"
@@ -279,6 +284,10 @@ def _make_period_journal(
             parts.append(t)
     if reactions and sum(reactions.values()) > 0:
         parts.append(f"\n## 👍 이 기간 이모지 반응 집계\n{json.dumps(reactions, ensure_ascii=False)}")
+    if settlement:
+        parts.append("\n## 💰 이 기간 가계부 결산 (회고 끝에 소비 흐름을 자연스럽게 한두 줄로 "
+                     "짚어줘 — 숫자 나열 말고 눈에 띄는 것 한둘. 예: '이번 달은 외식이 늘었네요')\n"
+                     + settlement)
     prompt = "\n\n".join(parts) + "\n\n위 저널들로 회고를 서술하세요(압축 요약 금지, 회고+피드백)."
     try:
         r = llm.call(alias, prompt, system=system, timeout=_DIGEST_TIMEOUT)
