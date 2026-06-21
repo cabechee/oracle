@@ -104,6 +104,19 @@ def run_evening(target: Optional[date] = None) -> Dict[str, Any]:
     if briefs:
         parts.append("\n".join(briefs[:12]))
 
+    try:
+        import ledger as ledger_mod
+        pays = [it for it in ledger_mod.today(today).get("items", [])
+                if it.get("kind") != "income"]
+    except Exception:
+        pays = []
+    if pays:
+        parts.append(
+            "[오늘 아빠가 결제한 내역 — 아빠가 낸 돈. 식사·외출이 이 결제와 맞물리면 아빠가 "
+            "낸 것(혼자면 사 먹은 것, 일행 있으면 대접한 것)이지 '대접받은' 게 아니다]\n"
+            + "\n".join(f"- {it.get('merchant') or it.get('memo') or '결제'} "
+                        f"{it.get('amount', 0):,}원" for it in pays))
+
     return _compose("evening", today, parts, personas.evening_system())
 
 
