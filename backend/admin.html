@@ -725,7 +725,6 @@ async function renderLedger(){
         const inc2 = it.kind==='income';
         const desc = it.merchant || it.memo || (inc2?'입금':'결제');
         const tag = (it.needs&&it.needs.length)?' <span style="color:var(--vermilion);font-size:11px">확인필요</span>':'';
-        const cat = it.category?` <span style="color:var(--faint);font-size:11px">${it.category}</span>`:'';
         const imgs = it.receipt_images||[];
         const parts = it.amount_parts||[];
         const diffTag = it.diff?` <span style="color:#fff;background:var(--vermilion);font-size:10.5px;padding:1px 5px;border-radius:3px" title="영수증 금액 불일치 — 펼쳐서 판독">🔺 금액다름</span>`:'';
@@ -736,7 +735,8 @@ async function renderLedger(){
         const rcptBtn = ` <label style="cursor:pointer" title="이 건에 영수증 올리기" onclick="event.stopPropagation()">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`;
         const main = `<tr style="cursor:${hasDetail?'pointer':'default'}" ${hasDetail?`onclick="toggleDetail('${it.id}')"`:''}>
           <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
-          <td style="${TD}">${chev}${desc}${diffTag}${sumTag}${tag}${cat}${cam}${rcptBtn}</td>
+          <td style="${TD}">${chev}${desc}${diffTag}${sumTag}${tag}${cam}${rcptBtn}</td>
+          <td style="${TD};color:var(--gray);white-space:nowrap;font-size:12px">${it.category||'<span style="color:var(--faint)">—</span>'}</td>
           <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
           <td style="${TD};${R};color:${(inc2||it.diff)?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
         let detail='';
@@ -750,11 +750,11 @@ async function renderLedger(){
               ${parts.map(p=>`<button onclick="resolveDiff('${it.id}',${p})" style="margin:2px 5px 2px 0">${won(p)}</button>`).join('')}
               <input id="df-${it.id}" type="number" placeholder="직접 입력" style="width:110px">
               <button onclick="resolveDiff('${it.id}',document.getElementById('df-${it.id}').value)">확정</button></div>`:'';
-          detail = `<tr id="det-${it.id}" style="display:none"><td colspan="4" style="padding:2px 12px 12px 28px;border-top:none">${apprTxt}${sumTxt}${itemsTxt}${thumbs}${diffUI}</td></tr>`;
+          detail = `<tr id="det-${it.id}" style="display:none"><td colspan="5" style="padding:2px 12px 12px 28px;border-top:none">${apprTxt}${sumTxt}${itemsTxt}${thumbs}${diffUI}</td></tr>`;
         }
         return main+detail;
       }).join('')
-    : `<tr><td style="${TD};color:var(--faint)" colspan="4">거래내역 없음</td></tr>`;
+    : `<tr><td style="${TD};color:var(--faint)" colspan="5">거래내역 없음</td></tr>`;
   // 확인필요 = 거래내역(이번 기간)에서 needs 있는 것 그대로 — 위 태그와 정확히 일치
   const incItems=(list.items||[]).filter(it=>it.needs&&it.needs.length).slice().reverse();
   const needs= incItems.length
@@ -797,6 +797,7 @@ async function renderLedger(){
     <h3 style="margin:22px 0 6px">거래내역 (장부 · ${(list.items||[]).length}건)</h3>
     <table style="${TB}"><thead><tr>
       <th style="${TD};text-align:left">날짜</th><th style="${TD};text-align:left">내역</th>
+      <th style="${TD};text-align:left">분류</th>
       <th style="${TD};text-align:left">결제수단</th><th style="${TD};${R}">금액</th></tr></thead>
       <tbody>${txRows}</tbody></table>
     <h3 style="margin:22px 0 6px">지출내역 확인필요 ${incItems.length?`(${incItems.length})`:''}</h3>

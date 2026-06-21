@@ -204,6 +204,24 @@ def test_set_fields_completes(monkeypatch):
     assert d["merchant"] == "올리브영" and d["needs"] == [] and d["complete"] is True
 
 
+def test_set_fields_auto_categorizes(monkeypatch):
+    # 가맹점 채우면(타이핑) 분류도 자동 계산
+    fake = _FakeLedger([{"_id": "p", "kind": "expense", "amount": 6000, "merchant": "",
+                         "needs": ["merchant"], "complete": False, "items": []}])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.set_fields("p", {"merchant": "스타벅스"})
+    assert fake.docs[0]["category"] == "카페"
+
+
+def test_attach_receipt_categorizes(monkeypatch):
+    # 영수증으로 채우면 가맹점·품목으로 분류 계산
+    fake = _FakeLedger([{"_id": "p", "kind": "expense", "amount": 12000, "merchant": "",
+                         "needs": ["merchant"], "complete": False}])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.attach_receipt("p", {"merchant": "스타벅스", "items": ["아메리카노"]})
+    assert fake.docs[0]["category"] == "카페"
+
+
 def test_approval_extraction():
     assert ledger._approval_of("현대카드 승인번호 12345678 6,000원 승인") == "12345678"
     assert ledger._approval_of("스타벅스 6,000원 승인") == ""   # 번호 없으면 빈값

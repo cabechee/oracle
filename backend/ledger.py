@@ -538,6 +538,8 @@ def set_fields(pay_id: str, fields: Dict[str, Any]) -> bool:
     if not upd:
         return False
     merged = {**r, **upd}
+    if upd.get("merchant") and not upd.get("category"):     # 가맹점 채우면 분류도 자동
+        upd["category"] = _category_of(upd["merchant"], " ".join(merged.get("items") or []) or upd["merchant"])
     needs = [] if (merged.get("kind") == "income" or merged.get("merchant")) else ["merchant"]
     upd["needs"] = needs
     upd["complete"] = not needs
@@ -586,8 +588,9 @@ def attach_receipt(pay_id: str, fields: Dict[str, Any]) -> Optional[Dict[str, An
             imgs.append(im)                                # 여러 장 누적(쇼핑몰+카드전표)
         upd["receipt_images"] = imgs
     merged_merchant = upd.get("merchant") or r.get("merchant")
-    if merged_merchant and not r.get("category"):
-        upd["category"] = _category_of(merged_merchant, " ".join(items) or merged_merchant)
+    if merged_merchant:        # 영수증의 가맹점·품목으로 항상 재분류(더 정확한 정보가 들어왔으니)
+        blob = " ".join(items or r.get("items") or []) or merged_merchant
+        upd["category"] = _category_of(merged_merchant, blob)
     is_income = r.get("kind") == "income"
     upd["needs"] = [] if (is_income or merged_merchant) else ["merchant"]
     upd["complete"] = not upd["needs"]
