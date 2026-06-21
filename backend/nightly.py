@@ -33,6 +33,11 @@ def run_nightly() -> Dict[str, Any]:
         out["category"] = category.upgrade(alias)
     except Exception as e:
         out["category"] = {"ok": False, "error": str(e)}
+    try:                       # 발견 — 메뉴별 하루 1회 LLM 인사이트
+        import discovery
+        out["discovery"] = discovery.generate_all()
+    except Exception as e:
+        out["discovery"] = {"ok": False, "error": str(e)}
     today = date.today()
     if today.weekday() == 0:   # 월요일 = 지난 주(월~일) 완료
         try:

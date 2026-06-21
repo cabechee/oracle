@@ -112,6 +112,11 @@ def category_rules() -> Collection:
     return _conn().category_rules
 
 
+def discoveries() -> Collection:
+    """발견 — 하루 1회 메뉴별 LLM 인사이트(어드민 상단 quote + 발견 로그)."""
+    return _conn().discoveries
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:

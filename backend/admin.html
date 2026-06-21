@@ -83,6 +83,11 @@
   .hc .sub{font-size:12px;color:var(--gray);margin-top:5px;line-height:1.55}
   .hc ul{margin:6px 0 0;padding-left:0;list-style:none}
   .hc li{font-size:12.5px;padding:2px 0;color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 발견 quote (메뉴 상단) */
+  .quote{display:flex;align-items:flex-start;gap:11px;background:#FBF1EE;border:1px solid #EBD7D1;
+    border-left:3px solid var(--vermilion);border-radius:10px;padding:12px 15px;margin-bottom:18px;font-size:13.5px;line-height:1.62}
+  .quote .qx{flex:1;color:var(--soft)}
+  .quote button{flex-shrink:0;font-size:11.5px;padding:3px 11px}
 </style>
 </head>
 <body>
@@ -97,7 +102,7 @@
       <div class="gsearch"><input id="gsearch" placeholder="기록·신호 검색 (Enter)"
         onkeydown="if(event.key==='Enter'){go('col:records');setTimeout(()=>{Q=this.value;SKIP=0;render()},0)}"></div>
     </div>
-    <div class="body"><div id="main"><div class="empty">로딩…</div></div></div>
+    <div class="body"><div id="disco"></div><div id="main"><div class="empty">로딩…</div></div></div>
   </main>
 </div>
 <script>
@@ -111,7 +116,8 @@ const NAV = [
   {grp:'기능', items:[{id:'__ledger__', label:'💰 가계부'}, {id:'__calendar__', label:'📅 캘린더'}]},
   {grp:'기록', items:[{id:'col:records', label:KNOWN.records}, {id:'col:signals', label:KNOWN.signals},
                       {id:'col:journals', label:KNOWN.journals}, {id:'col:conversations', label:KNOWN.conversations},
-                      {id:'__collected__', label:'📍 활동 로그'}, {id:'__dismissed__', label:'🗂 확인함'}]},
+                      {id:'__collected__', label:'📍 활동 로그'}, {id:'__dismissed__', label:'🗂 확인함'},
+                      {id:'__discovery__', label:'✨ 발견'}]},
   {grp:'설정', items:[{id:'__companion__', label:'🐾 동반자'}, {id:'__location__', label:'📡 위치·수집'},
                       {id:'__models__', label:'🧠 모델'}, {id:'__excludes__', label:'🔕 신호 제외'}]},
 ];
@@ -175,8 +181,27 @@ async function rebrief(btn){
 }
 
 // ── 디스패치 ──
+function discoMenu(cur){
+  const map={'__home__':'home','__ledger__':'ledger','__calendar__':'calendar','__collected__':'collected'};
+  if(map[cur]) return map[cur];
+  if(cur.startsWith('col:')){ const n=cur.slice(4); if(['records','signals','journals','conversations'].includes(n)) return n; }
+  return '';
+}
+async function loadDiscovery(menuKey){
+  const d=document.getElementById('disco'); if(!d) return;
+  if(!menuKey){ d.innerHTML=''; return; }
+  try{ const r=await(await fetch('/discovery/'+menuKey)).json();
+    d.innerHTML=(r&&r.text)?`<div class="quote">✨<span class="qx">${esc(r.text)}</span><button onclick="dismissDisco('${menuKey}')">확인</button></div>`:'';
+  }catch(e){ d.innerHTML=''; }
+}
+async function dismissDisco(menuKey){
+  const d=document.getElementById('disco'); if(d) d.innerHTML='';
+  try{ await fetch('/discovery/'+menuKey+'/dismiss',{method:'POST'}); }catch(e){}
+}
 async function render(){
+  loadDiscovery(discoMenu(CUR));   // 메뉴 상단 발견 quote (비동기, 독립)
   const grpOf = id => (NAV.find(g=>g.items.some(i=>i.id===id))||{}).grp || '';
+  if(CUR==='__discovery__'){ crumb('기록','발견'); return renderDiscoveryLog(); }
   if(CUR==='__home__'){ crumb('','홈'); return renderHome(); }
   if(CUR==='__ledger__'){ crumb('기능','가계부'); return renderLedger(); }
   if(CUR==='__calendar__'){ crumb('기능','캘린더'); return renderCalendar(); }
@@ -235,6 +260,25 @@ async function renderHome(){
       :`<div class="kpi" style="font-size:15px;color:var(--gray)">없음</div>`}</div>`);
   m.innerHTML = `<div class="bar"><h2>오늘 한눈에</h2><span class="total">${new Date().toLocaleDateString('ko',{month:'long',day:'numeric',weekday:'long'})}</span></div>
     <div class="cards">${cards.join('')}</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  기록: 발견 로그
+// ══════════════════════════════════════════════════════════════
+async function renderDiscoveryLog(){
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d; try{ d=await(await fetch('/discovery/log')).json(); }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  const items=d.items||[];
+  m.innerHTML=`<div class="bar"><h2>발견</h2><span class="total">하루 1회 메뉴별 인사이트 · ${items.length}건</span>
+      <button onclick="runDisco(this)">지금 생성</button></div>`+
+    (items.length?items.map(it=>`<div class="pf" style="padding:12px 15px">
+      <div class="hint" style="margin-bottom:5px">${it.date} · ${esc(it.label)}${it.dismissed?' · <span class="faint">확인함</span>':''}</div>
+      <div style="font-size:13.5px;line-height:1.62">✨ ${esc(it.text)}</div></div>`).join('')
+    :'<div class="empty">아직 발견 없음 — 자정 배치 또는 \'지금 생성\'</div>');
+}
+async function runDisco(btn){ btn.disabled=true; btn.textContent='생성 중…';
+  try{ const r=await(await fetch('/discovery/run',{method:'POST'})).json(); btn.textContent=`${r.generated}개 생성`; setTimeout(renderDiscoveryLog,1200); }
+  catch(e){ alert('실패: '+e.message); btn.disabled=false; }
 }
 
 // ══════════════════════════════════════════════════════════════
