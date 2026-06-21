@@ -19,8 +19,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import db
 
 _AMOUNT = re.compile(r"(\d[\d,]*)\s*원")          # 1원~ 한 자리도(작은 건 parse에서 노이즈로 거름)
-# 잔액/잔고(running balance) — 거래 금액 아님. 금액 추출 전에 떼낸다.
-_BALANCE = re.compile(r"(?:잔액|잔고|balance)\s*[:\s]*[\d,]+\s*원", re.I)
+# 잔액·누적·한도 등(running balance/누계) — 거래 금액 아님. 금액 추출 전에 떼낸다.
+_BALANCE = re.compile(
+    r"(?:잔액|잔고|balance|누적|누계|이용\s*한도|한도|이번\s*달|당월|사용\s*액)\s*[:\s]*[\d,]+\s*원",
+    re.I)
 _INCOME = re.compile(r"입금|급여|월급|상여|들어왔|받았")            # 돈 들어옴(수입)
 _OUT = re.compile(r"승인|결제|출금|구매|결제완료|납부|송금")        # 돈 나감(지출); 이체는 방향 따로
 # 비지출 오탐(적립·쿠폰·환급·광고 등) — 실제 입금은 '입금'으로 따로 들어옴
@@ -104,14 +106,25 @@ def _merchant_of(summary: str) -> str:
 def _amount_of(summary: str, text: str) -> Optional[int]:
     """거래 금액 — '잔액/잔고'(running balance)는 빼고 첫 금액. 못 찾으면 None.
     예) '예금이자 4원 입금됨, 잔액 19,237원' → 4 (잔액 19,237 아님)."""
-    for src in (summary, text):
-        m = _AMOUNT.search(_BALANCE.sub(" ", src or ""))
-        if m:
-            try:
-                return int(m.group(1).replace(",", ""))
-            except ValueError:
-                continue
-    return None
+    a = _all_amounts(summary, text)
+    return a[0] if a else None
+
+
+def _all_amounts(summary: str, text: str) -> List[int]:
+    """거래 금액 전부(>=100, 중복 제거) — 잔액·누적·한도 제외.
+    한 알림에 'A원·B원 두 건'이면 [A, B] (건마다 따로 기록)."""
+    src = _BALANCE.sub(" ", summary or "")
+    if not _AMOUNT.search(src):
+        src = _BALANCE.sub(" ", text or "")
+    out: List[int] = []
+    for m in _AMOUNT.finditer(src):
+        try:
+            v = int(m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        if v >= 100 and v not in out:
+            out.append(v)
+    return out
 
 
 # ── 파싱: 신호 한 줄 → 수입/지출 구조 ────────────────────────────
@@ -202,6 +215,8 @@ def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[st
         out["signal_ids"] = sids
     if incoming.get("record_id"):
         out["record_id"] = incoming["record_id"]
+    if incoming.get("receipt_image"):
+        out["receipt_image"] = incoming["receipt_image"]   # 영수증 사진 — merge 후에도 보존
     # needs 재계산 — 합친 뒤에도 비어 있는 필수만
     merged_merchant = out.get("merchant") or existing.get("merchant")
     is_income = "income" in (existing.get("kind"), incoming.get("kind"))
@@ -242,15 +257,19 @@ def sync_from_briefs(target: Optional[date] = None) -> int:
     for b in db.signal_briefs().find({"ts": {"$gte": t0, "$lte": t1}}):
         ts = b.get("ts")
         for it in b.get("items", []):
-            p = parse_payment(it.get("sender", ""), it.get("summary", ""))
+            sender, summary = it.get("sender", ""), it.get("summary", "")
+            p = parse_payment(sender, summary)
             if not p:
                 continue
             sids = [s for s in (it.get("signal_ids") or []) if s]
-            key = sids[0] if sids else f"{b['_id']}-{(it.get('summary') or '')[:16]}"
-            doc = {"_id": f"pay-{key}", "date": target.isoformat(), "ts": ts,
-                   "signal_ids": sids, **p}
-            if _merge_or_insert(doc) in ("inserted", "merged"):
-                n += 1
+            key = sids[0] if sids else f"{b['_id']}-{(summary or '')[:16]}"
+            amts = _all_amounts(summary, f"{sender} {summary}") or [p["amount"]]
+            for a in amts:                     # 한 알림에 'A원·B원 두 건'이면 건마다 따로
+                pid = f"pay-{key}" if len(amts) == 1 else f"pay-{key}-{a}"
+                doc = {"_id": pid, "date": target.isoformat(), "ts": ts,
+                       "signal_ids": sids, **p, "amount": a}
+                if _merge_or_insert(doc) in ("inserted", "merged"):
+                    n += 1
     return n
 
 
@@ -286,6 +305,7 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         "needs": [] if merchant else ["merchant"],
         "complete": bool(merchant),
         "record_id": record_id,
+        "receipt_image": (fields.get("image") or "").strip(),   # vault 상대경로 — 나중에 열람
     }
     return _merge_or_insert(doc)
 
@@ -306,6 +326,7 @@ def _row_view(r: Dict[str, Any]) -> Dict[str, Any]:
         "complete": bool(r.get("complete", True)),
         "needs": r.get("needs", []),
         "source": r.get("source", "notification"),
+        "receipt_image": r.get("receipt_image", ""),   # 있으면 /photos/{경로}로 열람
         "ts": r["ts"].isoformat() if isinstance(r.get("ts"), datetime) else None,
     }
 

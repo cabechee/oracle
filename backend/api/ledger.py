@@ -60,32 +60,25 @@ async def ep_receipt(file: UploadFile = File(...)):
     data = await file.read()
     if not data:
         raise HTTPException(400, "빈 파일")
-    suffix = os.path.splitext(file.filename or "")[1] or ".jpg"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    try:
-        tmp.write(data)
-        tmp.close()
-        import ingest
-        import nest_client
-        from agent import vision
-        alias = ingest._resolve_alias("vision", None, prefer_vision=True,
-                                      fallback_key="insight")
-        images = nest_client.images_from_paths([tmp.name])
-        f = vision.extract_receipt(alias, images)
-        if not (isinstance(f, dict) and f.get("is_receipt") and f.get("total")):
-            return {"ok": False, "reason": "영수증으로 인식하지 못했어요", "extracted": f}
-        h = hashlib.sha1(data).hexdigest()[:12]
-        res = ledger_mod.from_receipt(f"receipt-drop-{h}", datetime.datetime.now(), {
-            "amount": f.get("total"), "merchant": f.get("merchant"),
-            "items": f.get("items"), "date": f.get("date"), "method": f.get("method"),
-        })
-        return {"ok": True, "result": res, "merchant": f.get("merchant"),
-                "amount": f.get("total"), "method": f.get("method"), "items": f.get("items")}
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
+    import corpus
+    import ingest
+    import nest_client
+    from agent import vision
+    now = datetime.datetime.now()
+    ext = os.path.splitext(file.filename or "")[1].lstrip(".") or "jpg"
+    abs_path = corpus.save_image(now, 1, data, ext)        # vault에 영구 저장(나중에 열람)
+    vault_rel = corpus.to_vault_rel(abs_path)
+    alias = ingest._resolve_alias("vision", None, prefer_vision=True, fallback_key="insight")
+    f = vision.extract_receipt(alias, nest_client.images_from_paths([abs_path]))
+    if not (isinstance(f, dict) and f.get("is_receipt") and f.get("total")):
+        return {"ok": False, "reason": "영수증으로 인식하지 못했어요",
+                "image": vault_rel, "extracted": f}
+    h = hashlib.sha1(data).hexdigest()[:12]
+    res = ledger_mod.from_receipt(f"receipt-drop-{h}", now, {
+        "amount": f.get("total"), "merchant": f.get("merchant"), "items": f.get("items"),
+        "date": f.get("date"), "method": f.get("method"), "image": vault_rel})
+    return {"ok": True, "result": res, "merchant": f.get("merchant"), "amount": f.get("total"),
+            "method": f.get("method"), "items": f.get("items"), "image": vault_rel}
 
 
 class FieldsIn(BaseModel):

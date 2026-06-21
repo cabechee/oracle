@@ -95,6 +95,12 @@ def test_parse_excludes_balance():
     assert ledger.parse_payment("신한카드", "출금 50,000원 잔액 19,237원")["amount"] == 50000
 
 
+def test_all_amounts_multi():
+    # 한 알림에 두 건이면 둘 다, 잔액·누적은 제외
+    assert ledger._all_amounts("31,800원·23,800원 두 건 승인됨", "현대카드 31,800원·23,800원") == [31800, 23800]
+    assert ledger._all_amounts("출금 50,000원 잔액 19,237원 누적 200,000원", "x") == [50000]
+
+
 def test_parse_needs_merchant():
     p = ledger.parse_payment("현대카드", "the Pink 19,000원 승인")
     assert p["kind"] == "expense" and p["merchant"] == "" and p["needs"] == ["merchant"]

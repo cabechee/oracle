@@ -419,6 +419,7 @@ def _maybe_ledger_receipt(ctx: Dict[str, Any], alias: str, images, analysis, cap
     res = ledger_mod.from_receipt(ctx["record_id"], ctx.get("ts"), {
         "amount": f.get("total"), "merchant": f.get("merchant"),
         "items": f.get("items"), "date": f.get("date"), "method": f.get("method"),
+        "image": (ctx.get("image_paths") or [None])[0],   # 기록 사진 — 가계부서 열람
     })
     print(f"[ingest] 영수증→가계부({res}): {f.get('merchant')} {f.get('total')}원", flush=True)
 
