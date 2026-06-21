@@ -750,6 +750,7 @@ async function renderLedger(){
     style="border:1.5px dashed var(--hair);border-radius:6px;padding:16px;text-align:center;
            color:var(--gray);font-size:13px;margin:6px 0">
     📄 영수증을 여기로 드래그&드랍 — 알아서 인식해서 결제내역에 매칭합니다
+    <div style="color:var(--faint);font-size:11.5px;margin-top:3px">PDF·여러 장 묶음도 OK (페이지마다 따로 처리)</div>
     <div id="rcptmsg" style="color:var(--faint);font-size:12px;margin-top:6px"></div></div>`;
   const netColor = s.net>=0 ? 'var(--vermilion)' : '#999';
   m.innerHTML = `
@@ -791,9 +792,9 @@ async function dropReceipt(e){
   try{
     const r = await (await fetch('/ledger/receipt', {method:'POST', body: fd})).json();
     if(r.ok){
-      msg.textContent = `✓ ${r.merchant||'가맹점?'} ${(Number(r.amount)||0).toLocaleString('ko')}원 — ${r.result==='merged'?'기존 결제에 매칭됨':'새로 기록'}`;
-      setTimeout(renderLedger, 1400);
-    } else { msg.textContent = '✗ '+(r.reason||'인식 실패'); }
+      msg.textContent = `✓ 영수증 ${r.count}건 처리 (기존결제 매칭 ${r.merged}, 새로 ${r.count-r.merged})${r.pages>1?' · '+r.pages+'쪽 PDF':''}`;
+      setTimeout(renderLedger, 1500);
+    } else { msg.textContent = '✗ '+(r.reason||'인식 실패')+(r.pages?` (${r.pages}쪽)`:''); }
   }catch(err){ msg.textContent='✗ 업로드 실패: '+err.message; }
 }
 async function fillLedger(id){

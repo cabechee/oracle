@@ -51,10 +51,28 @@ def ep_incomplete():
     return {"items": ledger_mod.incomplete()}
 
 
+def _pdf_to_pngs(data: bytes, max_pages: int = 30, dpi: int = 150) -> list:
+    """PDF 바이트 → 페이지별 PNG 바이트. pymupdf(fitz) 사용. 실패/미설치면 []."""
+    try:
+        import fitz
+    except Exception:
+        return []
+    out = []
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+        for i in range(min(doc.page_count, max_pages)):
+            out.append(doc[i].get_pixmap(dpi=dpi).tobytes("png"))
+        doc.close()
+    except Exception as e:
+        print(f"[ledger] PDF 변환 실패: {e}", flush=True)
+    return out
+
+
 @router.post("/ledger/receipt")
 async def ep_receipt(file: UploadFile = File(...)):
-    """영수증 이미지 드롭 → 비전 인식 → 가계부 매칭(merge). 어드민 드래그&드랍용.
+    """영수증 드롭 → 비전 인식 → 가계부 매칭(merge). 어드민 드래그&드랍용.
 
+    **PDF(여러 장 묶음)·여러 영수증** 지원: 페이지별로 변환해 각 영수증을 따로 매칭/기록.
     같은 금액·날짜의 카드알림이 있으면 합쳐 보강, 없으면 새 항목.
     """
     data = await file.read()
@@ -65,20 +83,39 @@ async def ep_receipt(file: UploadFile = File(...)):
     import nest_client
     from agent import vision
     now = datetime.datetime.now()
-    ext = os.path.splitext(file.filename or "")[1].lstrip(".") or "jpg"
-    abs_path = corpus.save_image(now, 1, data, ext)        # vault에 영구 저장(나중에 열람)
-    vault_rel = corpus.to_vault_rel(abs_path)
+    fname = (file.filename or "").lower()
+    is_pdf = fname.endswith(".pdf") or data[:5] == b"%PDF-"
+    # 페이지(또는 단일 이미지)별로 vault에 저장
+    pages = []   # [(vault_rel, abs_path)]
+    if is_pdf:
+        pngs = _pdf_to_pngs(data)
+        if not pngs:
+            raise HTTPException(400, "PDF를 이미지로 변환하지 못했어요(pymupdf 필요)")
+        for i, pb in enumerate(pngs, 1):
+            ap = corpus.save_image(now, i, pb, "png")
+            pages.append((corpus.to_vault_rel(ap), ap))
+    else:
+        ext = os.path.splitext(fname)[1].lstrip(".") or "jpg"
+        ap = corpus.save_image(now, 1, data, ext)
+        pages.append((corpus.to_vault_rel(ap), ap))
     alias = ingest._resolve_alias("vision", None, prefer_vision=True, fallback_key="insight")
-    f = vision.extract_receipt(alias, nest_client.images_from_paths([abs_path]))
-    if not (isinstance(f, dict) and f.get("is_receipt") and f.get("total")):
-        return {"ok": False, "reason": "영수증으로 인식하지 못했어요",
-                "image": vault_rel, "extracted": f}
-    h = hashlib.sha1(data).hexdigest()[:12]
-    res = ledger_mod.from_receipt(f"receipt-drop-{h}", now, {
-        "amount": f.get("total"), "merchant": f.get("merchant"), "items": f.get("items"),
-        "date": f.get("date"), "method": f.get("method"), "image": vault_rel})
-    return {"ok": True, "result": res, "merchant": f.get("merchant"), "amount": f.get("total"),
-            "method": f.get("method"), "items": f.get("items"), "image": vault_rel}
+    h = hashlib.sha1(data).hexdigest()[:10]
+    results = []
+    idx = 0
+    for vault_rel, ap in pages:        # 페이지마다 영수증 전부 추출(한 장에 여러 건도)
+        for rc in vision.extract_receipts(alias, nest_client.images_from_paths([ap])):
+            res = ledger_mod.from_receipt(f"receipt-drop-{h}-{idx}", now, {
+                "amount": rc.get("total"), "merchant": rc.get("merchant"),
+                "items": rc.get("items"), "date": rc.get("date"),
+                "method": rc.get("method"), "image": vault_rel})
+            results.append({"merchant": rc.get("merchant"), "amount": rc.get("total"),
+                            "result": res})
+            idx += 1
+    if not results:
+        return {"ok": False, "reason": "영수증을 찾지 못했어요", "pages": len(pages)}
+    merged = sum(1 for r in results if r["result"] == "merged")
+    return {"ok": True, "count": len(results), "merged": merged,
+            "pages": len(pages), "items": results}
 
 
 @router.post("/ledger/{pay_id}/receipt")

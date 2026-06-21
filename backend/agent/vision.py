@@ -153,3 +153,28 @@ def extract_receipt(alias: str, images: List[Dict[str, str]]) -> Dict[str, Any]:
     except Exception as e:
         print(f"[vision] 영수증 추출 실패: {e}", flush=True)
         return {"is_receipt": False}
+
+
+RECEIPTS_SYSTEM = """이미지에서 영수증·카드전표·거래내역을 **전부** 찾아 각각 JSON으로.
+한 장에 여러 건이 있으면 모두(묶음 영수증·여러 장 스캔 등). 보이는 것만 채우고 추측 금지.
+{"receipts": [
+  {"merchant": "상호명", "total": 12000, "items": ["아메리카노"], "date": "2026-06-21", "method": "현대카드"}
+]}
+영수증이 하나도 없으면 {"receipts": []}. total(합계 금액)이 없는 건 빼라."""
+
+
+def extract_receipts(alias: str, images: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """이미지에서 영수증을 **전부** 추출 — 묶음/여러 건 지원. [{merchant,total,items,date,method}, ...]."""
+    if not alias or not images:
+        return []
+    try:
+        r = llm.call(alias, "이미지에서 영수증/전표를 전부 찾아 JSON으로 뽑아줘.",
+                     images=images, system=RECEIPTS_SYSTEM, expect_json=True)
+        out = r.get("json") or _parse_json(r.get("text") or "")
+        recs = out.get("receipts") if isinstance(out, dict) else None
+        if not isinstance(recs, list):
+            return []
+        return [x for x in recs if isinstance(x, dict) and x.get("total")]
+    except Exception as e:
+        print(f"[vision] 영수증(복수) 추출 실패: {e}", flush=True)
+        return []
