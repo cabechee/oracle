@@ -6,906 +6,638 @@
 <title>Oracle 어드민</title>
 <style>
   :root{
-    --paper:#FAF9F6; --ink:#161411; --gray:#9A948A; --faint:#C9C4BA;
-    --hair:#E5E2DA; --mat:#fff; --vermilion:#BC4B33; --soft:#211E19;
+    --paper:#FAF9F6; --ink:#1A1714; --gray:#8E887C; --faint:#BDB7AC;
+    --hair:#E7E3DB; --mat:#FFFFFF; --vermilion:#BC4B33; --soft:#26221C;
+    --hi:#F2F0EA; --shadow:0 1px 2px rgba(30,24,16,.05);
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--paper);color:var(--ink);
-    font-family:-apple-system,'Pretendard',system-ui,sans-serif;font-size:14px;line-height:1.5}
-  header{padding:18px 24px;border-bottom:1px solid var(--hair);display:flex;
-    align-items:baseline;gap:14px;position:sticky;top:0;background:var(--paper);z-index:5}
-  header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:-.3px}
-  header .sub{color:var(--gray);font-size:12px}
-  .wrap{display:flex;min-height:calc(100vh - 59px)}
-  nav{width:200px;border-right:1px solid var(--hair);padding:16px 0;flex-shrink:0}
-  nav a{display:flex;justify-content:space-between;padding:9px 24px;cursor:pointer;
-    color:var(--soft);text-decoration:none;border-left:2px solid transparent}
-  nav a:hover{background:#F2F0EB}
-  nav a.active{border-left-color:var(--vermilion);color:var(--ink);font-weight:600;background:#F2F0EB}
-  nav a .n{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
-  main{flex:1;padding:20px 24px;overflow:auto}
-  .bar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
-  .bar h2{font-size:15px;margin:0;font-weight:600}
+    font:14px/1.5 -apple-system,'Pretendard',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  /* ── 레이아웃 ── */
+  .app{display:grid;grid-template-columns:214px 1fr;min-height:100vh}
+  aside{border-right:1px solid var(--hair);position:sticky;top:0;height:100vh;overflow:auto;padding:14px 0}
+  .brand{padding:4px 18px 12px;display:flex;align-items:baseline;gap:8px}
+  .brand b{font-size:15px;letter-spacing:-.3px}
+  .brand i{font-size:11px;color:var(--gray);font-style:normal}
+  .grp{margin:13px 0 3px;padding:0 20px;font-size:10.5px;letter-spacing:.07em;color:var(--faint);font-weight:700}
+  .navi{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:1px 8px;
+    padding:7px 12px;border-radius:8px;cursor:pointer;color:var(--soft);font-size:13.5px}
+  .navi:hover{background:var(--hi)}
+  .navi.on{background:var(--ink);color:var(--paper);font-weight:600}
+  .navi .c{color:var(--faint);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .navi.on .c{color:var(--paper);opacity:.65}
+  main{min-width:0;display:flex;flex-direction:column}
+  .top{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:1px solid var(--hair);
+    padding:13px 26px;display:flex;align-items:center;gap:14px}
+  .crumb{font-size:12.5px;color:var(--gray);display:flex;align-items:baseline;gap:7px}
+  .crumb b{color:var(--ink);font-weight:600;font-size:15.5px;letter-spacing:-.2px}
+  .gsearch{margin-left:auto;flex:0 1 270px}
+  .gsearch input{width:100%;padding:7px 12px;border:1px solid var(--hair);border-radius:8px;background:var(--mat);font:inherit;font-size:13px}
+  .body{padding:22px 26px;max-width:940px;width:100%}
+  /* ── 공통 컴포넌트 ── */
+  .bar{display:flex;gap:10px;align-items:baseline;margin-bottom:14px;flex-wrap:wrap}
+  .bar h2{font-size:15px;margin:0;font-weight:600;letter-spacing:-.2px}
   .bar .total{color:var(--gray);font-size:12px}
   input[type=search]{flex:1;min-width:120px;max-width:280px;padding:7px 11px;
-    border:1px solid var(--hair);border-radius:7px;background:var(--mat);font-size:13px}
-  button{font-family:inherit;font-size:12.5px;padding:6px 12px;border:1px solid var(--hair);
-    background:var(--mat);border-radius:7px;cursor:pointer;color:var(--soft)}
+    border:1px solid var(--hair);border-radius:8px;background:var(--mat);font-size:13px}
+  button{font:inherit;font-size:12.5px;padding:6px 12px;border:1px solid var(--hair);
+    background:var(--mat);border-radius:8px;cursor:pointer;color:var(--soft)}
   button:hover{border-color:var(--gray)}
+  button:disabled{opacity:.5;cursor:default}
   button.danger{color:var(--vermilion);border-color:#E8D5CF}
   button.danger:hover{background:#FBF1EE}
   button.accent{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-  .doc{border:1px solid var(--hair);border-radius:9px;background:var(--mat);
-    margin-bottom:10px;overflow:hidden}
-  .doc .head{display:flex;justify-content:space-between;align-items:center;
-    padding:10px 14px;cursor:pointer;gap:10px}
-  .doc .head:hover{background:#FCFBF9}
-  .doc .id{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--gray);
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .doc .summary{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--soft)}
-  .doc .when{color:var(--faint);font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
-  .doc pre{margin:0;padding:12px 14px;border-top:1px solid var(--hair);background:#FCFBF9;
-    font-family:ui-monospace,monospace;font-size:11.5px;line-height:1.55;
-    white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
-  .doc .actions{padding:8px 14px;border-top:1px solid var(--hair);text-align:right}
-  .thumb{width:40px;height:40px;object-fit:cover;border-radius:5px;border:1px solid var(--hair)}
-  .empty{color:var(--gray);padding:40px 0;text-align:center}
-  .more{display:block;margin:14px auto;}
-  .flag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;
-    background:#F2EFEA;color:var(--gray);margin-left:6px}
-  .flag.otp{background:#FBF1EE;color:var(--vermilion)}
-  .pf{border:1px solid var(--hair);border-radius:9px;background:var(--mat);padding:14px;margin-bottom:14px}
+  select{font:inherit;padding:8px;border:1px solid var(--hair);border-radius:7px;background:var(--mat)}
+  .pf{border:1px solid var(--hair);border-radius:11px;background:var(--mat);padding:15px;margin-bottom:13px;box-shadow:var(--shadow)}
   .pf label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}
   .pf textarea{width:100%;min-height:90px;padding:10px;border:1px solid var(--hair);
-    border-radius:7px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.6;
-    resize:vertical;background:#FCFBF9;color:var(--ink)}
+    border-radius:8px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.6;resize:vertical;background:#FCFBF9;color:var(--ink)}
   .pf .row{margin-top:8px;display:flex;gap:8px;align-items:center}
   .pf .row .hint{color:var(--gray);font-size:11.5px;margin-left:auto}
+  .hint{color:var(--gray);font-size:11.5px}
+  .doc{border:1px solid var(--hair);border-radius:10px;background:var(--mat);margin-bottom:9px;overflow:hidden;box-shadow:var(--shadow)}
+  .doc .head{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;gap:10px}
+  .doc .head:hover{background:#FCFBF9}
+  .doc .summary{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--soft)}
+  .doc .when{color:var(--faint);font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .doc .id{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--gray)}
+  .doc pre{margin:0;padding:12px 14px;border-top:1px solid var(--hair);background:#FCFBF9;
+    font-family:ui-monospace,monospace;font-size:11.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto}
+  .doc .actions{padding:8px 14px;border-top:1px solid var(--hair);text-align:right}
+  .flag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;background:#F2EFEA;color:var(--gray);margin-left:6px}
+  .flag.otp{background:#FBF1EE;color:var(--vermilion)}
+  .empty{color:var(--gray);padding:46px 0;text-align:center}
+  .thumb{width:40px;height:40px;object-fit:cover;border-radius:5px;border:1px solid var(--hair)}
+  /* 탭 (통합 페이지) */
+  .tabs{display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--hair)}
+  .tab{padding:8px 15px;cursor:pointer;font-size:13.5px;color:var(--gray);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab:hover{color:var(--soft)}
+  .tab.on{color:var(--ink);font-weight:600;border-bottom-color:var(--vermilion)}
+  /* 홈 카드 */
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:13px}
+  .hc{border:1px solid var(--hair);border-radius:12px;background:var(--mat);padding:15px 16px;box-shadow:var(--shadow);cursor:pointer;transition:border-color .12s}
+  .hc:hover{border-color:var(--gray)}
+  .hc .t{font-size:12px;color:var(--gray);display:flex;align-items:center;gap:6px;margin-bottom:9px}
+  .hc .kpi{font-size:23px;font-weight:600;letter-spacing:-.6px}
+  .hc .sub{font-size:12px;color:var(--gray);margin-top:5px;line-height:1.55}
+  .hc ul{margin:6px 0 0;padding-left:0;list-style:none}
+  .hc li{font-size:12.5px;padding:2px 0;color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
-<header>
-  <h1>Oracle 어드민</h1>
-  <span class="sub" id="sub">로딩…</span>
-</header>
-<div class="wrap">
-  <nav id="nav"></nav>
-  <main id="main"><div class="empty">컬렉션을 선택하세요</div></main>
+<div class="app">
+  <aside>
+    <div class="brand"><b>Oracle</b><i id="brandsub">어드민</i></div>
+    <div id="nav"></div>
+  </aside>
+  <main>
+    <div class="top">
+      <div class="crumb" id="crumb"><b>홈</b></div>
+      <div class="gsearch"><input id="gsearch" placeholder="기록·신호 검색 (Enter)"
+        onkeydown="if(event.key==='Enter'){go('col:records');setTimeout(()=>{Q=this.value;SKIP=0;render()},0)}"></div>
+    </div>
+    <div class="body"><div id="main"><div class="empty">로딩…</div></div></div>
+  </main>
 </div>
 <script>
 const $ = s => document.querySelector(s);
-let CUR = null, SKIP = 0, Q = '';
+let CUR='__home__', SKIP=0, Q='', STATS=null;
+
+// ── 네비게이션 모델 (그룹) ──
+const KNOWN = {records:'📸 캡처', signals:'📨 신호', journals:'📓 저널', conversations:'💬 대화'};
+const NAV = [
+  {grp:null,   items:[{id:'__home__', label:'🏠 홈'}]},
+  {grp:'기능', items:[{id:'__ledger__', label:'💰 가계부'}, {id:'__calendar__', label:'📅 캘린더'}]},
+  {grp:'기록', items:[{id:'col:records', label:KNOWN.records}, {id:'col:signals', label:KNOWN.signals},
+                      {id:'col:journals', label:KNOWN.journals}, {id:'col:conversations', label:KNOWN.conversations},
+                      {id:'__collected__', label:'📍 활동 로그'}, {id:'__dismissed__', label:'🗂 확인함'}]},
+  {grp:'설정', items:[{id:'__companion__', label:'🐾 동반자'}, {id:'__location__', label:'📡 위치·수집'},
+                      {id:'__models__', label:'🧠 모델'}, {id:'__excludes__', label:'🔕 신호 제외'}]},
+];
 
 async function api(path, opts){
   const r = await fetch('/admin/api' + path, opts);
   if(!r.ok) throw new Error(r.status + ' ' + await r.text());
   return r.status === 204 ? null : r.json();
 }
+function go(id){ CUR=id; SKIP=0; Q=''; buildNav(); render(); }
 
 async function loadStats(){
-  const s = await api('/stats');
-  const total = s.collections.reduce((a,c)=>a+c.count,0);
-  $('#sub').textContent = total + ' docs · ' + s.collections.length + ' collections';
-  $('#nav').innerHTML = s.collections.map(c =>
-    `<a data-c="${c.name}" class="${c.name===CUR?'active':''}">
-       <span>${c.label}</span><span class="n">${c.count}</span></a>`).join('') +
-    (s.unbriefed_signals > 0
-      ? `<div style="padding:14px 24px;margin-top:8px;border-top:1px solid var(--hair)">
-           <div style="font-size:12px;color:var(--gray);margin-bottom:8px">
-             미요약 신호 ${s.unbriefed_signals}건</div>
-           <button class="accent" onclick="rebrief(this)">지금 요약</button></div>`
-      : '');
-  $('#nav').innerHTML += `<a data-c="__personas__" class="${CUR==='__personas__'?'active':''}"
-    style="border-top:1px solid var(--hair);margin-top:6px;padding-top:14px">
-    <span>⚙ 페르소나</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__excludes__" class="${CUR==='__excludes__'?'active':''}">
-    <span>🔕 신호 제외</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__models__" class="${CUR==='__models__'?'active':''}">
-    <span>🧠 모델 설정</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__companion__" class="${CUR==='__companion__'?'active':''}">
-    <span>🐾 말 걸기</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__places__" class="${CUR==='__places__'?'active':''}">
-    <span>📍 장소</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__collector__" class="${CUR==='__collector__'?'active':''}">
-    <span>📡 수집기</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__dismissed__" class="${CUR==='__dismissed__'?'active':''}">
-    <span>🗂 확인한 항목</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__calendar__" class="${CUR==='__calendar__'?'active':''}">
-    <span>📅 캘린더</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__collected__" class="${CUR==='__collected__'?'active':''}">
-    <span>📥 수집 기록</span></a>`;
-  $('#nav').innerHTML += `<a data-c="__ledger__" class="${CUR==='__ledger__'?'active':''}">
-    <span>💰 가계부</span></a>`;
-  document.querySelectorAll('nav a').forEach(a =>
-    a.onclick = () => { CUR=a.dataset.c; SKIP=0; Q=''; render(); });
+  try{ STATS = await api('/stats'); }catch(e){ STATS = {collections:[]}; }
+  buildNav();
+}
+function colCount(name){ const c=(STATS&&STATS.collections||[]).find(x=>x.name===name); return c?c.count:''; }
+
+function buildNav(){
+  const shownCols = Object.keys(KNOWN);
+  let html = '';
+  for(const g of NAV){
+    if(g.grp) html += `<div class="grp">${g.grp}</div>`;
+    for(const it of g.items){
+      const cnt = it.id.startsWith('col:') ? colCount(it.id.slice(4)) : '';
+      html += `<div class="navi ${it.id===CUR?'on':''}" onclick="go('${it.id}')">
+        <span>${it.label}</span>${cnt!==''?`<span class="c">${cnt}</span>`:''}</div>`;
+    }
+  }
+  // 데이터(고급) — 기록에 없는 나머지 컬렉션
+  const rest = (STATS&&STATS.collections||[]).filter(c=>!shownCols.includes(c.name));
+  if(rest.length){
+    html += `<div class="grp" style="cursor:pointer" onclick="DATAOPEN=!DATAOPEN;buildNav()">데이터 ${DATAOPEN?'▾':'▸'}</div>`;
+    if(DATAOPEN) for(const c of rest){
+      const id='col:'+c.name;
+      html += `<div class="navi ${id===CUR?'on':''}" onclick="go('${id}')">
+        <span style="font-size:12.5px">${c.label||c.name}</span><span class="c">${c.count}</span></div>`;
+    }
+  }
+  if(STATS && STATS.unbriefed_signals>0){
+    html += `<div style="padding:12px 18px;margin-top:8px;border-top:1px solid var(--hair)">
+      <div class="hint" style="margin-bottom:7px">미요약 신호 ${STATS.unbriefed_signals}건</div>
+      <button class="accent" onclick="rebrief(this)">지금 요약</button></div>`;
+  }
+  $('#nav').innerHTML = html;
+  const tot = (STATS&&STATS.collections||[]).reduce((a,c)=>a+c.count,0);
+  $('#brandsub').textContent = tot ? tot.toLocaleString()+' docs' : '어드민';
+}
+let DATAOPEN=false;
+
+function crumb(group, title){
+  $('#crumb').innerHTML = (group?`${group} &nbsp;›&nbsp; `:'') + `<b>${title}</b>`;
 }
 
 async function rebrief(btn){
-  btn.disabled = true; btn.textContent = '요약 중…';
-  try{
-    const r = await api('/signals/rebrief', {method:'POST'});
-    alert(`${r.briefed}건 요약 완료\n\n${r.summary || '(요약 없음)'}`);
-    await loadStats(); if(CUR) render();
+  btn.disabled=true; btn.textContent='요약 중…';
+  try{ const r=await api('/signals/rebrief',{method:'POST'});
+    alert(`${r.briefed}건 요약 완료\n\n${r.summary||'(요약 없음)'}`);
+    await loadStats(); render();
   }catch(e){ alert('실패: '+e.message); }
-  btn.disabled = false; btn.textContent = '지금 요약';
+  btn.disabled=false; btn.textContent='지금 요약';
 }
 
-function fmtWhen(d){
-  if(!d) return '';
-  const t = new Date(d);
-  return isNaN(t) ? '' : t.toLocaleString('ko',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-}
-
-function summarize(doc){
-  return doc.user_comment || doc.summary || doc.text || doc.body ||
-    (doc.insight && doc.insight.text) || doc.date || doc.label || '—';
-}
-
+// ── 디스패치 ──
 async function render(){
-  document.querySelectorAll('nav a').forEach(a =>
-    a.classList.toggle('active', a.dataset.c===CUR));
-  if(CUR==='__personas__') return renderPersonas();
-  if(CUR==='__excludes__') return renderExcludes();
-  if(CUR==='__models__') return renderModels();
-  if(CUR==='__companion__') return renderCompanion();
-  if(CUR==='__places__') return renderPlaces();
-  if(CUR==='__collector__') return renderCollector();
-  if(CUR==='__dismissed__') return renderDismissed();
-  if(CUR==='__calendar__') return renderCalendar();
-  if(CUR==='__collected__') return renderCollected();
-  if(CUR==='__ledger__') return renderLedger();
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
+  const grpOf = id => (NAV.find(g=>g.items.some(i=>i.id===id))||{}).grp || '';
+  if(CUR==='__home__'){ crumb('','홈'); return renderHome(); }
+  if(CUR==='__ledger__'){ crumb('기능','가계부'); return renderLedger(); }
+  if(CUR==='__calendar__'){ crumb('기능','캘린더'); return renderCalendar(); }
+  if(CUR==='__collected__'){ crumb('기록','활동 로그'); return renderCollected(); }
+  if(CUR==='__dismissed__'){ crumb('기록','확인함'); return renderDismissed(); }
+  if(CUR==='__companion__'){ crumb('설정','동반자'); return renderCompanionPage(); }
+  if(CUR==='__location__'){ crumb('설정','위치·수집'); return renderLocationPage(); }
+  if(CUR==='__models__'){ crumb('설정','모델'); return renderModels(); }
+  if(CUR==='__excludes__'){ crumb('설정','신호 제외'); return renderExcludes(); }
+  if(CUR.startsWith('col:')){ const name=CUR.slice(4); crumb(grpOf(CUR)||'데이터', KNOWN[name]||name); return renderCollection(name); }
+  renderHome();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  홈 — 오늘 한눈에
+// ══════════════════════════════════════════════════════════════
+async function renderHome(){
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  const won=n=>(Number(n)||0).toLocaleString('ko')+'원';
+  const safe=async(p,d)=>{ try{ return await (await fetch(p)).json(); }catch(e){ return d; } };
+  const [led, cal, col, recs] = await Promise.all([
+    safe('/ledger/settlement?period=month', {}),
+    safe('/calendar/upcoming?days=7', {items:[]}),
+    safe('/collector-status', null),
+    api('/collection/records?limit=4').catch(()=>({docs:[]})),
+  ]);
+  const cards = [];
+  // 가계부
+  cards.push(`<div class="hc" onclick="go('__ledger__')">
+    <div class="t">💰 이번 달 지출</div>
+    <div class="kpi">${won(led.expense||0)}</div>
+    <div class="sub">${(led.by_category||[]).slice(0,3).map(c=>c.name+' '+won(c.amount)).join(' · ')||'기록 없음'}${led.incomplete?` · <span style="color:var(--vermilion)">확인필요 ${led.incomplete}</span>`:''}</div></div>`);
+  // 일정
+  const evs=(cal.items||[]).slice(0,4);
+  cards.push(`<div class="hc" onclick="go('__calendar__')">
+    <div class="t">📅 다가오는 일정</div>
+    ${evs.length?`<ul>${evs.map(e=>`<li>${e.all_day?'·':'•'} ${esc(e.title)}</li>`).join('')}</ul>`
+      :`<div class="kpi" style="font-size:15px;color:var(--gray)">7일 내 일정 없음</div>`}</div>`);
+  // 위치·수집기
+  if(col){
+    const place = col.visit_on && col.place ? esc(col.place) : (col.visit_on?'어딘가 체류':'이동/미확정');
+    const fresh = col.age_sec!=null ? col.age_sec+'초 전' : '미상';
+    cards.push(`<div class="hc" onclick="go('__location__')">
+      <div class="t">📡 지금 위치 <span class="faint" style="margin-left:auto;font-size:11px">${fresh}</span></div>
+      <div class="kpi" style="font-size:18px">${place}</div>
+      <div class="sub">WiFi ${col.wifi?esc(col.wifi):'없음'} · 차 ${col.bt?'연결':'끊김'}${col.car_state?' · '+col.car_state:''}</div></div>`);
+  }else{
+    cards.push(`<div class="hc" onclick="go('__location__')"><div class="t">📡 수집기</div>
+      <div class="kpi" style="font-size:15px;color:var(--gray)">아직 보고 없음</div></div>`);
+  }
+  // 최근 캡처
+  const ds=(recs.docs||[]).slice(0,4);
+  cards.push(`<div class="hc" onclick="go('col:records')">
+    <div class="t">📸 최근 캡처</div>
+    ${ds.length?`<ul>${ds.map(d=>`<li>${esc(summarize(d)).slice(0,40)}</li>`).join('')}</ul>`
+      :`<div class="kpi" style="font-size:15px;color:var(--gray)">없음</div>`}</div>`);
+  m.innerHTML = `<div class="bar"><h2>오늘 한눈에</h2><span class="total">${new Date().toLocaleDateString('ko',{month:'long',day:'numeric',weekday:'long'})}</span></div>
+    <div class="cards">${cards.join('')}</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  기록 — 컬렉션 브라우저
+// ══════════════════════════════════════════════════════════════
+function fmtWhen(d){ if(!d) return ''; const t=new Date(d);
+  return isNaN(t)?'':t.toLocaleString('ko',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+function summarize(doc){ return doc.user_comment||doc.summary||doc.text||doc.body||
+  (doc.insight&&doc.insight.text)||doc.date||doc.label||'—'; }
+
+async function renderCollection(name){
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
   let data;
-  try{ data = await api(`/collection/${CUR}?limit=50&skip=${SKIP}&q=${encodeURIComponent(Q)}`); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-
-  const bar = `<div class="bar">
-    <h2>${CUR}</h2><span class="total">${data.total}건</span>
-    <input type="search" placeholder="검색 (_id·본문·요약·발신인)" value="${Q}"
-      onkeydown="if(event.key==='Enter'){Q=this.value;SKIP=0;render()}">
-  </div>`;
-
-  if(!data.docs.length){ m.innerHTML = bar + '<div class="empty">문서 없음</div>'; return; }
-
-  const rows = data.docs.map(d => {
-    const id = d._id;
-    const when = fmtWhen(d.ts || d.period_start || d.last_ts);
-    const otp = d.otp ? '<span class="flag otp">OTP</span>' : '';
-    const briefed = (CUR==='signals' && d.briefed===false) ? '<span class="flag">미요약</span>' : '';
-    return `<div class="doc" data-id="${id}">
-      <div class="head" onclick="toggle(this)">
-        <span class="summary">${esc(summarize(d))}${otp}${briefed}</span>
-        <span class="when">${when}</span>
-      </div>
-      <div class="body" hidden>
-        <pre>${esc(JSON.stringify(d,null,2))}</pre>
-        <div class="actions">
-          <span class="id">${id}</span>
-          <button class="danger" onclick="del('${id}',event)">삭제</button>
-        </div>
-      </div>
-    </div>`;
+  try{ data=await api(`/collection/${name}?limit=50&skip=${SKIP}&q=${encodeURIComponent(Q)}`); }
+  catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  const bar=`<div class="bar"><h2>${KNOWN[name]||name}</h2><span class="total">${data.total}건</span>
+    <input type="search" placeholder="검색 (_id·본문·요약·발신인)" value="${esc(Q)}"
+      onkeydown="if(event.key==='Enter'){Q=this.value;SKIP=0;render()}"></div>`;
+  if(!data.docs.length){ m.innerHTML=bar+'<div class="empty">문서 없음</div>'; return; }
+  const rows=data.docs.map(d=>{
+    const id=d._id, when=fmtWhen(d.ts||d.period_start||d.last_ts);
+    const otp=d.otp?'<span class="flag otp">OTP</span>':'';
+    const br=(name==='signals'&&d.briefed===false)?'<span class="flag">미요약</span>':'';
+    return `<div class="doc"><div class="head" onclick="toggle(this)">
+      <span class="summary">${esc(summarize(d))}${otp}${br}</span><span class="when">${when}</span></div>
+      <div class="body" hidden><pre>${esc(JSON.stringify(d,null,2))}</pre>
+        <div class="actions"><span class="id">${id}</span>
+          <button class="danger" onclick="delDoc('${name}','${id}',event)">삭제</button></div></div></div>`;
   }).join('');
-
-  const shown = SKIP + data.docs.length;
-  const nav = [];
-  if(SKIP > 0) nav.push(`<button onclick="SKIP=Math.max(0,SKIP-50);render()">← 이전</button>`);
-  if(shown < data.total) nav.push(`<button onclick="SKIP+=50;render()">다음 →</button>`);
-  const more = nav.length
-    ? `<div style="text-align:center;margin:16px 0;color:var(--gray);font-size:12px">
-         ${SKIP+1}–${shown} / ${data.total} &nbsp; ${nav.join(' ')}</div>` : '';
-  m.innerHTML = bar + rows + more;
+  const shown=SKIP+data.docs.length, n=[];
+  if(SKIP>0) n.push(`<button onclick="SKIP=Math.max(0,SKIP-50);render()">← 이전</button>`);
+  if(shown<data.total) n.push(`<button onclick="SKIP+=50;render()">다음 →</button>`);
+  const more=n.length?`<div style="text-align:center;margin:16px 0" class="hint">${SKIP+1}–${shown} / ${data.total} &nbsp; ${n.join(' ')}</div>`:'';
+  m.innerHTML=bar+rows+more;
+}
+function toggle(head){ const b=head.parentElement.querySelector('.body'); b.hidden=!b.hidden; }
+async function delDoc(name,id,ev){ ev.stopPropagation();
+  if(!confirm(`삭제할까요?\n${id}`)) return;
+  try{ await api(`/collection/${name}/${encodeURIComponent(id)}`,{method:'DELETE'}); await loadStats(); render(); }
+  catch(e){ alert('삭제 실패: '+e.message); }
 }
 
-function toggle(head){
-  const b = head.parentElement.querySelector('.body');
-  b.hidden = !b.hidden;
+// ══════════════════════════════════════════════════════════════
+//  설정: 동반자 (페르소나 + 말 걸기 탭)
+// ══════════════════════════════════════════════════════════════
+let CTAB='personas';
+function renderCompanionPage(){
+  const m=$('#main');
+  m.innerHTML=`<div class="bar"><h2>동반자</h2><span class="total">베르·쿠키 — 말투·역할(페르소나)과 먼저 거는 말(말 걸기)</span></div>
+    <div class="tabs">
+      <div class="tab ${CTAB==='personas'?'on':''}" onclick="CTAB='personas';renderCompanionPage()">페르소나</div>
+      <div class="tab ${CTAB==='speak'?'on':''}" onclick="CTAB='speak';renderCompanionPage()">말 걸기</div>
+    </div><div id="sub"><div class="empty">로딩…</div></div>`;
+  if(CTAB==='personas') renderPersonas($('#sub')); else renderCompanion($('#sub'));
 }
 
-async function renderPersonas(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let d;
-  try{ d = await api('/personas'); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  m.innerHTML = `<div class="bar"><h2>페르소나</h2>
-    <span class="total">베르(메인)·쿠키(서브) 말투·역할 · 저장 후 5초 내 반영</span></div>` +
-    d.fields.map(f => `
-      <div class="pf">
-        <label>${f.label} ${f.overridden?'<span class="flag">수정됨</span>':''}</label>
-        <textarea data-key="${f.key}">${esc(f.value)}</textarea>
-        <div class="row">
-          <button class="accent" onclick="savePersona('${f.key}',this)">저장</button>
-          ${f.overridden?`<button onclick="resetPersona('${f.key}')">디폴트로</button>`:''}
-          <span class="hint">${f.key}</span>
-        </div>
-      </div>`).join('');
+async function renderPersonas(host){
+  const m=host||$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d; try{ d=await api('/personas'); }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  m.innerHTML=d.fields.map(f=>`<div class="pf">
+    <label>${f.label} ${f.overridden?'<span class="flag">수정됨</span>':''}</label>
+    <textarea data-key="${f.key}">${esc(f.value)}</textarea>
+    <div class="row"><button class="accent" onclick="savePersona('${f.key}',this)">저장</button>
+      ${f.overridden?`<button onclick="resetPersona('${f.key}')">디폴트로</button>`:''}
+      <span class="hint">${f.key}</span></div></div>`).join('');
+}
+async function savePersona(key,btn){
+  const ta=btn.closest('.pf').querySelector('textarea'); btn.disabled=true;
+  try{ await api('/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value:ta.value})});
+    renderPersonas(btn.closest('#sub')||$('#main')); }
+  catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
+}
+async function resetPersona(key){ if(!confirm('디폴트로 되돌릴까요?')) return;
+  try{ await api('/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value:''})});
+    renderPersonas($('#sub')); }catch(e){ alert('실패: '+e.message); }
 }
 
-async function savePersona(key, btn){
-  const ta = btn.closest('.pf').querySelector('textarea');
-  btn.disabled = true;
-  try{
-    await api('/personas', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({key, value: ta.value})});
-    renderPersonas();
-  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
-}
-
-async function resetPersona(key){
-  if(!confirm('디폴트로 되돌릴까요?')) return;
-  try{
-    await api('/personas', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({key, value: ''})});
-    renderPersonas();
-  }catch(e){ alert('실패: '+e.message); }
-}
-
-async function renderExcludes(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let d;
-  try{ d = await api('/signal-excludes'); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  m.innerHTML = `<div class="bar"><h2>신호 제외</h2>
-    <span class="total">발신자·앱·내용에 아래 문구가 포함되면 요약에서 제외 · 한 줄에 하나 · 원본은 남음</span></div>
-    <div class="pf">
-      <label>제외 패턴 (부분일치, 대소문자 무시)</label>
-      <textarea id="exTa" style="min-height:220px"
-        placeholder="예)&#10;CBC Maintenance&#10;세션 자동 종료&#10;광고">${esc((d.patterns||[]).join('\n'))}</textarea>
-      <div class="row">
-        <button class="accent" onclick="saveExcludes(this)">저장</button>
-        <span class="hint">다음 요약부터 적용</span>
-      </div>
-    </div>`;
-}
-
-async function saveExcludes(btn){
-  const ta = document.getElementById('exTa');
-  const patterns = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
-  btn.disabled = true;
-  try{
-    await api('/signal-excludes', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({patterns})});
-    btn.textContent = '저장됨 ✓';
-    setTimeout(() => { btn.textContent = '저장'; btn.disabled = false; }, 1200);
-  }catch(e){ alert('저장 실패: '+e.message); btn.disabled = false; }
-}
-
-async function renderModels(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let d;
-  try{ d = await api('/task-aliases'); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  const sel = (val) => '<option value="">(env 디폴트)</option>' +
-    d.models.map(a => `<option value="${esc(a)}" ${a===val?'selected':''}>${esc(a)}</option>`).join('');
-  m.innerHTML = `<div class="bar"><h2>모델 설정</h2>
-    <span class="total">용도별 Nest 모델 — 저장 후 5초 내 반영 · 비우면 env 디폴트</span></div>` +
-    d.fields.map(f => `
-      <div class="pf">
-        <label>${f.label} <span class="hint">${f.key}</span></label>
-        <select style="width:100%;padding:9px;border:1px solid var(--hair);font:inherit;background:var(--paper)"
-          onchange="saveTaskAlias('${f.key}', this.value)">${sel(f.value)}</select>
-        <div class="hint" style="margin-top:4px">실제 적용: ${esc(f.effective) || '(자동 — Nest 첫 모델)'}</div>
-      </div>`).join('');
-}
-
-async function saveTaskAlias(key, value){
-  try{
-    await api('/task-aliases', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({key, value})});
-    renderModels();
-  }catch(e){ alert('저장 실패: '+e.message); }
-}
-
-// ── 동반자 말 걸기 설정 ───────────────────────────────────────
-function numField(key, val, label, suffix){
+function numField(key,val,label,suffix){
   return `<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0">
     <span style="min-width:96px">${label}</span>
     <input type="number" min="0" data-k="${key}" value="${val}"
       style="width:74px;padding:6px 8px;border:1px solid var(--hair);border-radius:6px;font:inherit">
     <span class="hint" style="margin:0">${suffix||''}</span></label>`;
 }
-function chkField(key, on, label){
+function chkField(key,on,label){
   return `<label style="display:inline-flex;align-items:center;gap:6px;font-weight:400;margin:0 14px 8px 0">
     <input type="checkbox" data-k="${key}" ${on?'checked':''}> ${label}</label>`;
 }
-
-async function renderCompanion(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let d;
-  try{ d = await api('/companion-config'); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  const c = d.config, ev = c.location_events||{}, labels = d.event_labels||{}, st = d.state||{};
-  const evRows = Object.keys(labels).map(k =>
-    chkField('ev:'+k, ev[k]!==false, esc(labels[k]))).join('');
-  const ago = (v) => v==null ? '아직 없음' : (v+'분 전');
-  m.innerHTML = `<div class="bar"><h2>말 걸기</h2>
-      <span class="total">쿠키·베르가 먼저 거는 한마디 — 텀·시간대·새벽 정지·위치 조건 · 저장 후 5초 내 반영</span></div>
-    <div class="pf">
-      ${chkField('enabled', c.enabled!==false, '<b>전체 켜기</b> (끄면 일절 안 걺)')}
-    </div>
-    <div class="pf">
-      <label>새벽 조용 구간 — 이 시간엔 정기·위치 모두 침묵</label>
-      <div class="row" style="gap:6px">
-        ${numField('quiet_start_hour', c.quiet_start_hour, '시작', '시')}
-        ${numField('quiet_end_hour', c.quiet_end_hour, '끝', '시 (예: 23~8)')}
-      </div>
-    </div>
-    <div class="pf">
-      <label>정시 체크인 — '뭐해?' (매시 0분에 1회, 위치와 완전 별개·GPS 안 봄)</label>
-      ${chkField('checkin_enabled', c.checkin_enabled!==false, '켜기')}
-      <div class="row" style="margin-top:4px;gap:6px">
-        ${numField('checkin_start_hour', c.checkin_start_hour, '활동 시작', '시')}
-        ${numField('checkin_end_hour', c.checkin_end_hour, '활동 끝', '시')}
-      </div>
-      <div class="hint" style="margin-top:6px">활동 시간대의 매 정시에 한 번 · 마지막: ${ago(st.checkin_ago_min)}</div>
-    </div>
-    <div class="pf">
-      <label>위치 이벤트에 말 걸기 — 저장된 장소 도착/나섬
-        <span class="hint">위치를 어떻게 확인할지는 📍 장소 탭에서</span></label>
-      ${chkField('location_enabled', c.location_enabled!==false, '켜기')}
-      <div class="row" style="margin-top:4px">${numField('location_cooldown_min', c.location_cooldown_min, '최소 간격', '분')}</div>
+async function renderCompanion(host){
+  const m=host||$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d; try{ d=await(await fetch('/companion-config')).json(); }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  const c=d.config, ev=c.location_events||{}, labels=d.event_labels||{}, st=d.state||{};
+  const evRows=Object.keys(labels).map(k=>chkField('ev:'+k, ev[k]!==false, esc(labels[k]))).join('');
+  const ago=v=>v==null?'아직 없음':(v+'분 전');
+  m.innerHTML=`<div class="pf">${chkField('enabled', c.enabled!==false, '<b>전체 켜기</b> (끄면 일절 안 걺)')}</div>
+    <div class="pf"><label>새벽 조용 구간 — 이 시간엔 정기·위치 모두 침묵</label>
+      <div class="row" style="gap:6px">${numField('quiet_start_hour',c.quiet_start_hour,'시작','시')}${numField('quiet_end_hour',c.quiet_end_hour,'끝','시 (예: 23~8)')}</div></div>
+    <div class="pf"><label>정시 체크인 — '뭐해?' (매시 0분 1회, GPS 안 봄)</label>
+      ${chkField('checkin_enabled',c.checkin_enabled!==false,'켜기')}
+      <div class="row" style="margin-top:4px;gap:6px">${numField('checkin_start_hour',c.checkin_start_hour,'활동 시작','시')}${numField('checkin_end_hour',c.checkin_end_hour,'활동 끝','시')}</div>
+      <div class="hint" style="margin-top:6px">마지막: ${ago(st.checkin_ago_min)}</div></div>
+    <div class="pf"><label>위치 이벤트에 말 걸기 — 저장된 장소 도착/나섬 <span class="hint">위치 확인 방법은 위치·수집 탭</span></label>
+      ${chkField('location_enabled',c.location_enabled!==false,'켜기')}
+      <div class="row" style="margin-top:4px">${numField('location_cooldown_min',c.location_cooldown_min,'최소 간격','분')}</div>
       <div style="margin-top:10px">${evRows}</div>
-      <div class="hint" style="margin-top:6px">마지막 위치: ${ago(st.location_ago_min)}</div>
-    </div>
-    <div class="pf" style="border:none;background:none;padding:0">
-      <button class="accent" onclick="saveCompanion(this)">저장</button>
-    </div>`;
+      <div class="hint" style="margin-top:6px">마지막 위치: ${ago(st.location_ago_min)}</div></div>
+    <div style="margin-top:4px"><button class="accent" onclick="saveCompanion(this)">저장</button></div>`;
 }
-
 async function saveCompanion(btn){
-  const patch = {location_events:{}};
-  document.querySelectorAll('[data-k]').forEach(el => {
-    const k = el.dataset.k;
-    if(k.startsWith('ev:')){ patch.location_events[k.slice(3)] = el.checked; return; }
-    if(el.type==='checkbox') patch[k] = el.checked;
-    else patch[k] = Number(el.value);
+  const patch={location_events:{}};
+  ($('#sub')||document).querySelectorAll('[data-k]').forEach(el=>{
+    const k=el.dataset.k;
+    if(k.startsWith('ev:')){ patch.location_events[k.slice(3)]=el.checked; return; }
+    patch[k]=el.type==='checkbox'?el.checked:Number(el.value);
   });
-  btn.disabled = true;
-  try{
-    await api('/companion-config', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(patch)});
-    btn.textContent = '저장됨 ✓';
-    setTimeout(() => { btn.textContent='저장'; btn.disabled=false; }, 1200);
+  btn.disabled=true;
+  try{ await fetch('/companion-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+    btn.textContent='저장됨 ✓'; setTimeout(()=>{btn.textContent='저장';btn.disabled=false;},1200);
   }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
 }
 
-// ── 장소 (집·작업실·자주 가는 곳) ─ /places 직접 호출(폰과 공용 API) ──
-const KIND_LABEL = {home:'집', office:'작업실', place:'장소'};
-async function places(path, opts){
-  const r = await fetch('/places' + (path||''), opts);
-  if(!r.ok) throw new Error(r.status + ' ' + await r.text());
-  return r.json();
+// ══════════════════════════════════════════════════════════════
+//  설정: 위치·수집 (장소 + 수집기 탭)
+// ══════════════════════════════════════════════════════════════
+let LTAB='places';
+function renderLocationPage(){
+  const m=$('#main');
+  m.innerHTML=`<div class="bar"><h2>위치·수집</h2><span class="total">등록 장소·센싱(장소 탭) + 수집기 설정(수집기 탭)</span></div>
+    <div class="tabs">
+      <div class="tab ${LTAB==='places'?'on':''}" onclick="LTAB='places';renderLocationPage()">장소 · 센싱</div>
+      <div class="tab ${LTAB==='collector'?'on':''}" onclick="LTAB='collector';renderLocationPage()">수집기</div>
+    </div><div id="sub"><div class="empty">로딩…</div></div>`;
+  if(LTAB==='places') renderPlaces($('#sub')); else renderCollector($('#sub'));
 }
-async function locCfg(opts){
-  const r = await fetch('/location-config', opts);
-  if(!r.ok) throw new Error(r.status + ' ' + await r.text());
-  return r.json();
-}
-async function collStatus(){
-  const r = await fetch('/collector-status');
-  if(!r.ok) throw new Error(r.status);
-  return r.json();
-}
-const inStyle = 'width:100%;padding:8px 10px;border:1px solid var(--hair);border-radius:7px;font:inherit;background:#FCFBF9;margin-bottom:8px';
 
-async function renderPlaces(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let d, lc, st=null;
-  try{ d = await places(); lc = (await locCfg()).config; }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  try{ st = await collStatus(); }catch(e){}   // 라이브 상태(graceful — 보고 없으면 패널만 빈 채)
-  const items = d.items || [];
+const KIND_LABEL={home:'집',office:'작업실',place:'장소'};
+async function places(path,opts){ const r=await fetch('/places'+(path||''),opts); if(!r.ok) throw new Error(r.status+' '+await r.text()); return r.json(); }
+async function locCfg(opts){ const r=await fetch('/location-config',opts); if(!r.ok) throw new Error(r.status+' '+await r.text()); return r.json(); }
+async function collStatus(){ const r=await fetch('/collector-status'); if(!r.ok) throw new Error(r.status); return r.json(); }
+const inStyle='width:100%;padding:8px 10px;border:1px solid var(--hair);border-radius:7px;font:inherit;background:#FCFBF9;margin-bottom:8px';
 
-  // 📡 수집기 현재 상태 — 현재 WiFi·위치·차 BT + 최근 로그 (운전 중 adb logcat 대체).
-  const curWifi = (st && st.wifi) ? st.wifi : '';
-  const place = st ? (st.visit_on && st.place ? esc(st.place)
-                      : (st.visit_on ? '어딘가 체류 중' : '이동 중 / 미확정')) : '';
-  const logBox = (st && st.logs && st.logs.length)
-    ? `<div style="background:#1c1b19;color:#d8d4cc;font:11px/1.55 ui-monospace,SFMono-Regular,monospace;padding:8px 10px;border-radius:7px;max-height:220px;overflow:auto;white-space:pre-wrap">${st.logs.slice(-50).reverse().map(esc).join('\n')}</div>`
-    : '<div class="hint">최근 로그 없음 — 이동·BT 등 이벤트가 생기면 여기 쌓여요</div>';
-  const fresh = st ? (st.age_sec!=null ? st.age_sec+'초 전 보고' : '보고 시각 미상')
-                   : '아직 보고 없음 — 새 수집기 설치 후 1분 내 뜸';
-  const status = `<div class="pf">
-    <label>📡 수집기 현재 상태 <span class="hint">${fresh}</span></label>
-    ${st ? `<div class="hint" style="margin-bottom:8px;line-height:1.8">
-      현재 WiFi: <b>${curWifi?esc(curWifi):'(연결 없음/미상)'}</b><br>
-      위치: <b>${place}</b> · 차 BT: <b>${st.bt?esc(st.bt)+' 연결됨':'끊김'}</b>${(st.lat!=null&&st.lng!=null)?` · GPS <a href="https://maps.google.com/?q=${st.lat},${st.lng}" target="_blank">${st.lat.toFixed(5)}, ${st.lng.toFixed(5)} 🗺</a>`:''}</div>` : ''}
-    ${logBox}
-    <div class="row" style="margin-top:6px"><button onclick="renderPlaces()">새로고침 ↻</button></div>
-  </div>`;
-
-  // 위치 확인(센싱) 설정 — 말 걸기와 분리. '어떻게 위치를 확인할지'.
-  const sensing = `<div class="pf">
-    <label>위치 확인 <span class="hint">폰이 어떻게 위치를 알아낼지 (말 걸기와 별개)</span></label>
-    ${numField('poll_interval_sec', lc.poll_interval_sec, '확인 주기', '초')}
-    ${chkField('skip_on_known_wifi', lc.skip_on_known_wifi!==false, '등록된 WiFi에 물려 있으면 GPS 스킵(배터리 절약)')}
-    <div class="row" style="margin-top:6px"><button class="accent" onclick="saveSensing(this)">위치 확인 저장</button></div>
-  </div>`;
-  const coords = p => (p.lat!=null && p.lng!=null) ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '좌표 없음(폰에서 추가)';
-  const add = `<div class="pf">
-    <label>장소 추가 <span class="hint">새 장소를 직접 추가 (집·작업실 WiFi는 아래 각 장소에서 바로 수정)</span></label>
+async function renderPlaces(host){
+  const m=host||$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d,lc,st=null;
+  try{ d=await places(); lc=(await locCfg()).config; }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  try{ st=await collStatus(); }catch(e){}
+  const items=d.items||[];
+  const curWifi=(st&&st.wifi)?st.wifi:'';
+  const place=st?(st.visit_on&&st.place?esc(st.place):(st.visit_on?'어딘가 체류 중':'이동 중 / 미확정')):'';
+  const logBox=(st&&st.logs&&st.logs.length)
+    ? `<div style="background:#1c1b19;color:#d8d4cc;font:11px/1.55 ui-monospace,monospace;padding:8px 10px;border-radius:7px;max-height:220px;overflow:auto;white-space:pre-wrap">${st.logs.slice(-50).reverse().map(esc).join('\n')}</div>`
+    : '<div class="hint">최근 로그 없음</div>';
+  const fresh=st?(st.age_sec!=null?st.age_sec+'초 전 보고':'보고 시각 미상'):'아직 보고 없음';
+  const status=`<div class="pf"><label>📡 수집기 현재 상태 <span class="hint">${fresh}</span></label>
+    ${st?`<div class="hint" style="margin-bottom:8px;line-height:1.8">현재 WiFi: <b>${curWifi?esc(curWifi):'(연결 없음/미상)'}</b><br>
+      위치: <b>${place}</b> · 차 BT: <b>${st.bt?esc(st.bt)+' 연결됨':'끊김'}</b>${(st.lat!=null&&st.lng!=null)?` · GPS <a href="https://maps.google.com/?q=${st.lat},${st.lng}" target="_blank">${st.lat.toFixed(5)}, ${st.lng.toFixed(5)} 🗺</a>`:''}</div>`:''}
+    ${logBox}<div class="row" style="margin-top:6px"><button onclick="renderPlaces($('#sub'))">새로고침 ↻</button></div></div>`;
+  const sensing=`<div class="pf"><label>위치 확인 <span class="hint">폰이 어떻게 위치를 알아낼지</span></label>
+    ${numField('poll_interval_sec',lc.poll_interval_sec,'확인 주기','초')}
+    ${chkField('skip_on_known_wifi',lc.skip_on_known_wifi!==false,'등록 WiFi에 물려 있으면 GPS 스킵(배터리 절약)')}
+    <div class="row" style="margin-top:6px"><button class="accent" onclick="saveSensing(this)">위치 확인 저장</button></div></div>`;
+  const coords=p=>(p.lat!=null&&p.lng!=null)?`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`:'좌표 없음(폰에서 추가)';
+  const add=`<div class="pf"><label>장소 추가</label>
     <input id="npName" placeholder="이름 (예: 단골 카페)" style="${inStyle}">
-    <input id="npWifi" placeholder="WiFi (여러 개는 쉼표로 — 하나라도 잡히면 여기)" style="${inStyle}">
-    <input id="npBt" placeholder="블루투스 기기명 (여러 개는 쉼표로) · 선택" style="${inStyle}">
-    <textarea id="npDesc" placeholder="설명 — 동반자가 맥락으로 씀 (예: 주말마다 작업하는 조용한 곳)"
-      style="${inStyle};min-height:56px;font-family:inherit"></textarea>
-    <div class="row"><button class="accent" onclick="addPlace(this)">추가</button></div>
-  </div>`;
-  const rows = items.length ? items.map(p => `
-    <div class="pf" data-id="${p.id}" data-name="${esc(p.name)}">
-      <label>${KIND_LABEL[p.kind]||p.kind} <span class="hint">${coords(p)}</span></label>
-      <input data-name value="${esc(p.name)}" placeholder="장소 이름" style="${inStyle}">
-      <input data-wifi value="${esc((p.wifis||[]).join(', '))}" placeholder="WiFi (여러 개는 쉼표로, OR 매칭)" style="${inStyle}">
-      <input data-bt value="${esc((p.bts||[]).join(', '))}" placeholder="블루투스 기기명 (여러 개는 쉼표로, OR 매칭)" style="${inStyle}">
-      <textarea data-desc placeholder="설명 (동반자 맥락)"
-        style="${inStyle};min-height:52px;font-family:inherit">${esc(p.description||'')}</textarea>
-      <div class="row">
-        <button class="accent" onclick="savePlace('${p.id}', this)">저장</button>
-        ${curWifi ? `<button data-wc="${esc(curWifi)}" onclick="registerWifi('${p.id}', this)">현재 WiFi 추가</button>` : ''}
-        <button class="danger" onclick="delPlace('${p.id}')">삭제</button>
-      </div>
-    </div>`).join('')
-    : '<div class="empty">아직 등록된 장소가 없어요 — 위에서 추가하세요</div>';
-  m.innerHTML = `<div class="bar"><h2>장소</h2>
-    <span class="total">수집기 상태 + 위치 확인 설정 + 등록된 장소(WiFi·BT·설명 직접 수정)</span></div>`
-    + status + sensing + add + rows;
+    <input id="npWifi" placeholder="WiFi (여러 개는 쉼표 — 하나라도 잡히면 여기)" style="${inStyle}">
+    <input id="npBt" placeholder="블루투스 기기명 (쉼표) · 선택" style="${inStyle}">
+    <textarea id="npDesc" placeholder="설명 — 동반자가 맥락으로 씀" style="${inStyle};min-height:52px;font-family:inherit"></textarea>
+    <div class="row"><button class="accent" onclick="addPlace(this)">추가</button></div></div>`;
+  const rows=items.length?items.map(p=>`<div class="pf" data-id="${p.id}" data-name="${esc(p.name)}">
+    <label>${KIND_LABEL[p.kind]||p.kind} <span class="hint">${coords(p)}</span></label>
+    <input data-name value="${esc(p.name)}" style="${inStyle}">
+    <input data-wifi value="${esc((p.wifis||[]).join(', '))}" placeholder="WiFi (쉼표, OR)" style="${inStyle}">
+    <input data-bt value="${esc((p.bts||[]).join(', '))}" placeholder="BT (쉼표, OR)" style="${inStyle}">
+    <textarea data-desc placeholder="설명" style="${inStyle};min-height:50px;font-family:inherit">${esc(p.description||'')}</textarea>
+    <div class="row"><button class="accent" onclick="savePlace('${p.id}',this)">저장</button>
+      ${curWifi?`<button data-wc="${esc(curWifi)}" onclick="registerWifi('${p.id}',this)">현재 WiFi 추가</button>`:''}
+      <button class="danger" onclick="delPlace('${p.id}')">삭제</button></div></div>`).join('')
+    : '<div class="empty">등록된 장소 없음 — 위에서 추가</div>';
+  m.innerHTML=status+sensing+add+rows;
 }
-
 async function saveSensing(btn){
-  const patch = {};
-  document.querySelectorAll('[data-k]').forEach(el => {
-    const k = el.dataset.k;
+  const patch={};
+  ($('#sub')||document).querySelectorAll('[data-k]').forEach(el=>{ const k=el.dataset.k;
     if(!['poll_interval_sec','skip_on_known_wifi'].includes(k)) return;
-    patch[k] = el.type==='checkbox' ? el.checked : Number(el.value);
-  });
-  btn.disabled = true;
-  try{
-    await locCfg({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)});
-    btn.textContent = '저장됨 ✓';
-    setTimeout(() => { btn.textContent='위치 확인 저장'; btn.disabled=false; }, 1200);
+    patch[k]=el.type==='checkbox'?el.checked:Number(el.value); });
+  btn.disabled=true;
+  try{ await locCfg({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+    btn.textContent='저장됨 ✓'; setTimeout(()=>{btn.textContent='위치 확인 저장';btn.disabled=false;},1200);
   }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
 }
-
-const splitList = v => (v||'').split(',').map(s=>s.trim()).filter(Boolean);
-
+const splitList=v=>(v||'').split(',').map(s=>s.trim()).filter(Boolean);
 async function addPlace(btn){
-  const name = document.getElementById('npName').value.trim();
+  const name=document.getElementById('npName').value.trim();
   if(!name){ alert('이름을 적어주세요'); return; }
-  const wifis = splitList(document.getElementById('npWifi').value);
-  const bts = splitList(document.getElementById('npBt').value);
-  const description = document.getElementById('npDesc').value;
-  btn.disabled = true;
-  try{
-    await places('', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name, wifis, bts, description, kind:'place'})});
-    renderPlaces();
-  }catch(e){ alert('추가 실패: '+e.message); btn.disabled=false; }
+  btn.disabled=true;
+  try{ await places('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    name, wifis:splitList(document.getElementById('npWifi').value), bts:splitList(document.getElementById('npBt').value),
+    description:document.getElementById('npDesc').value, kind:'place'})}); renderPlaces($('#sub')); }
+  catch(e){ alert('추가 실패: '+e.message); btn.disabled=false; }
 }
-
-async function savePlace(id, btn){
-  const pf = btn.closest('.pf');
-  const name = (pf.querySelector('[data-name]')||{value:''}).value.trim() || pf.dataset.name;
-  const description = pf.querySelector('[data-desc]').value;
-  // WiFi·BT는 쉼표로 여러 개 — 빈 리스트면 해제. (입력칸은 현재 목록 프리필)
-  const wifis = splitList((pf.querySelector('[data-wifi]')||{value:''}).value);
-  const bts = splitList((pf.querySelector('[data-bt]')||{value:''}).value);
-  btn.disabled = true;
-  try{
-    await places('', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, name, description, wifis, bts})});
-    btn.textContent = '저장됨 ✓';
-    setTimeout(() => { btn.textContent='저장'; btn.disabled=false; }, 1200);
+async function savePlace(id,btn){
+  const pf=btn.closest('.pf');
+  const name=(pf.querySelector('[data-name]')||{value:''}).value.trim()||pf.dataset.name;
+  btn.disabled=true;
+  try{ await places('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    id, name, description:pf.querySelector('[data-desc]').value,
+    wifis:splitList((pf.querySelector('[data-wifi]')||{value:''}).value), bts:splitList((pf.querySelector('[data-bt]')||{value:''}).value)})});
+    btn.textContent='저장됨 ✓'; setTimeout(()=>{btn.textContent='저장';btn.disabled=false;},1200);
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
+}
+async function registerWifi(id,btn){
+  const wifi=btn.dataset.wc; if(!wifi) return;
+  const pf=btn.closest('.pf');
+  if(!confirm('현재 WiFi "'+wifi+'"를 \''+pf.dataset.name+'\'에 추가할까요?')) return;
+  const wifis=splitList((pf.querySelector('[data-wifi]')||{value:''}).value);
+  if(!wifis.includes(wifi)) wifis.push(wifi);
+  btn.disabled=true;
+  try{ await places('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name:pf.dataset.name,wifis})}); renderPlaces($('#sub')); }
+  catch(e){ alert('추가 실패: '+e.message); btn.disabled=false; }
+}
+async function delPlace(id){ if(!confirm('이 장소를 삭제할까요?')) return;
+  try{ await places('/'+encodeURIComponent(id),{method:'DELETE'}); renderPlaces($('#sub')); }catch(e){ alert('삭제 실패: '+e.message); }
+}
+async function collCfg(opts){ const r=await fetch('/collector-config',opts); if(!r.ok) throw new Error(r.status+' '+await r.text()); return r.json(); }
+async function renderCollector(host){
+  const m=host||$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let c; try{ c=(await collCfg()).config; }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  m.innerHTML=`<div class="pf">${chkField('enabled',c.enabled!==false,'<b>전체 켜기</b> (끄면 전송 안 함)')}</div>
+    <div class="pf"><label>수집 텀</label>${numField('sync_interval_min',c.sync_interval_min,'주기','분')}</div>
+    <div class="pf"><label>무엇을 수집할지</label>
+      ${chkField('collect_notifications',c.collect_notifications!==false,'앱 알림')}
+      ${chkField('collect_sms',c.collect_sms!==false,'문자(SMS)')}
+      ${chkField('collect_calls',c.collect_calls!==false,'부재중 통화')}
+      ${chkField('collect_location',c.collect_location!==false,'위치(GPS/WiFi/BT 체류·방문)')}</div>
+    <div style="margin-top:4px"><button class="accent" onclick="saveCollector(this)">저장</button></div>`;
+}
+async function saveCollector(btn){
+  const keys=['enabled','sync_interval_min','collect_sms','collect_calls','collect_notifications','collect_location'];
+  const patch={};
+  ($('#sub')||document).querySelectorAll('[data-k]').forEach(el=>{ const k=el.dataset.k; if(!keys.includes(k)) return;
+    patch[k]=el.type==='checkbox'?el.checked:Number(el.value); });
+  btn.disabled=true;
+  try{ await collCfg({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+    btn.textContent='저장됨 ✓'; setTimeout(()=>{btn.textContent='저장';btn.disabled=false;},1200);
   }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
 }
 
-// 수집기가 보고한 '현재 WiFi'를 이 장소의 WiFi 목록에 **추가**(OR 매칭 — 기존 것 유지).
-async function registerWifi(id, btn){
-  const wifi = btn.dataset.wc;
-  if(!wifi) return;
-  const pf = btn.closest('.pf');
-  if(!confirm('현재 WiFi "'+wifi+'"를 \''+pf.dataset.name+'\'에 추가할까요?')) return;
-  const wifis = splitList((pf.querySelector('[data-wifi]')||{value:''}).value);
-  if(!wifis.includes(wifi)) wifis.push(wifi);
-  btn.disabled = true;
-  try{
-    await places('', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, name: pf.dataset.name, wifis})});
-    renderPlaces();
-  }catch(e){ alert('추가 실패: '+e.message); btn.disabled=false; }
+// ══════════════════════════════════════════════════════════════
+//  설정: 모델 · 신호 제외
+// ══════════════════════════════════════════════════════════════
+async function renderModels(){
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d; try{ d=await api('/task-aliases'); }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  const sel=val=>'<option value="">(env 디폴트)</option>'+d.models.map(a=>`<option value="${esc(a)}" ${a===val?'selected':''}>${esc(a)}</option>`).join('');
+  m.innerHTML=`<div class="bar"><h2>모델</h2><span class="total">용도별 Nest 모델 — 저장 후 5초 내 반영 · 비우면 env 디폴트</span></div>`+
+    d.fields.map(f=>`<div class="pf"><label>${f.label} <span class="hint">${f.key}</span></label>
+      <select style="width:100%" onchange="saveTaskAlias('${f.key}',this.value)">${sel(f.value)}</select>
+      <div class="hint" style="margin-top:4px">실제 적용: ${esc(f.effective)||'(자동)'}</div></div>`).join('');
+}
+async function saveTaskAlias(key,value){
+  try{ await api('/task-aliases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value})}); renderModels(); }
+  catch(e){ alert('저장 실패: '+e.message); }
+}
+async function renderExcludes(){
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d; try{ d=await api('/signal-excludes'); }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  m.innerHTML=`<div class="bar"><h2>신호 제외</h2><span class="total">발신자·앱·내용에 아래 문구 포함되면 요약 제외 · 한 줄에 하나 · 원본은 남음</span></div>
+    <div class="pf"><label>제외 패턴 (부분일치, 대소문자 무시)</label>
+      <textarea id="exTa" style="min-height:220px" placeholder="예)&#10;CBC Maintenance&#10;광고">${esc((d.patterns||[]).join('\n'))}</textarea>
+      <div class="row"><button class="accent" onclick="saveExcludes(this)">저장</button><span class="hint">다음 요약부터 적용</span></div></div>`;
+}
+async function saveExcludes(btn){
+  const patterns=document.getElementById('exTa').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  btn.disabled=true;
+  try{ await api('/signal-excludes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patterns})});
+    btn.textContent='저장됨 ✓'; setTimeout(()=>{btn.textContent='저장';btn.disabled=false;},1200);
+  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
 }
 
-async function delPlace(id){
-  if(!confirm('이 장소를 삭제할까요?')) return;
-  try{ await places('/'+encodeURIComponent(id), {method:'DELETE'}); renderPlaces(); }
-  catch(e){ alert('삭제 실패: '+e.message); }
-}
-
-// ── 확인한 항목 (dismiss된 데스크 항목 — 검토·되돌리기) ──
-const DCAT = {action_needed:'당장처리', attention:'관심', acquaintance:'지인', low:'일반', spam:'스팸'};
+// ══════════════════════════════════════════════════════════════
+//  기록: 확인함 (dismissed)
+// ══════════════════════════════════════════════════════════════
+const DCAT={action_needed:'당장처리',attention:'관심',acquaintance:'지인',low:'일반',spam:'스팸'};
 async function renderDismissed(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let d;
-  try{ const r = await fetch('/dashboard/dismissed'); if(!r.ok) throw new Error(r.status); d = await r.json(); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  const items = d.items || [];
-  const rows = items.length ? items.map(it => `
-    <div class="pf" data-key="${esc(it.key)}">
-      <div class="hint" style="margin-bottom:4px">
-        ${fmtWhen(it.dismissed_at)} 확인${it.category?(' · '+(DCAT[it.category]||it.category)):''}</div>
-      <div style="margin-bottom:6px">${it.sender?('<b>'+esc(it.sender)+'</b> '):''}${esc(it.summary||'')}</div>
-      <div class="row"><button class="accent" onclick="undismiss(this)">되돌리기</button></div>
-    </div>`).join('')
-    : '<div class="empty">확인 처리한 항목이 없어요</div>';
-  m.innerHTML = `<div class="bar"><h2>확인한 항목</h2>
-    <span class="total">${items.length}건 — 되돌리면 데스크 '당장 처리'에 다시 떠요</span></div>` + rows;
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d; try{ const r=await fetch('/dashboard/dismissed'); if(!r.ok) throw new Error(r.status); d=await r.json(); }
+  catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  const items=d.items||[];
+  const rows=items.length?items.map(it=>`<div class="pf" data-key="${esc(it.key)}">
+    <div class="hint" style="margin-bottom:4px">${fmtWhen(it.dismissed_at)} 확인${it.category?(' · '+(DCAT[it.category]||it.category)):''}</div>
+    <div style="margin-bottom:6px">${it.sender?('<b>'+esc(it.sender)+'</b> '):''}${esc(it.summary||'')}</div>
+    <div class="row"><button class="accent" onclick="undismiss(this)">되돌리기</button></div></div>`).join('')
+    : '<div class="empty">확인 처리한 항목 없음</div>';
+  m.innerHTML=`<div class="bar"><h2>확인함</h2><span class="total">${items.length}건 — 되돌리면 데스크 '당장 처리'에 다시 떠요</span></div>`+rows;
 }
 async function undismiss(btn){
-  const pf = btn.closest('.pf');
-  const key = pf.dataset.key;
-  btn.disabled = true;
-  try{
-    await fetch('/dashboard/undismiss', {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({key})});
-    pf.style.opacity = 0.45;
-    btn.textContent = '되돌림 ✓ — 데스크에 다시 뜸';
-  }catch(e){ alert('실패: '+e.message); btn.disabled=false; }
+  const pf=btn.closest('.pf'); btn.disabled=true;
+  try{ await fetch('/dashboard/undismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:pf.dataset.key})});
+    pf.style.opacity=0.45; btn.textContent='되돌림 ✓'; }catch(e){ alert('실패: '+e.message); btn.disabled=false; }
 }
 
-// ── 캘린더 (구글 워크스페이스) ──
-function fmtEvent(e){
-  if(!e.start) return '';
-  const d = new Date(e.start);
-  if(isNaN(d)) return e.start;
-  return e.all_day
-    ? d.toLocaleDateString('ko',{month:'numeric',day:'numeric',weekday:'short'})
-    : d.toLocaleString('ko',{month:'numeric',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'});
-}
+// ══════════════════════════════════════════════════════════════
+//  기능: 캘린더
+// ══════════════════════════════════════════════════════════════
+function fmtEvent(e){ if(!e.start) return ''; const d=new Date(e.start); if(isNaN(d)) return e.start;
+  return e.all_day?d.toLocaleDateString('ko',{month:'numeric',day:'numeric',weekday:'short'})
+    :d.toLocaleString('ko',{month:'numeric',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'}); }
 async function renderCalendar(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let st;
-  try{ st = await (await fetch('/calendar/status')).json(); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let st; try{ st=await(await fetch('/calendar/status')).json(); }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
   let body;
   if(st.authed){
-    let evs = [];
-    try{ evs = ((await (await fetch('/calendar/upcoming?days=14')).json()).items)||[]; }catch(e){}
-    const rows = evs.length ? evs.map(e => `
-      <div class="pf">
-        <div style="margin-bottom:2px"><b>${esc(e.title)}</b>${e.all_day?' · 종일':''}</div>
-        <div class="hint">${esc(fmtEvent(e))}${e.location?(' · '+esc(e.location)):''}</div>
-      </div>`).join('') : '<div class="empty">앞으로 14일 일정이 없어요</div>';
-    const drop = `<div id="caldrop"
-      ondragover="event.preventDefault();this.style.background='#F2F0EB'"
+    let evs=[]; try{ evs=((await(await fetch('/calendar/upcoming?days=14')).json()).items)||[]; }catch(e){}
+    const rows=evs.length?evs.map(e=>`<div class="pf">
+      <div style="margin-bottom:2px"><b>${esc(e.title)}</b>${e.all_day?' · 종일':''}</div>
+      <div class="hint">${esc(fmtEvent(e))}${e.location?(' · '+esc(e.location)):''}</div></div>`).join('')
+      :'<div class="empty">앞으로 14일 일정 없음</div>';
+    const drop=`<div id="caldrop" ondragover="event.preventDefault();this.style.background='#F2F0EB'"
       ondragleave="this.style.background=''" ondrop="dropCalendar(event)"
-      style="border:1.5px dashed var(--hair);border-radius:6px;padding:16px;text-align:center;color:var(--gray);font-size:13px;margin:8px 0">
-      📅 일정 스크린샷을 여기로 드래그&드랍 — 인식해서 캘린더에 추가합니다
-      <div style="color:var(--faint);font-size:11.5px;margin-top:3px">카톡·문자·포스터·초대장 등 (여러 일정도 OK)</div>
-      <div id="calmsg" style="color:var(--faint);font-size:12px;margin-top:6px"></div></div>`;
-    body = `<div class="pf"><label>연동됨 ✓ <span class="hint">${esc(st.account||st.calendar_id||'')}</span></label></div>` + drop + rows;
-  } else {
-    const step = st.has_client
-      ? `클라이언트 파일(gcal_credentials.json)은 준비됐어요. <b>scripts/gcal_auth.py</b>만 실행하면 됩니다.`
-      : `아직 OAuth 클라이언트(<b>gcal_credentials.json</b>)가 없어요.`;
-    body = `<div class="pf">
-      <label>아직 연동 안 됨</label>
-      <div class="hint" style="line-height:1.9;margin-top:6px">
-        ${step}<br><br>
-        <b>인증 절차 (한 번만):</b><br>
-        1. Google Cloud Console → 프로젝트 → ‘Google Calendar API’ 사용 설정<br>
-        2. OAuth 동의화면(테스트 사용자=본인) + OAuth 클라이언트 ID(<b>데스크톱 앱</b>) 생성 → JSON 다운로드<br>
-        3. 그 파일을 <code>~/projects/oracle/gcal_credentials.json</code> 로 저장<br>
-        4. <code>cd ~/projects/oracle &amp;&amp; backend/.venv/bin/python scripts/gcal_auth.py</code><br>
-        5. 브라우저 동의 → <code>gcal_token.json</code> 생성 → 끝(이 페이지 새로고침)
-      </div>
-      <div class="row" style="margin-top:8px"><button onclick="renderCalendar()">상태 새로고침 ↻</button></div>
-    </div>`;
+      style="border:1.5px dashed var(--hair);border-radius:9px;padding:16px;text-align:center;color:var(--gray);font-size:13px;margin:0 0 12px">
+      📅 일정 스크린샷을 여기로 드래그&드랍 — 인식해서 캘린더에 추가
+      <div class="hint" style="margin-top:3px">카톡·문자·포스터·초대장 등 (여러 일정·연속 투입 OK)</div>
+      <div id="calmsg" class="hint" style="margin-top:6px"></div></div>`;
+    body=`<div class="hint" style="margin-bottom:10px">연동됨 ✓ ${esc(st.account||st.calendar_id||'')}</div>`+drop+rows;
+  }else{
+    const step=st.has_client?`클라이언트 파일은 준비됨. <b>scripts/gcal_auth.py</b>만 실행.`:`아직 OAuth 클라이언트(<b>gcal_credentials.json</b>) 없음.`;
+    body=`<div class="pf"><label>아직 연동 안 됨</label>
+      <div class="hint" style="line-height:1.9;margin-top:6px">${step}<br><br><b>인증(한 번만):</b><br>
+      1. Google Cloud Console → ‘Google Calendar API’ 사용<br>
+      2. OAuth 동의화면 + 클라이언트 ID(데스크톱 앱) → JSON 다운로드<br>
+      3. <code>~/projects/oracle/gcal_credentials.json</code> 저장<br>
+      4. <code>backend/.venv/bin/python scripts/gcal_auth.py</code><br>
+      5. 동의 → 끝(새로고침)</div>
+      <div class="row" style="margin-top:8px"><button onclick="renderCalendar()">상태 새로고침 ↻</button></div></div>`;
   }
-  m.innerHTML = `<div class="bar"><h2>캘린더</h2>
-    <span class="total">구글 캘린더 — 일정이 데스크·동반자 맥락에 들어가요</span></div>` + body;
+  m.innerHTML=`<div class="bar"><h2>캘린더</h2><span class="total">구글 캘린더 — 일정이 데스크·동반자 맥락에</span></div>`+body;
 }
-// 일정 스크린샷 드롭 → 인식 → 캘린더 등록
-function dropCalendar(e){
-  e.preventDefault();
+function dropCalendar(e){ e.preventDefault();
   const z=document.getElementById('caldrop'); if(z) z.style.background='';
   [...((e.dataTransfer&&e.dataTransfer.files)||[])].forEach(file=>enqueueDrop({
     file, msgEl:'calmsg', url:'/calendar/screenshot', after:renderCalendar,
     done:(r,f)=>r.ok?`✓ ${f.name}: 일정 ${r.count}건 추가`:`✗ ${f.name}: ${r.reason||'인식 실패'}`}));
 }
 
-// ── 수집 기록 (수집기가 저장한 여정·주차·신호 전체) ──
-const SKIND = {sms:'문자', missed_call:'부재중', notification:'앱 알림'};
-function mapsLink(la, lo){
-  return (la!=null && lo!=null) ? ` <a href="https://maps.google.com/?q=${la},${lo}" target="_blank">🗺</a>` : '';
-}
+// ══════════════════════════════════════════════════════════════
+//  기록: 활동 로그 (여정·주차·신호)
+// ══════════════════════════════════════════════════════════════
+const SKIND={sms:'문자',missed_call:'부재중',notification:'앱 알림'};
+function mapsLink(la,lo){ return (la!=null&&lo!=null)?` <a href="https://maps.google.com/?q=${la},${lo}" target="_blank">🗺</a>`:''; }
 function hm(iso){ const d=new Date(iso); return isNaN(d)?'':d.toLocaleTimeString('ko',{hour:'2-digit',minute:'2-digit'}); }
 async function renderCollected(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let d;
-  try{ d = await (await fetch('/collector-records?limit=150')).json(); }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  const v = d.visits||[], pk = d.parking||[], sg = d.signals||[];
-  const rowStyle = 'padding:7px 12px;border-bottom:1px solid var(--hair);display:flex;gap:8px;align-items:center;flex-wrap:wrap';
-  // 위치 라벨: 좌표 있는 기록에 '이 자리를 장소로 등록' — 다음부터 자동 인식(집·사무실처럼)
-  const labelUI = (kind, id, lat, lng) => (lat!=null && lng!=null)
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let d; try{ d=await(await fetch('/collector-records?limit=150')).json(); }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  const v=d.visits||[], pk=d.parking||[], sg=d.signals||[];
+  const rowStyle='padding:7px 12px;border-bottom:1px solid var(--hair);display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+  const labelUI=(kind,id,lat,lng)=>(lat!=null&&lng!=null)
     ? `<span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center">
         <input id="ll-${kind}-${id}" placeholder="장소 라벨" style="width:104px;font-size:12px" onclick="event.stopPropagation()">
-        <button style="font-size:11px;padding:2px 7px" onclick="saveLocLabel('${kind}','${id}','ll-${kind}-${id}',${lat},${lng})">장소로 저장</button></span>`
-    : '';
-  // ⚠ 오류 플래그 · ✎ 좌표 수정 · 🗑 삭제
-  const actUI = (kind, id, lat, lng, err) => `<span style="display:inline-flex;gap:6px;margin-left:6px;font-size:11.5px">
+        <button style="font-size:11px;padding:2px 7px" onclick="saveLocLabel('${kind}','${id}','ll-${kind}-${id}',${lat},${lng})">장소로 저장</button></span>` : '';
+  const actUI=(kind,id,lat,lng,err)=>`<span style="display:inline-flex;gap:6px;margin-left:6px;font-size:11.5px">
       <span onclick="toggleErr('${kind}','${id}',${err?'false':'true'})" style="cursor:pointer;color:${err?'var(--vermilion)':'var(--faint)'}" title="${err?'오류 해제':'위치 오류로 표시'}">⚠${err?'오류':''}</span>
       <span onclick="editCoords('${kind}','${id}',${lat},${lng})" style="cursor:pointer;color:var(--faint)" title="좌표 수정">✎</span>
       <span onclick="delLoc('${kind}','${id}')" style="cursor:pointer;color:var(--faint)" title="삭제">🗑</span></span>`;
-  const visitRows = v.length ? v.map(x => `<div style="${rowStyle}${x.error?';opacity:.5':''}">
+  const visitRows=v.length?v.map(x=>`<div style="${rowStyle}${x.error?';opacity:.5':''}">
       <b>${x.error?'⚠ ':''}${x.name?esc(x.name):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span>${actUI('visit',x.id,x.lat,x.lng,x.error)}${labelUI('visit',x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">여정 기록 없음</div>';
-  const parkRows = pk.length ? pk.map(x => `<div style="${rowStyle}${x.error?';opacity:.5':''}">
+  const parkRows=pk.length?pk.map(x=>`<div style="${rowStyle}${x.error?';opacity:.5':''}">
       🅿 <b>${x.error?'⚠ ':''}${x.place?esc(x.place):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span>${actUI('parking',x.id,x.lat,x.lng,x.error)}${labelUI('parking',x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">주차 기록 없음</div>';
-  const sigRows = sg.length ? sg.map(x => `<div style="${rowStyle}">
+  const sigRows=sg.length?sg.map(x=>`<div style="${rowStyle}">
       <span class="hint">[${SKIND[x.kind]||x.kind}] ${fmtWhen(x.ts)}</span> <b>${esc(x.sender||'')}</b> ${esc((x.body||'').slice(0,60))}</div>`).join('')
     : '<div class="empty">신호 없음</div>';
-  m.innerHTML = `<div class="bar"><h2>수집 기록</h2>
-      <span class="total">수집기가 저장한 것 전체 — 여정·주차·신호 (최신순)</span></div>
-    <div class="pf"><label>🚶 여정 / 방문 <span class="hint">${v.length}건</span></label>
-      <div style="margin-top:4px">${visitRows}</div></div>
-    <div class="pf"><label>🅿 주차 <span class="hint">${pk.length}건</span></label>
-      <div style="margin-top:4px">${parkRows}</div></div>
-    <div class="pf"><label>📨 신호 (문자·부재중·앱) <span class="hint">${sg.length}건</span></label>
-      <div style="margin-top:4px">${sigRows}</div></div>
-    <div class="row" style="margin-top:8px"><button onclick="renderCollected()">새로고침 ↻</button></div>`;
+  m.innerHTML=`<div class="bar"><h2>활동 로그</h2><span class="total">수집기가 저장한 것 — 여정·주차·신호 (최신순)</span></div>
+    <div class="pf"><label>🚶 여정 / 방문 <span class="hint">${v.length}건</span></label><div style="margin-top:4px">${visitRows}</div></div>
+    <div class="pf"><label>🅿 주차 <span class="hint">${pk.length}건</span></label><div style="margin-top:4px">${parkRows}</div></div>
+    <div class="pf"><label>📨 신호 <span class="hint">${sg.length}건</span></label><div style="margin-top:4px">${sigRows}</div></div>
+    <div style="margin-top:8px"><button onclick="renderCollected()">새로고침 ↻</button></div>`;
 }
-// 수집기록의 한 위치를 '장소'로 등록 — 다음부터 그 자리 도착/주차가 이 이름으로 자동 인식
-async function saveLocLabel(kind, id, inputId, lat, lng){
-  const el=document.getElementById(inputId);
-  const name=(el.value||'').trim();
+async function saveLocLabel(kind,id,inputId,lat,lng){
+  const el=document.getElementById(inputId); const name=(el.value||'').trim();
   if(!name){ alert('장소 이름을 입력하세요'); el.focus(); return; }
   el.disabled=true;
-  try{
-    const r=await (await fetch('/locations/label',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({kind, id, name, lat, lng})})).json();
-    renderCollected();
-  }catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
+  try{ await fetch('/locations/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,id,name,lat,lng})}); renderCollected(); }
+  catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
 }
-// 위치 오류 플래그(잘못 찍힌 위치 — 일기·동반자 맥락서 제외)
-async function toggleErr(kind, id, val){
-  try{ await fetch('/locations/edit',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({kind, id, error: val==='true'||val===true})}); renderCollected(); }
+async function toggleErr(kind,id,val){
+  try{ await fetch('/locations/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,id,error:val==='true'||val===true})}); renderCollected(); }
   catch(e){ alert('실패: '+e.message); }
 }
-// 좌표 직접 수정 — 잘못 찍힌 위치를 임의 좌표로
-async function editCoords(kind, id, lat, lng){
-  const cur=(lat!=null&&lng!=null)?lat+','+lng:'';
-  const v=prompt('새 좌표 (위도,경도)', cur);
+async function editCoords(kind,id,lat,lng){
+  const v=prompt('새 좌표 (위도,경도)', (lat!=null&&lng!=null)?lat+','+lng:'');
   if(v==null) return;
-  const m=v.split(',').map(s=>parseFloat(s.trim()));
-  if(m.length!==2||isNaN(m[0])||isNaN(m[1])){ alert('형식: 위도,경도 (예: 37.5,127.0)'); return; }
-  try{ await fetch('/locations/edit',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({kind, id, lat:m[0], lng:m[1]})}); renderCollected(); }
+  const mm=v.split(',').map(s=>parseFloat(s.trim()));
+  if(mm.length!==2||isNaN(mm[0])||isNaN(mm[1])){ alert('형식: 위도,경도 (예: 37.5,127.0)'); return; }
+  try{ await fetch('/locations/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,id,lat:mm[0],lng:mm[1]})}); renderCollected(); }
   catch(e){ alert('실패: '+e.message); }
 }
-async function delLoc(kind, id){
-  if(!confirm('이 기록을 삭제할까요?')) return;
-  try{ await fetch('/locations/delete',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({kind, id})}); renderCollected(); }
+async function delLoc(kind,id){ if(!confirm('이 기록을 삭제할까요?')) return;
+  try{ await fetch('/locations/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,id})}); renderCollected(); }
   catch(e){ alert('삭제 실패: '+e.message); }
 }
 
-// ── 수집기 설정 (Android 네이티브 수집기가 매 사이클 fetch해 적용) ──
-async function collCfg(opts){
-  const r = await fetch('/collector-config', opts);
-  if(!r.ok) throw new Error(r.status + ' ' + await r.text());
-  return r.json();
-}
-async function renderCollector(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let c;
-  try{ c = (await collCfg()).config; }
-  catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  m.innerHTML = `<div class="bar"><h2>수집기</h2>
-      <span class="total">Android 네이티브 수집기 — 매 사이클 이 설정을 받아 적용 · 앱 알림·문자·통화</span></div>
-    <div class="pf">
-      ${chkField('enabled', c.enabled!==false, '<b>전체 켜기</b> (끄면 수집기가 전송 안 함)')}
-    </div>
-    <div class="pf">
-      <label>수집 텀</label>
-      ${numField('sync_interval_min', c.sync_interval_min, '주기', '분')}
-    </div>
-    <div class="pf">
-      <label>무엇을 수집할지</label>
-      ${chkField('collect_notifications', c.collect_notifications!==false, '앱 알림')}
-      ${chkField('collect_sms', c.collect_sms!==false, '문자(SMS)')}
-      ${chkField('collect_calls', c.collect_calls!==false, '부재중 통화')}
-      ${chkField('collect_location', c.collect_location!==false, '위치(GPS/WiFi/BT 체류·방문·도착말걸기)')}
-    </div>
-    <div class="pf" style="border:none;background:none;padding:0">
-      <button class="accent" onclick="saveCollector(this)">저장</button>
-    </div>`;
-}
-async function saveCollector(btn){
-  const keys = ['enabled','sync_interval_min','collect_sms','collect_calls','collect_notifications','collect_location'];
-  const patch = {};
-  document.querySelectorAll('[data-k]').forEach(el => {
-    const k = el.dataset.k;
-    if(!keys.includes(k)) return;
-    patch[k] = el.type==='checkbox' ? el.checked : Number(el.value);
-  });
-  btn.disabled = true;
-  try{
-    await collCfg({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)});
-    btn.textContent='저장됨 ✓';
-    setTimeout(()=>{ btn.textContent='저장'; btn.disabled=false; }, 1200);
-  }catch(e){ alert('저장 실패: '+e.message); btn.disabled=false; }
-}
-
-function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-
-async function del(id, ev){
-  ev.stopPropagation();
-  if(!confirm(`삭제할까요?\n${id}`)) return;
-  try{ await api(`/collection/${CUR}/${encodeURIComponent(id)}`, {method:'DELETE'});
-    await loadStats(); render(); }
-  catch(e){ alert('삭제 실패: '+e.message); }
-}
-
-// ── 💰 가계부 — 회계 대차대조표 스타일 ──
-let LP = 'month';
-async function renderLedger(){
-  const m = $('#main');
-  m.innerHTML = '<div class="empty">로딩…</div>';
-  let s, list, cats;
-  try{
-    s = await (await fetch(`/ledger/settlement?period=${LP}`)).json();
-    list = await (await fetch(`/ledger/list?period=${LP}`)).json();
-    cats = await (await fetch('/ledger/categories')).json();
-  }catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
-  window.LCATS = cats.categories||[];
-  const won = n => (Number(n)||0).toLocaleString('ko')+'원';
-  const R='text-align:right;font-variant-numeric:tabular-nums';
-  const TB='border-collapse:collapse;width:100%;font-size:13px';
-  const TD='padding:5px 8px;border-bottom:1px solid var(--hair)';
-  const expRows = (s.by_category||[]).length
-    ? s.by_category.map(c=>`<tr><td style="${TD}">${c.name}</td><td style="${TD};${R}">${won(c.amount)}</td></tr>`).join('')
-    : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
-  const incRows = s.income
-    ? `<tr><td style="${TD}">수입(입금·급여 등)</td><td style="${TD};${R}">${won(s.income)}</td></tr>`
-    : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
-  const kv=(label,val)=>`<div style="margin:4px 0;font-size:12.5px"><b style="color:var(--gray)">${label}</b> ${val||'—'}</div>`;
-  const join=(arr,f)=>(arr||[]).map(f).join(' · ');
-  // 거래내역(장부) — 최신순
-  const txRows = (list.items||[]).length
-    ? list.items.slice().reverse().map(it=>{
-        const inc2 = it.kind==='income';
-        const desc = it.merchant || it.memo || (inc2?'입금':'결제');
-        const tag = (it.needs&&it.needs.length)?' <span style="color:var(--vermilion);font-size:11px">확인필요</span>':'';
-        const imgs = it.receipt_images||[];
-        const parts = it.amount_parts||[];
-        const diffTag = it.diff?` <span style="color:#fff;background:var(--vermilion);font-size:10.5px;padding:1px 5px;border-radius:3px" title="영수증 금액 불일치 — 펼쳐서 판독">🔺 금액다름</span>`:'';
-        const sumTag = (parts.length>1&&!it.diff)?` <span style="color:var(--gray);font-size:10.5px;border:1px solid var(--hair);padding:1px 5px;border-radius:3px" title="여러 영수증 합산">합산 ${parts.length}</span>`:'';
-        const hasDetail = (it.items&&it.items.length) || imgs.length || it.diff || it.approval_no;
-        const chev = hasDetail?`<span id="cv-${it.id}" style="color:var(--faint);display:inline-block;width:12px">▸</span> `:'<span style="display:inline-block;width:12px"></span> ';
-        const cam = imgs.length?` <span style="color:var(--faint);font-size:11px">📷${imgs.length}</span>`:'';
-        const rcptBtn = ` <label style="cursor:pointer" title="이 건에 영수증 올리기" onclick="event.stopPropagation()">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`;
-        const main = `<tr style="cursor:${hasDetail?'pointer':'default'}" ${hasDetail?`onclick="toggleDetail('${it.id}')"`:''}>
-          <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
-          <td style="${TD}">${chev}${desc}${diffTag}${sumTag}${tag}${cam}${rcptBtn}</td>
-          <td style="${TD};white-space:nowrap;font-size:12px"><span onclick="event.stopPropagation();editCat('${it.id}',this)" style="cursor:pointer;color:${it.category?'var(--gray)':'var(--faint)'};border-bottom:1px dotted var(--hair)" title="분류 수정">${it.category||'분류'}</span></td>
-          <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
-          <td style="${TD};${R};color:${(inc2||it.diff)?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
-        let detail='';
-        if(hasDetail){
-          const apprTxt = it.approval_no?`<div style="font-size:11.5px;color:var(--faint);margin-bottom:5px">승인번호 ${it.approval_no}</div>`:'';
-          const sumTxt = (parts.length>1&&!it.diff)?`<div style="font-size:12px;margin-bottom:6px"><span style="color:var(--faint)">합산</span>&nbsp; ${parts.map(won).join(' + ')} = <b>${won(it.amount)}</b></div>`:'';
-          const itemsTxt = (it.items&&it.items.length)?`<div style="font-size:12.5px;margin-bottom:7px"><span style="color:var(--faint)">내역</span>&nbsp; ${it.items.join(', ')}</div>`:'';
-          const thumbs = imgs.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px">${imgs.map(im=>`<img src="/photos/${im}" onclick="lightbox('/photos/${im}')" loading="lazy" style="width:64px;height:64px;object-fit:cover;border:1px solid var(--hair);border-radius:4px;cursor:zoom-in" title="크게 보기">`).join('')}</div>`:'';
-          const diffUI = it.diff?`<div style="background:#FBEEEC;border:1px solid var(--vermilion);border-radius:5px;padding:8px 10px;font-size:12.5px">
-              <div style="margin-bottom:6px">🔺 <b>영수증마다 금액이 달라요</b> — 맞는 금액을 고르거나 입력하세요:</div>
-              ${parts.map(p=>`<button onclick="resolveDiff('${it.id}',${p})" style="margin:2px 5px 2px 0">${won(p)}</button>`).join('')}
-              <input id="df-${it.id}" type="number" placeholder="직접 입력" style="width:110px">
-              <button onclick="resolveDiff('${it.id}',document.getElementById('df-${it.id}').value)">확정</button></div>`:'';
-          detail = `<tr id="det-${it.id}" style="display:none"><td colspan="5" style="padding:2px 12px 12px 28px;border-top:none">${apprTxt}${sumTxt}${itemsTxt}${thumbs}${diffUI}</td></tr>`;
-        }
-        return main+detail;
-      }).join('')
-    : `<tr><td style="${TD};color:var(--faint)" colspan="5">거래내역 없음</td></tr>`;
-  // 확인필요 = 거래내역(이번 기간)에서 needs 있는 것 그대로 — 위 태그와 정확히 일치
-  const incItems=(list.items||[]).filter(it=>it.needs&&it.needs.length).slice().reverse();
-  const needs= incItems.length
-    ? incItems.map(it=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
-        <span style="color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</span>
-        <b style="white-space:nowrap">${won(it.amount)}</b> <span style="color:var(--gray)">${it.method||''}</span>
-        <input id="mc-${it.id}" placeholder="가맹점" style="width:130px;margin-left:auto">
-        <button onclick="fillLedger('${it.id}')">저장</button>
-        <label style="cursor:pointer" title="영수증 올려서 채우기">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label></div>`).join('')
-    : '<div style="color:var(--faint);font-size:13px">없음 — 다 확인됨 👍</div>';
-  const drop = `<div id="rcptdrop"
-    ondragover="event.preventDefault();this.style.background='#F2F0EB'"
-    ondragleave="this.style.background=''" ondrop="dropReceipt(event)"
-    style="border:1.5px dashed var(--hair);border-radius:6px;padding:16px;text-align:center;
-           color:var(--gray);font-size:13px;margin:6px 0">
-    📄 영수증을 여기로 드래그&드랍 — 알아서 인식해서 결제내역에 매칭합니다
-    <div style="color:var(--faint);font-size:11.5px;margin-top:3px">PDF·여러 장 묶음도 OK (페이지마다 따로 처리)</div>
-    <div id="rcptmsg" style="color:var(--faint);font-size:12px;margin-top:6px"></div></div>`;
-  const ruleChips = (cats.rules||[]).map(r=>`<span style="border:1px solid var(--hair);border-radius:10px;padding:1px 7px;white-space:nowrap">${esc(r.name)}→${esc(r.category)}${r.source==='seed'?'':` <span onclick="delRule('${r.id}')" style="cursor:pointer;color:var(--faint)" title="규칙 삭제">✕</span>`}</span>`).join(' ');
-  const ruleBar = `<div style="margin:6px 0;font-size:12px">
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <span class="hint">분류 규칙 ${(cats.rules||[]).length}개 · 규칙 우선 → 품목 LLM</span>
-      <button onclick="upgradeCats(this)" style="font-size:12px">LLM 분류 업그레이드</button>
-      <button onclick="recat(this)" style="font-size:12px">규칙 재적용</button>
-      <span id="catmsg" class="hint"></span></div>
-    ${ruleChips?`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;color:var(--gray)">${ruleChips}</div>`:''}</div>`;
-  const netColor = s.net>=0 ? 'var(--vermilion)' : '#999';
-  m.innerHTML = `
-    <div class="bar"><h2>가계부 · ${LP==='month'?'이번 달':'이번 주'}</h2>
-      <span class="hint">${s.start} ~ ${s.end} · ${s.count}건</span>
-      <button onclick="LP='week';renderLedger()" ${LP==='week'?'disabled':''}>주간</button>
-      <button onclick="LP='month';renderLedger()" ${LP==='month'?'disabled':''}>월간</button></div>
-    ${drop}
-    ${ruleBar}
-    <div style="display:flex;gap:18px;flex-wrap:wrap">
-      <table style="${TB};flex:1;min-width:230px"><thead><tr>
-        <th style="${TD};text-align:left">수입</th><th style="${TD};${R}">금액</th></tr></thead>
-        <tbody>${incRows}</tbody>
-        <tfoot><tr><td style="${TD};font-weight:600">수입계</td><td style="${TD};${R};font-weight:600">${won(s.income)}</td></tr></tfoot></table>
-      <table style="${TB};flex:1;min-width:230px"><thead><tr>
-        <th style="${TD};text-align:left">지출 (분류별)</th><th style="${TD};${R}">금액</th></tr></thead>
-        <tbody>${expRows}</tbody>
-        <tfoot><tr><td style="${TD};font-weight:600">지출계</td><td style="${TD};${R};font-weight:600">${won(s.expense)}</td></tr></tfoot></table>
-    </div>
-    <div style="margin:14px 0;font-size:16px;font-weight:600;color:${netColor}">순액 ${s.net>=0?'+':''}${won(s.net)}</div>
-    ${kv('결제수단', join(s.by_method, x=>`${x.name} ${won(x.amount)}`))}
-    ${kv('많이 쓴 곳', join(s.top_merchants, x=>`${x.name} ${won(x.amount)}`))}
-    ${kv('정기결제(추정)', join(s.recurring, x=>`${x.merchant} ${won(x.amount)}`))}
-    <h3 style="margin:22px 0 6px">거래내역 (장부 · ${(list.items||[]).length}건)</h3>
-    <table style="${TB}"><thead><tr>
-      <th style="${TD};text-align:left">날짜</th><th style="${TD};text-align:left">내역</th>
-      <th style="${TD};text-align:left">분류</th>
-      <th style="${TD};text-align:left">결제수단</th><th style="${TD};${R}">금액</th></tr></thead>
-      <tbody>${txRows}</tbody></table>
-    <h3 style="margin:22px 0 6px">지출내역 확인필요 ${incItems.length?`(${incItems.length})`:''}</h3>
-    ${needs}`;
-}
-// 거래내역 분류 직접 수정 — 클릭하면 드롭다운
-function editCat(id, el){
-  const cur=el.textContent.trim(), cats=window.LCATS||[];
-  const sel=document.createElement('select');
-  sel.style.cssText='font-size:12px';
-  sel.innerHTML='<option value="">—</option>'+cats.map(c=>`<option ${c===cur?'selected':''}>${c}</option>`).join('');
-  sel.onchange=async()=>{
-    try{ await fetch('/ledger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:sel.value})}); renderLedger(); }
-    catch(e){ alert('저장 실패: '+e.message); }
-  };
-  sel.onblur=()=>renderLedger();
-  el.replaceWith(sel); sel.focus();
-}
-async function upgradeCats(btn){
-  btn.disabled=true; const msg=document.getElementById('catmsg'); msg.textContent='LLM이 품목 보고 분류 중…';
-  try{ const r=await (await fetch('/ledger/upgrade',{method:'POST'})).json();
-    msg.textContent=`규칙 ${r.added}개 추가 · ${r.recategorized}건 재분류`; setTimeout(renderLedger,1600);
-  }catch(e){ msg.textContent='실패: '+e.message; btn.disabled=false; }
-}
-async function recat(btn){
-  btn.disabled=true; const msg=document.getElementById('catmsg'); msg.textContent='규칙 재적용 중…';
-  try{ const r=await (await fetch('/ledger/recategorize',{method:'POST'})).json();
-    msg.textContent=`${r.changed}건 재분류`; setTimeout(renderLedger,1200);
-  }catch(e){ msg.textContent='실패: '+e.message; btn.disabled=false; }
-}
-async function delRule(id){
-  if(!confirm('이 분류 규칙을 삭제할까요?')) return;
-  try{ await fetch('/ledger/rules/'+encodeURIComponent(id),{method:'DELETE'}); renderLedger(); }
-  catch(e){ alert('삭제 실패: '+e.message); }
-}
-// 드롭 큐 — 여러 파일·연속 투입을 쌓아 하나씩 순차 처리(처리 중에 더 넣으면 대기열에).
+// ── 드롭 큐 (영수증·캘린더 공용) — 여러 파일·연속 투입을 하나씩 순차 ──
 const DROPQ={items:[],busy:false};
 function enqueueDrop(job){ DROPQ.items.push(job); if(!DROPQ.busy) runDropQueue(); }
 async function runDropQueue(){
@@ -914,76 +646,171 @@ async function runDropQueue(){
     const job=DROPQ.items[0], msg=document.getElementById(job.msgEl), remain=DROPQ.items.length-1;
     if(msg) msg.textContent=`처리 중: ${job.file.name}${remain?` · 대기 ${remain}건`:''}`;
     let line;
-    try{
-      const fd=new FormData(); fd.append('file', job.file);
-      const r=await (await fetch(job.url,{method:'POST',body:fd})).json();
-      line=job.done(r, job.file);
+    try{ const fd=new FormData(); fd.append('file',job.file);
+      const r=await(await fetch(job.url,{method:'POST',body:fd})).json(); line=job.done(r,job.file);
     }catch(err){ line=`✗ ${job.file.name}: ${err.message}`; }
     DROPQ.items.shift(); lastAfter=job.after;
     const m2=document.getElementById(job.msgEl);
     if(m2) m2.textContent=line+(DROPQ.items.length?` · 대기 ${DROPQ.items.length}건`:'');
   }
-  DROPQ.busy=false;
-  if(lastAfter) setTimeout(lastAfter, 1600);
+  DROPQ.busy=false; if(lastAfter) setTimeout(lastAfter,1600);
 }
-function dropReceipt(e){
-  e.preventDefault();
+
+// ══════════════════════════════════════════════════════════════
+//  기능: 가계부
+// ══════════════════════════════════════════════════════════════
+let LP='month';
+async function renderLedger(){
+  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  let s,list,cats;
+  try{ s=await(await fetch(`/ledger/settlement?period=${LP}`)).json();
+    list=await(await fetch(`/ledger/list?period=${LP}`)).json();
+    cats=await(await fetch('/ledger/categories')).json();
+  }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
+  window.LCATS=cats.categories||[];
+  const won=n=>(Number(n)||0).toLocaleString('ko')+'원';
+  const R='text-align:right;font-variant-numeric:tabular-nums';
+  const TB='border-collapse:collapse;width:100%;font-size:13px';
+  const TD='padding:5px 8px;border-bottom:1px solid var(--hair)';
+  const expRows=(s.by_category||[]).length?s.by_category.map(c=>`<tr><td style="${TD}">${c.name}</td><td style="${TD};${R}">${won(c.amount)}</td></tr>`).join('')
+    : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
+  const incRows=s.income?`<tr><td style="${TD}">수입(입금·급여 등)</td><td style="${TD};${R}">${won(s.income)}</td></tr>`
+    : `<tr><td style="${TD};color:var(--faint)" colspan="2">—</td></tr>`;
+  const kv=(label,val)=>`<div style="margin:4px 0;font-size:12.5px"><b style="color:var(--gray)">${label}</b> ${val||'—'}</div>`;
+  const join=(arr,f)=>(arr||[]).map(f).join(' · ');
+  const txRows=(list.items||[]).length?list.items.slice().reverse().map(it=>{
+      const inc2=it.kind==='income';
+      const desc=it.merchant||it.memo||(inc2?'입금':'결제');
+      const tag=(it.needs&&it.needs.length)?' <span style="color:var(--vermilion);font-size:11px">확인필요</span>':'';
+      const imgs=it.receipt_images||[], parts=it.amount_parts||[];
+      const diffTag=it.diff?` <span style="color:#fff;background:var(--vermilion);font-size:10.5px;padding:1px 5px;border-radius:3px" title="영수증 금액 불일치 — 펼쳐서 판독">🔺 금액다름</span>`:'';
+      const sumTag=(parts.length>1&&!it.diff)?` <span style="color:var(--gray);font-size:10.5px;border:1px solid var(--hair);padding:1px 5px;border-radius:3px" title="여러 영수증 합산">합산 ${parts.length}</span>`:'';
+      const hasDetail=(it.items&&it.items.length)||imgs.length||it.diff||it.approval_no;
+      const chev=hasDetail?`<span id="cv-${it.id}" style="color:var(--faint);display:inline-block;width:12px">▸</span> `:'<span style="display:inline-block;width:12px"></span> ';
+      const cam=imgs.length?` <span style="color:var(--faint);font-size:11px">📷${imgs.length}</span>`:'';
+      const rcptBtn=` <label style="cursor:pointer" title="이 건에 영수증 올리기" onclick="event.stopPropagation()">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`;
+      const main=`<tr style="cursor:${hasDetail?'pointer':'default'}" ${hasDetail?`onclick="toggleDetail('${it.id}')"`:''}>
+        <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
+        <td style="${TD}">${chev}${desc}${diffTag}${sumTag}${tag}${cam}${rcptBtn}</td>
+        <td style="${TD};white-space:nowrap;font-size:12px"><span onclick="event.stopPropagation();editCat('${it.id}',this)" style="cursor:pointer;color:${it.category?'var(--gray)':'var(--faint)'};border-bottom:1px dotted var(--hair)" title="분류 수정">${it.category||'분류'}</span></td>
+        <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
+        <td style="${TD};${R};color:${(inc2||it.diff)?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
+      let detail='';
+      if(hasDetail){
+        const apprTxt=it.approval_no?`<div style="font-size:11.5px;color:var(--faint);margin-bottom:5px">승인번호 ${it.approval_no}</div>`:'';
+        const sumTxt=(parts.length>1&&!it.diff)?`<div style="font-size:12px;margin-bottom:6px"><span style="color:var(--faint)">합산</span>&nbsp; ${parts.map(won).join(' + ')} = <b>${won(it.amount)}</b></div>`:'';
+        const itemsTxt=(it.items&&it.items.length)?`<div style="font-size:12.5px;margin-bottom:7px"><span style="color:var(--faint)">내역</span>&nbsp; ${it.items.join(', ')}</div>`:'';
+        const thumbs=imgs.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px">${imgs.map(im=>`<img src="/photos/${im}" onclick="lightbox('/photos/${im}')" loading="lazy" style="width:64px;height:64px;object-fit:cover;border:1px solid var(--hair);border-radius:4px;cursor:zoom-in" title="크게 보기">`).join('')}</div>`:'';
+        const diffUI=it.diff?`<div style="background:#FBEEEC;border:1px solid var(--vermilion);border-radius:5px;padding:8px 10px;font-size:12.5px">
+            <div style="margin-bottom:6px">🔺 <b>영수증마다 금액이 달라요</b> — 맞는 금액 고르거나 입력:</div>
+            ${parts.map(p=>`<button onclick="resolveDiff('${it.id}',${p})" style="margin:2px 5px 2px 0">${won(p)}</button>`).join('')}
+            <input id="df-${it.id}" type="number" placeholder="직접 입력" style="width:110px">
+            <button onclick="resolveDiff('${it.id}',document.getElementById('df-${it.id}').value)">확정</button></div>`:'';
+        detail=`<tr id="det-${it.id}" style="display:none"><td colspan="5" style="padding:2px 12px 12px 28px;border-top:none">${apprTxt}${sumTxt}${itemsTxt}${thumbs}${diffUI}</td></tr>`;
+      }
+      return main+detail;
+    }).join('') : `<tr><td style="${TD};color:var(--faint)" colspan="5">거래내역 없음</td></tr>`;
+  const incItems=(list.items||[]).filter(it=>it.needs&&it.needs.length).slice().reverse();
+  const needs=incItems.length?incItems.map(it=>`<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
+      <span style="color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</span>
+      <b style="white-space:nowrap">${won(it.amount)}</b> <span style="color:var(--gray)">${it.method||''}</span>
+      <input id="mc-${it.id}" placeholder="가맹점" style="width:130px;margin-left:auto">
+      <button onclick="fillLedger('${it.id}')">저장</button>
+      <label style="cursor:pointer" title="영수증 올려서 채우기">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label></div>`).join('')
+    : '<div class="hint">없음 — 다 확인됨 👍</div>';
+  const drop=`<div id="rcptdrop" ondragover="event.preventDefault();this.style.background='#F2F0EB'"
+    ondragleave="this.style.background=''" ondrop="dropReceipt(event)"
+    style="border:1.5px dashed var(--hair);border-radius:9px;padding:16px;text-align:center;color:var(--gray);font-size:13px;margin:6px 0">
+    📄 영수증을 여기로 드래그&드랍 — 인식해서 결제내역에 매칭
+    <div class="hint" style="margin-top:3px">PDF·여러 장·연속 투입 OK (큐로 순차 처리)</div>
+    <div id="rcptmsg" class="hint" style="margin-top:6px"></div></div>`;
+  const ruleChips=(cats.rules||[]).map(r=>`<span style="border:1px solid var(--hair);border-radius:10px;padding:1px 7px;white-space:nowrap">${esc(r.name)}→${esc(r.category)}${r.source==='seed'?'':` <span onclick="delRule('${r.id}')" style="cursor:pointer;color:var(--faint)" title="규칙 삭제">✕</span>`}</span>`).join(' ');
+  const ruleBar=`<div style="margin:6px 0;font-size:12px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="hint">분류 규칙 ${(cats.rules||[]).length}개 · 규칙 우선 → 품목 LLM</span>
+      <button onclick="upgradeCats(this)" style="font-size:12px">LLM 분류 업그레이드</button>
+      <button onclick="recat(this)" style="font-size:12px">규칙 재적용</button>
+      <span id="catmsg" class="hint"></span></div>
+    ${ruleChips?`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;color:var(--gray)">${ruleChips}</div>`:''}</div>`;
+  const netColor=s.net>=0?'var(--vermilion)':'#999';
+  m.innerHTML=`<div class="bar"><h2>가계부 · ${LP==='month'?'이번 달':'이번 주'}</h2>
+      <span class="total">${s.start} ~ ${s.end} · ${s.count}건</span>
+      <button onclick="LP='week';renderLedger()" ${LP==='week'?'disabled':''}>주간</button>
+      <button onclick="LP='month';renderLedger()" ${LP==='month'?'disabled':''}>월간</button></div>
+    ${drop}
+    ${ruleBar}
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
+      <table style="${TB};flex:1;min-width:230px"><thead><tr><th style="${TD};text-align:left">수입</th><th style="${TD};${R}">금액</th></tr></thead>
+        <tbody>${incRows}</tbody><tfoot><tr><td style="${TD};font-weight:600">수입계</td><td style="${TD};${R};font-weight:600">${won(s.income)}</td></tr></tfoot></table>
+      <table style="${TB};flex:1;min-width:230px"><thead><tr><th style="${TD};text-align:left">지출 (분류별)</th><th style="${TD};${R}">금액</th></tr></thead>
+        <tbody>${expRows}</tbody><tfoot><tr><td style="${TD};font-weight:600">지출계</td><td style="${TD};${R};font-weight:600">${won(s.expense)}</td></tr></tfoot></table>
+    </div>
+    <div style="margin:14px 0;font-size:16px;font-weight:600;color:${netColor}">순액 ${s.net>=0?'+':''}${won(s.net)}</div>
+    ${kv('결제수단', join(s.by_method, x=>`${x.name} ${won(x.amount)}`))}
+    ${kv('많이 쓴 곳', join(s.top_merchants, x=>`${x.name} ${won(x.amount)}`))}
+    ${kv('정기결제(추정)', join(s.recurring, x=>`${x.merchant} ${won(x.amount)}`))}
+    <h3 style="margin:22px 0 6px;font-size:14px">거래내역 (장부 · ${(list.items||[]).length}건)</h3>
+    <table style="${TB}"><thead><tr><th style="${TD};text-align:left">날짜</th><th style="${TD};text-align:left">내역</th>
+      <th style="${TD};text-align:left">분류</th><th style="${TD};text-align:left">결제수단</th><th style="${TD};${R}">금액</th></tr></thead>
+      <tbody>${txRows}</tbody></table>
+    <h3 style="margin:22px 0 6px;font-size:14px">지출내역 확인필요 ${incItems.length?`(${incItems.length})`:''}</h3>
+    ${needs}`;
+}
+function dropReceipt(e){ e.preventDefault();
   const z=document.getElementById('rcptdrop'); if(z) z.style.background='';
   [...((e.dataTransfer&&e.dataTransfer.files)||[])].forEach(file=>enqueueDrop({
     file, msgEl:'rcptmsg', url:'/ledger/receipt', after:renderLedger,
     done:(r,f)=>r.ok?`✓ ${f.name}: 영수증 ${r.count}건 (매칭 ${r.merged}, 새 ${r.count-r.merged})${r.pages>1?' ·'+r.pages+'쪽':''}`:`✗ ${f.name}: ${r.reason||'인식 실패'}`}));
 }
-// 거래내역 펼침/접기
-function toggleDetail(id){
-  const d=document.getElementById('det-'+id), cv=document.getElementById('cv-'+id);
-  if(!d) return;
-  const open=d.style.display==='none';
-  d.style.display=open?'table-row':'none';
-  if(cv) cv.textContent=open?'▾':'▸';
+function editCat(id,el){
+  const cur=el.textContent.trim(), cats=window.LCATS||[];
+  const sel=document.createElement('select'); sel.style.cssText='font-size:12px';
+  sel.innerHTML='<option value="">—</option>'+cats.map(c=>`<option ${c===cur?'selected':''}>${c}</option>`).join('');
+  sel.onchange=async()=>{ try{ await fetch('/ledger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:sel.value})}); renderLedger(); }catch(e){ alert('저장 실패: '+e.message); } };
+  sel.onblur=()=>renderLedger(); el.replaceWith(sel); sel.focus();
 }
-// 영수증 썸네일 클릭 → 크게(라이트박스)
-function lightbox(src){
-  let o=document.getElementById('lbx');
+async function upgradeCats(btn){ btn.disabled=true; const msg=document.getElementById('catmsg'); msg.textContent='LLM이 품목 보고 분류 중…';
+  try{ const r=await(await fetch('/ledger/upgrade',{method:'POST'})).json();
+    msg.textContent=`규칙 ${r.added}개 추가 · ${r.recategorized}건 재분류`; setTimeout(renderLedger,1600);
+  }catch(e){ msg.textContent='실패: '+e.message; btn.disabled=false; }
+}
+async function recat(btn){ btn.disabled=true; const msg=document.getElementById('catmsg'); msg.textContent='규칙 재적용 중…';
+  try{ const r=await(await fetch('/ledger/recategorize',{method:'POST'})).json();
+    msg.textContent=`${r.changed}건 재분류`; setTimeout(renderLedger,1200);
+  }catch(e){ msg.textContent='실패: '+e.message; btn.disabled=false; }
+}
+async function delRule(id){ if(!confirm('이 분류 규칙을 삭제할까요?')) return;
+  try{ await fetch('/ledger/rules/'+encodeURIComponent(id),{method:'DELETE'}); renderLedger(); }catch(e){ alert('삭제 실패: '+e.message); }
+}
+async function fillLedger(id){
+  const el=document.getElementById('mc-'+id), v=(el.value||'').trim();
+  if(!v) return; el.disabled=true;
+  try{ await fetch('/ledger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({merchant:v})}); renderLedger(); }
+  catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
+}
+async function entryReceipt(id,input){
+  const file=input.files&&input.files[0]; if(!file) return;
+  const fd=new FormData(); fd.append('file',file);
+  try{ await fetch('/ledger/'+encodeURIComponent(id)+'/receipt',{method:'POST',body:fd}); renderLedger(); }
+  catch(e){ alert('영수증 처리 실패: '+e.message); }
+}
+function toggleDetail(id){ const d=document.getElementById('det-'+id), cv=document.getElementById('cv-'+id);
+  if(!d) return; const open=d.style.display==='none'; d.style.display=open?'table-row':'none'; if(cv) cv.textContent=open?'▾':'▸'; }
+function lightbox(src){ let o=document.getElementById('lbx');
   if(!o){ o=document.createElement('div'); o.id='lbx';
     o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out';
     o.onclick=()=>o.remove(); document.body.appendChild(o); }
-  o.innerHTML='<img src="'+src+'" style="max-width:92vw;max-height:92vh;box-shadow:0 4px 36px rgba(0,0,0,.5)">';
-}
-// 금액 불일치(diff) 판독 — 고른 금액으로 확정
-async function resolveDiff(id, amount){
-  const amt=parseInt(amount,10);
-  if(!amt||amt<=0){ alert('금액을 확인하세요'); return; }
-  try{
-    await fetch('/ledger/'+encodeURIComponent(id)+'/amount', {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({amount:amt})});
-    renderLedger();
-  }catch(e){ alert('확정 실패: '+e.message); }
-}
-async function fillLedger(id){
-  const el = document.getElementById('mc-'+id);
-  const v = (el.value||'').trim();
-  if(!v) return;
-  el.disabled = true;
-  try{
-    await fetch('/ledger/'+encodeURIComponent(id), {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({merchant:v})});
-    renderLedger();
-  }catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
-}
-// 특정 항목에 영수증 올리기 — 자동 매칭 X, 내가 고른 그 건에 붙임(인식되면 가맹점·품목도 채움)
-async function entryReceipt(id, input){
-  const file = input.files && input.files[0];
-  if(!file) return;
-  const fd = new FormData(); fd.append('file', file);
-  try{
-    const r = await (await fetch('/ledger/'+encodeURIComponent(id)+'/receipt',
-      {method:'POST', body: fd})).json();
-    if(r.ok && !r.recognized) alert('이미지는 붙였는데 영수증 내용은 못 읽었어요 — 가맹점은 직접 적어주세요.');
-    renderLedger();
-  }catch(e){ alert('영수증 올리기 실패: '+e.message); }
+  o.innerHTML='<img src="'+src+'" style="max-width:92vw;max-height:92vh;box-shadow:0 4px 36px rgba(0,0,0,.5)">'; }
+async function resolveDiff(id,amount){
+  const amt=parseInt(amount,10); if(!amt||amt<=0){ alert('금액을 확인하세요'); return; }
+  try{ await fetch('/ledger/'+encodeURIComponent(id)+'/amount',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})}); renderLedger(); }
+  catch(e){ alert('확정 실패: '+e.message); }
 }
 
-loadStats();
+// ── 공통 ──
+function esc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+(async function init(){ await loadStats(); render(); })();
 </script>
 </body>
 </html>
