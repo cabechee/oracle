@@ -186,6 +186,20 @@ def test_set_fields_completes(monkeypatch):
     assert d["merchant"] == "올리브영" and d["needs"] == [] and d["complete"] is True
 
 
+def test_attach_receipt_fills_entry(monkeypatch):
+    # 특정 항목에 영수증 붙이기 — 금액은 유지(자동 매칭 X), 가맹점·품목·이미지 채움
+    fake = _FakeLedger([{"_id": "pay-x", "kind": "expense", "amount": 23000,
+                         "method": "현대카드", "merchant": "", "needs": ["merchant"],
+                         "complete": False}])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    row = ledger.attach_receipt("pay-x", {"merchant": "김밥천국", "items": ["라면"],
+                                          "image": "images/x.jpg"})
+    d = fake.docs[0]
+    assert d["merchant"] == "김밥천국" and d["items"] == ["라면"] and d["amount"] == 23000
+    assert d["receipt_image"] == "images/x.jpg" and d["needs"] == [] and d["complete"] is True
+    assert row["merchant"] == "김밥천국"
+
+
 def test_today_backward_compat_card(monkeypatch):
     fake = _FakeLedger([{"_id": "old", "date": date.today().isoformat(),
                          "amount": 9000, "card": "신한카드", "ts": datetime.now()}])

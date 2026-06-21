@@ -81,6 +81,34 @@ async def ep_receipt(file: UploadFile = File(...)):
             "method": f.get("method"), "items": f.get("items"), "image": vault_rel}
 
 
+@router.post("/ledger/{pay_id}/receipt")
+async def ep_entry_receipt(pay_id: str, file: UploadFile = File(...)):
+    """**특정 항목**에 영수증 붙이기 — 자동 매칭 없이 내가 고른 항목에. 비전이 읽으면 가맹점·품목도
+    채우고, 못 읽어도 이미지는 그 항목에 붙는다(가맹점은 수동 입력으로 채울 수 있음)."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "빈 파일")
+    import corpus
+    import ingest
+    import nest_client
+    from agent import vision
+    now = datetime.datetime.now()
+    ext = os.path.splitext(file.filename or "")[1].lstrip(".") or "jpg"
+    abs_path = corpus.save_image(now, 1, data, ext)
+    vault_rel = corpus.to_vault_rel(abs_path)
+    alias = ingest._resolve_alias("vision", None, prefer_vision=True, fallback_key="insight")
+    f = vision.extract_receipt(alias, nest_client.images_from_paths([abs_path]))
+    fields = {"image": vault_rel}
+    recognized = isinstance(f, dict) and f.get("is_receipt")
+    if recognized:
+        fields.update({"merchant": f.get("merchant"), "items": f.get("items"),
+                       "method": f.get("method")})
+    row = ledger_mod.attach_receipt(pay_id, fields)
+    if row is None:
+        raise HTTPException(404, "항목 없음")
+    return {"ok": True, "item": row, "recognized": bool(recognized)}
+
+
 class FieldsIn(BaseModel):
     merchant: Optional[str] = None
     category: Optional[str] = None

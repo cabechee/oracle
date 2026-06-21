@@ -727,7 +727,8 @@ async function renderLedger(){
         const desc = it.merchant || it.memo || (inc2?'입금':'결제');
         const tag = (it.needs&&it.needs.length)?' <span style="color:var(--vermilion);font-size:11px">확인필요</span>':'';
         const cat = it.category?` <span style="color:var(--faint);font-size:11px">${it.category}</span>`:'';
-        const rcpt = it.receipt_image?` <a href="/photos/${it.receipt_image}" target="_blank" title="영수증 보기" style="text-decoration:none">📷</a>`:'';
+        const rcpt = ` <label style="cursor:pointer" title="이 건에 영수증 올리기">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`
+          + (it.receipt_image?` <a href="/photos/${it.receipt_image}" target="_blank" title="영수증 보기" style="text-decoration:none">📷</a>`:'');
         return `<tr>
           <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
           <td style="${TD}">${desc}${tag}${cat}${rcpt}</td>
@@ -740,7 +741,8 @@ async function renderLedger(){
         <span style="color:var(--faint)">${fmtWhen(it.ts)}</span>
         <b>${won(it.amount)}</b> <span style="color:var(--gray)">${it.method||''}</span>
         <input id="mc-${it.id}" placeholder="가맹점" style="width:130px;margin-left:auto">
-        <button onclick="fillLedger('${it.id}')">저장</button></div>`).join('')
+        <button onclick="fillLedger('${it.id}')">저장</button>
+        <label style="cursor:pointer" title="영수증 올려서 채우기">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label></div>`).join('')
     : '<div style="color:var(--faint);font-size:13px">없음 — 다 확인됨 👍</div>';
   const drop = `<div id="rcptdrop"
     ondragover="event.preventDefault();this.style.background='#F2F0EB'"
@@ -804,6 +806,18 @@ async function fillLedger(id){
       headers:{'Content-Type':'application/json'}, body: JSON.stringify({merchant:v})});
     renderLedger();
   }catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
+}
+// 특정 항목에 영수증 올리기 — 자동 매칭 X, 내가 고른 그 건에 붙임(인식되면 가맹점·품목도 채움)
+async function entryReceipt(id, input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  const fd = new FormData(); fd.append('file', file);
+  try{
+    const r = await (await fetch('/ledger/'+encodeURIComponent(id)+'/receipt',
+      {method:'POST', body: fd})).json();
+    if(r.ok && !r.recognized) alert('이미지는 붙였는데 영수증 내용은 못 읽었어요 — 가맹점은 직접 적어주세요.');
+    renderLedger();
+  }catch(e){ alert('영수증 올리기 실패: '+e.message); }
 }
 
 loadStats();

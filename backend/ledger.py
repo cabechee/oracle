@@ -384,8 +384,38 @@ def set_fields(pay_id: str, fields: Dict[str, Any]) -> bool:
     return True
 
 
+def attach_receipt(pay_id: str, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """**특정 항목**에 영수증 붙이기 — 자동 매칭 없이, 내가 고른 그 항목을 영수증 추출값으로 채움.
+
+    가맹점·품목·카테고리·이미지를 채우고(금액은 그 항목 것 유지), needs/complete 재계산.
+    fields: {merchant?, items?, method?, image?}.
+    """
+    r = db.ledger().find_one({"_id": pay_id})
+    if not r:
+        return None
+    upd: Dict[str, Any] = {}
+    merchant = (fields.get("merchant") or "").strip()
+    if merchant:
+        upd["merchant"] = merchant
+    items = [str(i).strip() for i in (fields.get("items") or []) if str(i).strip()][:30]
+    if items:
+        upd["items"] = items
+    if fields.get("method") and not r.get("method"):
+        upd["method"] = str(fields["method"]).strip()
+    if fields.get("image"):
+        upd["receipt_image"] = str(fields["image"]).strip()
+    merged_merchant = upd.get("merchant") or r.get("merchant")
+    if merged_merchant and not r.get("category"):
+        upd["category"] = _category_of(merged_merchant, " ".join(items) or merged_merchant)
+    is_income = r.get("kind") == "income"
+    upd["needs"] = [] if (is_income or merged_merchant) else ["merchant"]
+    upd["complete"] = not upd["needs"]
+    db.ledger().update_one({"_id": pay_id}, {"$set": upd})
+    return _row_view({**r, **upd})
+
+
 def remove(pay_id: str) -> bool:
-    """오기록 삭제 (오탐 제거용)."""
+    """오기록 삭제 (오탐 제거·수동 정리용)."""
     return db.ledger().delete_one({"_id": pay_id}).deleted_count > 0
 
 
