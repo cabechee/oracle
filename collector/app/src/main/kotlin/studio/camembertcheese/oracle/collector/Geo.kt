@@ -6,11 +6,15 @@ import android.location.LocationManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.CancellationSignal
+import android.os.SystemClock
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /// 위치·WiFi 저수준 — 순수 플랫폼(LocationManager·WifiManager). Play Services 무의존.
 object Geo {
+
+    private const val MAX_AGE_MS = 120_000L     // 2분 — 이보다 오래된 캐시 위치는 버림(엉뚱한 곳 기록 방지)
+    private const val MAX_ACC_M = 500f          // 정확도 500m 초과(셀타워 등)면 버림
 
     fun distance(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Float {
         val r = FloatArray(1)
@@ -18,32 +22,49 @@ object Geo {
         return r[0]
     }
 
-    /// 현재 위치 — getCurrentLocation(API30+, 신선) 우선, 실패 시 마지막 위치. 권한·미가용이면 null.
+    private fun ageMs(loc: Location): Long =
+        (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000L
+
+    private fun usable(loc: Location?): Boolean =
+        loc != null && loc.hasAccuracy() && loc.accuracy <= MAX_ACC_M && ageMs(loc) in 0..MAX_AGE_MS
+
+    private fun freshFix(lm: LocationManager, ctx: Context, provider: String, timeoutSec: Long): Location? =
+        try {
+            val latch = CountDownLatch(1)
+            val holder = arrayOfNulls<Location>(1)
+            lm.getCurrentLocation(provider, CancellationSignal(), ctx.mainExecutor) {
+                holder[0] = it; latch.countDown()
+            }
+            latch.await(timeoutSec, TimeUnit.SECONDS)
+            holder[0]
+        } catch (e: Exception) { null }
+
+    /// 현재 위치 — **신선(≤2분)하고 정확(≤500m)한 fix만**. 없으면 null(오래된/엉뚱한 위치 기록 방지).
+    ///
+    /// GPS 신선 fix 우선(정확). 충분히 정확하지 않으면 네트워크도 시도. 캐시 lastKnown은 신선할 때만.
+    /// 예전엔 fix 실패 시 lastKnown(몇 시간 전 위치)을 그대로 써서 엉뚱한 곳(마곡·서초 등)에 찍혔다.
     fun currentLocation(ctx: Context): Location? {
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-        val provider = when {
-            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> return null
-        }
-        return try {
+        val gpsOn = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val netOn = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        if (!gpsOn && !netOn) return null
+        val cands = ArrayList<Location>()
+        try {
             if (Build.VERSION.SDK_INT >= 30) {
-                val latch = CountDownLatch(1)
-                val holder = arrayOfNulls<Location>(1)
-                lm.getCurrentLocation(provider, CancellationSignal(), ctx.mainExecutor) {
-                    holder[0] = it; latch.countDown()
-                }
-                latch.await(15, TimeUnit.SECONDS)
-                holder[0] ?: lm.getLastKnownLocation(provider)
-            } else {
-                @Suppress("DEPRECATION")
-                lm.getLastKnownLocation(provider)
+                if (gpsOn) freshFix(lm, ctx, LocationManager.GPS_PROVIDER, 12)?.let { cands.add(it) }
+                // GPS가 충분히 정확하지 않을 때만 네트워크 fix 추가(빠르지만 부정확할 수 있음)
+                if (cands.none { it.hasAccuracy() && it.accuracy <= 80f } && netOn)
+                    freshFix(lm, ctx, LocationManager.NETWORK_PROVIDER, 6)?.let { cands.add(it) }
             }
+            if (gpsOn) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { cands.add(it) }
+            if (netOn) lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)?.let { cands.add(it) }
         } catch (e: SecurityException) {
-            null
+            return null
         } catch (e: Exception) {
-            null
+            // 무시 — 아래 필터로
         }
+        // 신선·정확 후보 중 가장 정확한 것. 하나도 없으면 null(이번 틱은 위치 미확정으로 스킵)
+        return cands.filter { usable(it) }.minByOrNull { it.accuracy }
     }
 
     /// 현재 연결된 WiFi SSID (위치 권한 필요). 없으면 null.
