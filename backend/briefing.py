@@ -72,7 +72,10 @@ def run_morning(target: Optional[date] = None) -> Dict[str, Any]:
     briefs = list(db.signal_briefs().find().sort("ts", -1).limit(2))
     sig = [b.get("summary", "") for b in briefs if b.get("summary")]
     if sig:
-        parts.append("[밤새 온 연락]\n" + "\n".join(sig))
+        parts.append(
+            "[밤새 온 연락 — 남이 아빠에게/남들끼리 보낸 것. 그 말·감정·바람은 보낸 사람 "
+            "것이지 아빠 것이 아니고, 거기 '너·네가·오빠'는 아빠를 가리킴. 보낸 사람 말을 "
+            "아빠가 한 것·떠맡은 것처럼 쓰지 마]\n" + "\n".join(sig))
 
     line = _yesterday_journal_line(today)
     if line:
