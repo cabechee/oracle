@@ -26,8 +26,9 @@ def say(alias: str, user_input: str = "",
     else:
         body = "(들어온 게 없음)"
     ctx_block = (
-        f"\n\n[오늘 흐름 — 배경 참고만. 눈앞의 것과 자연스레 이어질 때만 슬쩍, "
-        f"시간대·옛일에 꽂히지 마]\n{context.strip()}"
+        f"\n\n[오늘 흐름]\n{context.strip()}\n\n"
+        f"('오늘 흐름'은 지금 분위기를 알기 위한 배경지식일 뿐이야. 거기 옛날 얘기나 "
+        f"시간대에 끌려가지 말고, [방금 들어온 것]만 보고 한마디 해.)"
         if (context or "").strip() else "")
     prompt = f"[방금 들어온 것]\n{body}{ctx_block}"
     r = llm.call(alias, prompt, images=media or None, system=personas.quick_system())
