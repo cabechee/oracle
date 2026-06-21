@@ -817,11 +817,14 @@ async function renderLedger(){
     📄 영수증을 여기로 드래그&드랍 — 알아서 인식해서 결제내역에 매칭합니다
     <div style="color:var(--faint);font-size:11.5px;margin-top:3px">PDF·여러 장 묶음도 OK (페이지마다 따로 처리)</div>
     <div id="rcptmsg" style="color:var(--faint);font-size:12px;margin-top:6px"></div></div>`;
-  const ruleBar = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;font-size:12px">
-    <span class="hint">분류 규칙 ${(cats.rules||[]).length}개 · 분류는 규칙 우선 → 품목 LLM</span>
-    <button onclick="upgradeCats(this)" style="font-size:12px">LLM 분류 업그레이드</button>
-    <button onclick="recat(this)" style="font-size:12px">규칙 재적용</button>
-    <span id="catmsg" class="hint"></span></div>`;
+  const ruleChips = (cats.rules||[]).map(r=>`<span style="border:1px solid var(--hair);border-radius:10px;padding:1px 7px;white-space:nowrap">${esc(r.name)}→${esc(r.category)}${r.source==='seed'?'':` <span onclick="delRule('${r.id}')" style="cursor:pointer;color:var(--faint)" title="규칙 삭제">✕</span>`}</span>`).join(' ');
+  const ruleBar = `<div style="margin:6px 0;font-size:12px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="hint">분류 규칙 ${(cats.rules||[]).length}개 · 규칙 우선 → 품목 LLM</span>
+      <button onclick="upgradeCats(this)" style="font-size:12px">LLM 분류 업그레이드</button>
+      <button onclick="recat(this)" style="font-size:12px">규칙 재적용</button>
+      <span id="catmsg" class="hint"></span></div>
+    ${ruleChips?`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;color:var(--gray)">${ruleChips}</div>`:''}</div>`;
   const netColor = s.net>=0 ? 'var(--vermilion)' : '#999';
   m.innerHTML = `
     <div class="bar"><h2>가계부 · ${LP==='month'?'이번 달':'이번 주'}</h2>
@@ -877,6 +880,11 @@ async function recat(btn){
   try{ const r=await (await fetch('/ledger/recategorize',{method:'POST'})).json();
     msg.textContent=`${r.changed}건 재분류`; setTimeout(renderLedger,1200);
   }catch(e){ msg.textContent='실패: '+e.message; btn.disabled=false; }
+}
+async function delRule(id){
+  if(!confirm('이 분류 규칙을 삭제할까요?')) return;
+  try{ await fetch('/ledger/rules/'+encodeURIComponent(id),{method:'DELETE'}); renderLedger(); }
+  catch(e){ alert('삭제 실패: '+e.message); }
 }
 async function dropReceipt(e){
   e.preventDefault();
