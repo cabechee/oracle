@@ -131,6 +131,24 @@ def test_merge_receipt_into_notification(monkeypatch):
     assert d["method"] == "현대카드" and d["needs"] == [] and d["complete"] is True
 
 
+def test_receipt_ts_uses_receipt_date(monkeypatch):
+    # 영수증 날짜가 있으면 거래 ts도 그 날짜(업로드 시각 아님)
+    fake = _FakeLedger([])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.from_receipt("r1", datetime(2026, 6, 22, 3, 1),         # 업로드는 6/22 새벽
+                        {"amount": 7880, "merchant": "쿠팡", "date": "2026-06-01"})  # 영수증은 6/1
+    d = fake.docs[0]
+    assert d["date"] == "2026-06-01" and d["ts"].date().isoformat() == "2026-06-01"
+
+
+def test_receipt_ts_fallback_to_upload(monkeypatch):
+    # 영수증에 날짜 없으면 올린 시각으로 폴백
+    fake = _FakeLedger([])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.from_receipt("r1", datetime(2026, 6, 22, 3, 1), {"amount": 5000, "merchant": "투썸"})
+    assert fake.docs[0]["ts"].date().isoformat() == "2026-06-22"
+
+
 def test_receipt_no_match_inserts(monkeypatch):
     fake = _FakeLedger([])
     monkeypatch.setattr(ledger.db, "ledger", lambda: fake)

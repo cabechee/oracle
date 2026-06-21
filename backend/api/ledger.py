@@ -88,6 +88,7 @@ async def ep_receipt(file: UploadFile = File(...)):
     # 페이지(또는 단일 이미지)별로 vault에 저장
     pages = []   # [(vault_rel, abs_path)]
     if is_pdf:
+        corpus.save_image(now, 0, data, "pdf")     # 원본 PDF 보존 — 처리 중단(재시작) 시 재드롭으로 멱등 복구
         pngs = _pdf_to_pngs(data)
         if not pngs:
             raise HTTPException(400, "PDF를 이미지로 변환하지 못했어요(pymupdf 필요)")

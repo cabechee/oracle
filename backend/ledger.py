@@ -386,16 +386,24 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
     if not amount or int(amount) < 100:
         return "skip"
     d = fields.get("date")
+    has_date = False
     try:
-        day = date.fromisoformat(d) if d else (ts.date() if hasattr(ts, "date") else date.today())
+        if d:
+            day = date.fromisoformat(d)
+            has_date = True
+        else:
+            day = ts.date() if hasattr(ts, "date") else date.today()
     except (ValueError, TypeError):
         day = date.today()
     merchant = (fields.get("merchant") or "").strip()
     rtype = "card" if (fields.get("rtype") or "shop").strip().lower() == "card" else "shop"
+    # 거래 시점 = 영수증 날짜(있으면) — 없을 때만 올린 시각(ts). 정오로 둬 같은 날 정렬 안정.
+    entry_ts = (datetime.combine(day, dtime(12, 0)) if has_date
+                else (ts if isinstance(ts, datetime) else datetime.combine(day, dtime.min)))
     doc = {
         "_id": f"pay-receipt-{record_id}",
         "date": day.isoformat(),
-        "ts": ts if isinstance(ts, datetime) else datetime.combine(day, dtime.min),
+        "ts": entry_ts,
         "kind": fields.get("kind") or "expense",
         "amount": int(amount),
         "method": (fields.get("method") or "").strip(),
