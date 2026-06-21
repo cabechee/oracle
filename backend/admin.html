@@ -744,11 +744,13 @@ let LP = 'month';
 async function renderLedger(){
   const m = $('#main');
   m.innerHTML = '<div class="empty">로딩…</div>';
-  let s, list;
+  let s, list, cats;
   try{
     s = await (await fetch(`/ledger/settlement?period=${LP}`)).json();
     list = await (await fetch(`/ledger/list?period=${LP}`)).json();
+    cats = await (await fetch('/ledger/categories')).json();
   }catch(e){ m.innerHTML = `<div class="empty">실패: ${e.message}</div>`; return; }
+  window.LCATS = cats.categories||[];
   const won = n => (Number(n)||0).toLocaleString('ko')+'원';
   const R='text-align:right;font-variant-numeric:tabular-nums';
   const TB='border-collapse:collapse;width:100%;font-size:13px';
@@ -778,7 +780,7 @@ async function renderLedger(){
         const main = `<tr style="cursor:${hasDetail?'pointer':'default'}" ${hasDetail?`onclick="toggleDetail('${it.id}')"`:''}>
           <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
           <td style="${TD}">${chev}${desc}${diffTag}${sumTag}${tag}${cam}${rcptBtn}</td>
-          <td style="${TD};color:var(--gray);white-space:nowrap;font-size:12px">${it.category||'<span style="color:var(--faint)">—</span>'}</td>
+          <td style="${TD};white-space:nowrap;font-size:12px"><span onclick="event.stopPropagation();editCat('${it.id}',this)" style="cursor:pointer;color:${it.category?'var(--gray)':'var(--faint)'};border-bottom:1px dotted var(--hair)" title="분류 수정">${it.category||'분류'}</span></td>
           <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
           <td style="${TD};${R};color:${(inc2||it.diff)?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
         let detail='';
@@ -815,6 +817,11 @@ async function renderLedger(){
     📄 영수증을 여기로 드래그&드랍 — 알아서 인식해서 결제내역에 매칭합니다
     <div style="color:var(--faint);font-size:11.5px;margin-top:3px">PDF·여러 장 묶음도 OK (페이지마다 따로 처리)</div>
     <div id="rcptmsg" style="color:var(--faint);font-size:12px;margin-top:6px"></div></div>`;
+  const ruleBar = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;font-size:12px">
+    <span class="hint">분류 규칙 ${(cats.rules||[]).length}개 · 분류는 규칙 우선 → 품목 LLM</span>
+    <button onclick="upgradeCats(this)" style="font-size:12px">LLM 분류 업그레이드</button>
+    <button onclick="recat(this)" style="font-size:12px">규칙 재적용</button>
+    <span id="catmsg" class="hint"></span></div>`;
   const netColor = s.net>=0 ? 'var(--vermilion)' : '#999';
   m.innerHTML = `
     <div class="bar"><h2>가계부 · ${LP==='month'?'이번 달':'이번 주'}</h2>
@@ -822,6 +829,7 @@ async function renderLedger(){
       <button onclick="LP='week';renderLedger()" ${LP==='week'?'disabled':''}>주간</button>
       <button onclick="LP='month';renderLedger()" ${LP==='month'?'disabled':''}>월간</button></div>
     ${drop}
+    ${ruleBar}
     <div style="display:flex;gap:18px;flex-wrap:wrap">
       <table style="${TB};flex:1;min-width:230px"><thead><tr>
         <th style="${TD};text-align:left">수입</th><th style="${TD};${R}">금액</th></tr></thead>
@@ -844,6 +852,31 @@ async function renderLedger(){
       <tbody>${txRows}</tbody></table>
     <h3 style="margin:22px 0 6px">지출내역 확인필요 ${incItems.length?`(${incItems.length})`:''}</h3>
     ${needs}`;
+}
+// 거래내역 분류 직접 수정 — 클릭하면 드롭다운
+function editCat(id, el){
+  const cur=el.textContent.trim(), cats=window.LCATS||[];
+  const sel=document.createElement('select');
+  sel.style.cssText='font-size:12px';
+  sel.innerHTML='<option value="">—</option>'+cats.map(c=>`<option ${c===cur?'selected':''}>${c}</option>`).join('');
+  sel.onchange=async()=>{
+    try{ await fetch('/ledger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:sel.value})}); renderLedger(); }
+    catch(e){ alert('저장 실패: '+e.message); }
+  };
+  sel.onblur=()=>renderLedger();
+  el.replaceWith(sel); sel.focus();
+}
+async function upgradeCats(btn){
+  btn.disabled=true; const msg=document.getElementById('catmsg'); msg.textContent='LLM이 품목 보고 분류 중…';
+  try{ const r=await (await fetch('/ledger/upgrade',{method:'POST'})).json();
+    msg.textContent=`규칙 ${r.added}개 추가 · ${r.recategorized}건 재분류`; setTimeout(renderLedger,1600);
+  }catch(e){ msg.textContent='실패: '+e.message; btn.disabled=false; }
+}
+async function recat(btn){
+  btn.disabled=true; const msg=document.getElementById('catmsg'); msg.textContent='규칙 재적용 중…';
+  try{ const r=await (await fetch('/ledger/recategorize',{method:'POST'})).json();
+    msg.textContent=`${r.changed}건 재분류`; setTimeout(renderLedger,1200);
+  }catch(e){ msg.textContent='실패: '+e.message; btn.disabled=false; }
 }
 async function dropReceipt(e){
   e.preventDefault();

@@ -5,11 +5,12 @@ import hashlib
 import os
 import tempfile
 from datetime import date as _date
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
+import category as category_mod
 import ledger as ledger_mod
 
 router = APIRouter()
@@ -149,6 +150,51 @@ async def ep_entry_receipt(pay_id: str, file: UploadFile = File(...)):
     if row is None:
         raise HTTPException(404, "항목 없음")
     return {"ok": True, "item": row, "recognized": bool(recognized)}
+
+
+@router.get("/ledger/categories")
+def ep_categories():
+    """분류 체계 + 등록된 규칙 — 어드민 수정 드롭다운·규칙 관리용."""
+    category_mod.seed()
+    return {"categories": category_mod.CATEGORIES, "rules": category_mod.list_rules()}
+
+
+class RuleIn(BaseModel):
+    name: str
+    pattern: str
+    category: str
+    fields: Optional[List[str]] = None
+    set_merchant: str = ""
+    priority: int = 50
+    id: Optional[str] = None
+
+
+@router.post("/ledger/rules")
+def ep_upsert_rule(body: RuleIn):
+    """분류 규칙 추가/수정."""
+    return category_mod.upsert_rule(body.name, body.pattern, body.category,
+                                    fields=body.fields, set_merchant=body.set_merchant,
+                                    priority=body.priority, rule_id=body.id)
+
+
+@router.delete("/ledger/rules/{rule_id}")
+def ep_delete_rule(rule_id: str):
+    return {"ok": category_mod.delete_rule(rule_id)}
+
+
+@router.post("/ledger/recategorize")
+def ep_recategorize():
+    """규칙을 모든 지출에 재적용(분류 + 가맹점 보정)."""
+    category_mod.seed()
+    return {"ok": True, "changed": category_mod.recategorize()}
+
+
+@router.post("/ledger/upgrade")
+def ep_upgrade():
+    """LLM 주기 업그레이드 — 규칙 없는 가맹점을 품목 보고 분류 → 규칙 등록 → 재분류."""
+    import ingest
+    alias = ingest._resolve_alias("classify", None, prefer_vision=False, fallback_key="insight")
+    return category_mod.upgrade(alias)
 
 
 class AmountIn(BaseModel):

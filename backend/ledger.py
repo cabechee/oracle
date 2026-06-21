@@ -16,6 +16,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, time as dtime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+import category
 import db
 
 _AMOUNT = re.compile(r"(\d[\d,]*)\s*원")          # 1원~ 한 자리도(작은 건 parse에서 노이즈로 거름)
@@ -69,12 +70,10 @@ def _method_of(sender: str, text: str) -> str:
     return (sender or "").strip() or "기타"
 
 
-def _category_of(merchant: str, summary: str) -> str:
-    blob = f"{merchant} {summary}"
-    for name, pat in _CATEGORIES:
-        if re.search(pat, blob, re.I):
-            return name
-    return ""
+def _category_of(merchant: str, summary: str, sender: str = "") -> str:
+    """분류 — 규칙 엔진(category) 위임. 규칙 우선(쿠팡 등) → 키워드 폴백."""
+    import category
+    return category.classify(merchant, [summary] if summary else None, sender).get("category", "")
 
 
 # 가맹점 오인식 잡토큰 — 카드알림 요약엔 가맹점이 깔끔히 안 들어있는 경우가 많아 보수적으로.
@@ -166,6 +165,9 @@ def parse_payment(sender: str, summary: str) -> Optional[Dict[str, Any]]:
         return None
     method = _method_of(sender, text)
     merchant = "" if is_income else _merchant_of(summary)
+    cres = ({"category": "", "merchant": merchant} if is_income
+            else category.classify(merchant, [summary], sender))   # 발신자도 봄(payment.coupang→쿠팡)
+    merchant = cres.get("merchant") or merchant     # 규칙 가맹점 보정
     needs: List[str] = []
     if not is_income and not merchant:
         needs.append("merchant")           # 가맹점 모름 → 데스크가 묻거나 영수증이 채움
@@ -174,10 +176,11 @@ def parse_payment(sender: str, summary: str) -> Optional[Dict[str, Any]]:
         "amount": amount,
         "method": method,
         "merchant": merchant,
-        "category": _category_of(merchant, summary),
+        "category": cres.get("category", ""),
         "installment": bool(_INSTALL.search(summary)),
         "memo": summary.strip(),
         "source": "notification",
+        "sender": sender,                  # 발신자 보존 — 규칙 재적용·LLM 업그레이드용
         "recurring": False,
         "complete": not needs,
         "needs": needs,
@@ -396,6 +399,9 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
     except (ValueError, TypeError):
         day = date.today()
     merchant = (fields.get("merchant") or "").strip()
+    items_list = [str(i).strip() for i in (fields.get("items") or []) if str(i).strip()][:30]
+    cres = category.classify(merchant, items_list, "")     # 규칙 분류 + 가맹점 보정(쿠팡(주)→쿠팡)
+    merchant = cres.get("merchant") or merchant
     rtype = "card" if (fields.get("rtype") or "shop").strip().lower() == "card" else "shop"
     # 거래 시점 = 영수증 날짜(있으면) — 없을 때만 올린 시각(ts). 정오로 둬 같은 날 정렬 안정.
     entry_ts = (datetime.combine(day, dtime(12, 0)) if has_date
@@ -408,8 +414,8 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         "amount": int(amount),
         "method": (fields.get("method") or "").strip(),
         "merchant": merchant,
-        "category": _category_of(merchant, " ".join(fields.get("items") or []) or merchant),
-        "items": [str(i).strip() for i in (fields.get("items") or []) if str(i).strip()][:30],
+        "category": cres.get("category", ""),
+        "items": items_list,
         "installment": False,
         "memo": (fields.get("memo") or merchant or "영수증").strip(),
         "source": "receipt",

@@ -107,6 +107,11 @@ def parking() -> Collection:
     return _conn().parking
 
 
+def category_rules() -> Collection:
+    """가계부 분류 규칙 — 가맹점/발신자/품목 패턴 → 분류. 시드(쿠팡)+어드민 수정+LLM 업그레이드."""
+    return _conn().category_rules
+
+
 def ensure_indexes() -> None:
     """1회 호출 — Mongo가 idempotent하게 인덱스 생성."""
     try:
