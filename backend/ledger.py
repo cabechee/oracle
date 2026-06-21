@@ -23,6 +23,8 @@ _AMOUNT = re.compile(r"(\d[\d,]*)\s*원")          # 1원~ 한 자리도(작은 
 _BALANCE = re.compile(
     r"(?:잔액|잔고|balance|누적|누계|이용\s*한도|한도|이번\s*달|당월|사용\s*액)\s*[:\s]*[\d,]+\s*원",
     re.I)
+# 승인번호(approval no) — 거래 고유키. 영수증·카드알림이 둘 다 가지면 강력 매칭.
+_APPROVAL = re.compile(r"(?:승인\s*번호|승인\s*no|approval\s*(?:no|number)?)\s*[:#\s]*(\d{4,})", re.I)
 _INCOME = re.compile(r"입금|급여|월급|상여|들어왔|받았")            # 돈 들어옴(수입)
 _OUT = re.compile(r"승인|결제|출금|구매|결제완료|납부|송금")        # 돈 나감(지출); 이체는 방향 따로
 # 비지출 오탐(적립·쿠폰·환급·광고 등) — 실제 입금은 '입금'으로 따로 들어옴
@@ -103,6 +105,12 @@ def _merchant_of(summary: str) -> str:
     return ""
 
 
+def _approval_of(text: str) -> str:
+    """승인번호 추출(없으면 ''). 거래 고유키 — 같은 승인번호면 같은 결제."""
+    m = _APPROVAL.search(text or "")
+    return m.group(1) if m else ""
+
+
 def _amount_of(summary: str, text: str) -> Optional[int]:
     """거래 금액 — '잔액/잔고'(running balance)는 빼고 첫 금액. 못 찾으면 None.
     예) '예금이자 4원 입금됨, 잔액 19,237원' → 4 (잔액 19,237 아님)."""
@@ -181,6 +189,15 @@ def _day_range(target: date) -> Tuple[datetime, datetime]:
 
 
 # ── merge: 영수증 ↔ 카드알림 (출처가 다를 때 같은 결제로 합침) ──────
+def _images_of(doc: Dict[str, Any]) -> List[str]:
+    """그 항목에 붙은 영수증 이미지들(구 단일 receipt_image + 신 receipt_images 합쳐서)."""
+    imgs = [x for x in (doc.get("receipt_images") or []) if x]
+    one = doc.get("receipt_image")
+    if one and one not in imgs:
+        imgs.insert(0, one)
+    return imgs
+
+
 def _same_payment(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     """같은 결제인가 — 금액·날짜는 호출부가 이미 맞춤. 여기선 '오합치기' 방지만.
 
@@ -215,8 +232,14 @@ def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[st
         out["signal_ids"] = sids
     if incoming.get("record_id"):
         out["record_id"] = incoming["record_id"]
-    if incoming.get("receipt_image"):
-        out["receipt_image"] = incoming["receipt_image"]   # 영수증 사진 — merge 후에도 보존
+    if incoming.get("approval_no") and not existing.get("approval_no"):
+        out["approval_no"] = incoming["approval_no"]
+    imgs = _images_of(existing)                            # 영수증 여러 장 한곳에(쇼핑몰+카드전표)
+    for im in _images_of(incoming):
+        if im not in imgs:
+            imgs.append(im)
+    if imgs:
+        out["receipt_images"] = imgs
     # needs 재계산 — 합친 뒤에도 비어 있는 필수만
     merged_merchant = out.get("merchant") or existing.get("merchant")
     is_income = "income" in (existing.get("kind"), incoming.get("kind"))
@@ -229,6 +252,15 @@ def _merge_or_insert(doc: Dict[str, Any]) -> str:
     """같은 결제면 merge, 아니면 insert. 반환 'dup'|'merged'|'inserted'."""
     if db.ledger().find_one({"_id": doc["_id"]}):
         return "dup"                       # 같은 신호 재처리 — 멱등
+    # 1) 승인번호 일치 — 가장 강력(쇼핑몰 영수증·카드 전표·카드알림이 다 같은 승인번호).
+    #    날짜 무관(다른 시점 업로드도 한곳에 붙는다).
+    appr = doc.get("approval_no")
+    if appr:
+        cand = db.ledger().find_one({"approval_no": appr, "_id": {"$ne": doc["_id"]}})
+        if cand:
+            db.ledger().update_one({"_id": cand["_id"]}, {"$set": _merge_fields(cand, doc)})
+            return "merged"
+    # 2) 금액 + 날짜(±1일) — 승인번호 없을 때 폴백.
     try:
         d0 = date.fromisoformat(doc["date"])
     except (ValueError, KeyError):
@@ -263,11 +295,19 @@ def sync_from_briefs(target: Optional[date] = None) -> int:
                 continue
             sids = [s for s in (it.get("signal_ids") or []) if s]
             key = sids[0] if sids else f"{b['_id']}-{(summary or '')[:16]}"
+            approval = ""                      # 승인번호 — 원본 신호 본문에서(요약엔 보통 없음)
+            for sid in sids:
+                sg = db.signals().find_one({"_id": sid}, {"body": 1})
+                approval = _approval_of((sg or {}).get("body") or "") or _approval_of(summary)
+                if approval:
+                    break
             amts = _all_amounts(summary, f"{sender} {summary}") or [p["amount"]]
             for a in amts:                     # 한 알림에 'A원·B원 두 건'이면 건마다 따로
                 pid = f"pay-{key}" if len(amts) == 1 else f"pay-{key}-{a}"
                 doc = {"_id": pid, "date": target.isoformat(), "ts": ts,
                        "signal_ids": sids, **p, "amount": a}
+                if len(amts) == 1 and approval:   # 여러 건이면 승인번호 어느 건인지 모호 → 생략
+                    doc["approval_no"] = approval
                 if _merge_or_insert(doc) in ("inserted", "merged"):
                     n += 1
     return n
@@ -305,7 +345,8 @@ def from_receipt(record_id: str, ts: Any, fields: Dict[str, Any]) -> str:
         "needs": [] if merchant else ["merchant"],
         "complete": bool(merchant),
         "record_id": record_id,
-        "receipt_image": (fields.get("image") or "").strip(),   # vault 상대경로 — 나중에 열람
+        "approval_no": str(fields.get("approval") or "").strip(),   # 승인번호 — 강력 매칭키
+        "receipt_images": [im] if (im := (fields.get("image") or "").strip()) else [],
     }
     return _merge_or_insert(doc)
 
@@ -326,7 +367,8 @@ def _row_view(r: Dict[str, Any]) -> Dict[str, Any]:
         "complete": bool(r.get("complete", True)),
         "needs": r.get("needs", []),
         "source": r.get("source", "notification"),
-        "receipt_image": r.get("receipt_image", ""),   # 있으면 /photos/{경로}로 열람
+        "receipt_images": _images_of(r),               # 여러 장 — /photos/{경로}로 열람
+        "approval_no": r.get("approval_no", ""),
         "ts": r["ts"].isoformat() if isinstance(r.get("ts"), datetime) else None,
     }
 
@@ -402,8 +444,14 @@ def attach_receipt(pay_id: str, fields: Dict[str, Any]) -> Optional[Dict[str, An
         upd["items"] = items
     if fields.get("method") and not r.get("method"):
         upd["method"] = str(fields["method"]).strip()
+    if fields.get("approval") and not r.get("approval_no"):
+        upd["approval_no"] = str(fields["approval"]).strip()
     if fields.get("image"):
-        upd["receipt_image"] = str(fields["image"]).strip()
+        imgs = _images_of(r)
+        im = str(fields["image"]).strip()
+        if im and im not in imgs:
+            imgs.append(im)                                # 여러 장 누적(쇼핑몰+카드전표)
+        upd["receipt_images"] = imgs
     merged_merchant = upd.get("merchant") or r.get("merchant")
     if merged_merchant and not r.get("category"):
         upd["category"] = _category_of(merged_merchant, " ".join(items) or merged_merchant)

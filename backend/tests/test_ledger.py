@@ -186,6 +186,28 @@ def test_set_fields_completes(monkeypatch):
     assert d["merchant"] == "올리브영" and d["needs"] == [] and d["complete"] is True
 
 
+def test_approval_extraction():
+    assert ledger._approval_of("현대카드 승인번호 12345678 6,000원 승인") == "12345678"
+    assert ledger._approval_of("스타벅스 6,000원 승인") == ""   # 번호 없으면 빈값
+
+
+def test_merge_by_approval(monkeypatch):
+    # 승인번호 같으면 날짜·출처 달라도 한곳에 합침 + 영수증 이미지 둘 다 보존
+    fake = _FakeLedger([{
+        "_id": "pay-card", "date": "2026-06-19", "kind": "expense", "amount": 50000,
+        "method": "현대카드", "merchant": "", "approval_no": "12345678",
+        "source": "notification", "needs": ["merchant"], "complete": False,
+        "receipt_images": ["images/card.png"],
+    }])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    r = ledger.from_receipt("rec-9", datetime(2026, 6, 21, 10, 0), {   # 다른 날 쇼핑몰 영수증
+        "amount": 50000, "merchant": "쿠팡", "approval": "12345678", "image": "images/shop.png"})
+    assert r == "merged" and len(fake.docs) == 1
+    d = fake.docs[0]
+    assert d["merchant"] == "쿠팡" and d["approval_no"] == "12345678"
+    assert "images/card.png" in d["receipt_images"] and "images/shop.png" in d["receipt_images"]
+
+
 def test_attach_receipt_fills_entry(monkeypatch):
     # 특정 항목에 영수증 붙이기 — 금액은 유지(자동 매칭 X), 가맹점·품목·이미지 채움
     fake = _FakeLedger([{"_id": "pay-x", "kind": "expense", "amount": 23000,
@@ -196,7 +218,7 @@ def test_attach_receipt_fills_entry(monkeypatch):
                                           "image": "images/x.jpg"})
     d = fake.docs[0]
     assert d["merchant"] == "김밥천국" and d["items"] == ["라면"] and d["amount"] == 23000
-    assert d["receipt_image"] == "images/x.jpg" and d["needs"] == [] and d["complete"] is True
+    assert d["receipt_images"] == ["images/x.jpg"] and d["needs"] == [] and d["complete"] is True
     assert row["merchant"] == "김밥천국"
 
 

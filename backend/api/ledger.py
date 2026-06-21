@@ -107,7 +107,8 @@ async def ep_receipt(file: UploadFile = File(...)):
             res = ledger_mod.from_receipt(f"receipt-drop-{h}-{idx}", now, {
                 "amount": rc.get("total"), "merchant": rc.get("merchant"),
                 "items": rc.get("items"), "date": rc.get("date"),
-                "method": rc.get("method"), "image": vault_rel})
+                "method": rc.get("method"), "approval": rc.get("approval"),
+                "image": vault_rel})
             results.append({"merchant": rc.get("merchant"), "amount": rc.get("total"),
                             "result": res})
             idx += 1
@@ -139,7 +140,7 @@ async def ep_entry_receipt(pay_id: str, file: UploadFile = File(...)):
     recognized = isinstance(f, dict) and f.get("is_receipt")
     if recognized:
         fields.update({"merchant": f.get("merchant"), "items": f.get("items"),
-                       "method": f.get("method")})
+                       "method": f.get("method"), "approval": f.get("approval")})
     row = ledger_mod.attach_receipt(pay_id, fields)
     if row is None:
         raise HTTPException(404, "항목 없음")
