@@ -309,7 +309,9 @@ def _process_capture(ctx: Dict[str, Any], do_append: bool = True) -> Dict[str, A
             suggestion = v["suggestion"]
             vlm_alias = insight_alias
             vlm_caption = _summarize_analysis(analysis)
-            _maybe_ledger_receipt(ctx, insight_alias, nest_images, analysis, vlm_caption)
+            _auto = _auto_process(ctx, insight_alias, nest_images, analysis, vlm_caption)
+            if _auto:                        # 캡처 응답 코멘트에도 시스템 캡션 덧붙임(즉시 확인)
+                insight_text += "\n\n" + " · ".join(o["caption"] for o in _auto)
         except Exception as e:
             insight_text = f"(인사이트 생성 실패: {e})"
     elif insight_alias and not (user_comment or audio_caption):
@@ -404,24 +406,109 @@ def _quick_react(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 _RECEIPT_HINT = re.compile(r"영수증|receipt|합계|총액|거래\s*내역|결제\s*내역|카드\s*전표|승인번호")
 
 
-def _maybe_ledger_receipt(ctx: Dict[str, Any], alias: str, images, analysis, caption: str) -> None:
-    """사진이 영수증 같으면 비전으로 추출해 가계부로(merge). 아니면 조용히 통과."""
+def _maybe_ledger_receipt(ctx: Dict[str, Any], alias: str, images, analysis, caption: str):
+    """사진이 영수증 같으면 비전으로 추출해 가계부로(merge). 처리하면 결과 dict, 아니면 None."""
     if not images or not alias:
-        return
+        return None
     blob = (caption or "") + " " + json.dumps(analysis or {}, ensure_ascii=False)
     if not _RECEIPT_HINT.search(blob):
-        return
+        return None
     from agent import vision
     f = vision.extract_receipt(alias, images)
     if not (isinstance(f, dict) and f.get("is_receipt") and f.get("total")):
-        return
+        return None
     import ledger as ledger_mod
     res = ledger_mod.from_receipt(ctx["record_id"], ctx.get("ts"), {
         "amount": f.get("total"), "merchant": f.get("merchant"),
         "items": f.get("items"), "date": f.get("date"), "method": f.get("method"),
+        "approval": f.get("approval"), "rtype": f.get("rtype"), "platform": f.get("platform"),
         "image": (ctx.get("image_paths") or [None])[0],   # 기록 사진 — 가계부서 열람
     })
     print(f"[ingest] 영수증→가계부({res}): {f.get('merchant')} {f.get('total')}원", flush=True)
+    merchant = (f.get("merchant") or "가게").strip()
+    amount = int(f.get("total"))
+    verb = "합쳐 뒀어요" if res == "merged" else "적어 뒀어요"
+    return {"caption": "🧾 가계부에 기록했어요",
+            "text": f"{merchant} {amount:,}원, 가계부에 {verb}."}
+
+
+_CALENDAR_HINT = re.compile(
+    r"일정|약속|예약|초대장?|미팅|회의|행사|콘서트|공연|세미나|웨딩|결혼식|클래스|레슨|"
+    r"\d{1,2}\s*월\s*\d{1,2}\s*일|\d{4}-\d{2}-\d{2}")
+
+
+def _build_event(ev: Dict[str, Any]):
+    """비전 일정 dict → (title, start, end, all_day, when_label). 날짜 없으면 None."""
+    title = (ev.get("title") or "").strip()
+    d = (ev.get("date") or "").strip()[:10]
+    if not title or not re.match(r"\d{4}-\d{2}-\d{2}", d):
+        return None
+    m = re.search(r"(\d{1,2}):(\d{2})", (ev.get("start") or "").strip())
+    if ev.get("all_day") or not m:
+        return (title, d, None, True, f"{d} 종일")
+    st = f"{int(m.group(1)) % 24:02d}:{int(m.group(2)) % 60:02d}"
+    start = f"{d}T{st}:00+09:00"
+    em = re.search(r"(\d{1,2}):(\d{2})", (ev.get("end") or "").strip())
+    if em:
+        end = f"{d}T{int(em.group(1)) % 24:02d}:{int(em.group(2)) % 60:02d}:00+09:00"
+    else:
+        h = int(st[:2])
+        end = f"{d}T{h + 1:02d}:{st[3:]}:00+09:00" if h < 23 else None
+    return (title, start, end, False, f"{d} {st}")
+
+
+def _maybe_calendar_event(ctx: Dict[str, Any], alias: str, images, analysis, caption: str):
+    """사진/스샷에 일정이 있으면 캘린더에 등록. 처리하면 결과 dict, 아니면 None."""
+    if not images or not alias:
+        return None
+    blob = (caption or "") + " " + json.dumps(analysis or {}, ensure_ascii=False)
+    if not _CALENDAR_HINT.search(blob):
+        return None
+    import gcal
+    if not gcal.is_authed():
+        return None
+    from agent import vision
+    ts = ctx.get("ts")
+    today_s = ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else ""
+    made = []
+    for ev in vision.extract_calendar_events(alias, images, today=today_s):
+        built = _build_event(ev)
+        if not built:
+            continue
+        title, start, end, all_day, when = built
+        if gcal.create_event(title, start, end, "", (ev.get("location") or "").strip(), all_day):
+            made.append((title, when))
+    if not made:
+        return None
+    print(f"[ingest] 일정→캘린더: {made}", flush=True)
+    t = made[0]
+    more = f" 외 {len(made) - 1}건" if len(made) > 1 else ""
+    return {"caption": "📅 일정이 등록됐어요",
+            "text": f"{t[0]} ({t[1]}){more}, 캘린더에 넣어뒀어요."}
+
+
+def _auto_process(ctx: Dict[str, Any], alias: str, images, analysis, caption: str):
+    """기록에서 영수증·일정 자동 처리 → 처리되면 베르가 흐름(conversations)에 한마디(+시스템 캡션).
+
+    반환: 처리 결과 리스트(호출부가 캡처 응답 코멘트에도 덧붙임). 아무것도 없으면 [].
+    """
+    outcomes = []
+    for fn in (_maybe_ledger_receipt, _maybe_calendar_event):
+        try:
+            r = fn(ctx, alias, images, analysis, caption)
+            if r:
+                outcomes.append(r)
+        except Exception as e:
+            print(f"[ingest] 자동처리({fn.__name__}) 실패: {e}", flush=True)
+    if outcomes:
+        try:
+            from agent import companion
+            when = ctx.get("ts") if hasattr(ctx.get("ts"), "strftime") else None
+            for o in outcomes:               # 베르가 흐름에 — text=베르 한마디, trigger=시스템 캡션
+                companion._log_companion("berr", o["text"], trigger=o["caption"], when=when)
+        except Exception as e:
+            print(f"[ingest] 자동처리 알림 실패: {e}", flush=True)
+    return outcomes
 
 
 def _maybe_save_pending_place(ctx: Dict[str, Any]) -> None:
