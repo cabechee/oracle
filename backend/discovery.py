@@ -16,9 +16,10 @@ MENUS: Dict[str, str] = {
 }
 
 _SYSTEM = (
-    "너는 사용자의 기록을 가만히 들여다보고 '깨달음·느낀 점·반복되는 패턴'을 한두 문장으로 짚어주는 관찰자야.\n"
-    "훈수·평가·조언이 아니라, 사용자가 스스로 알아차리게 돕는 담백하고 따뜻한 한 줄.\n"
-    "데이터에 실제로 있는 것만. 지어내지 말고, 특별히 짚을 게 없으면 정확히 '없음'만 출력."
+    "너는 사용자의 기록을 들여다보고 '작은 발견·눈에 띄는 점·반복되는 패턴'을 한두 문장으로 짚어주는 관찰자야.\n"
+    "거창한 통찰이 아니어도 좋아 — 그날 데이터에서 눈에 들어오는 한 가지를 담백하고 따뜻하게 한 줄로.\n"
+    "훈수·평가·조언은 하지 말고 사용자가 스스로 알아차리게 돕기만. 데이터에 실제로 있는 것만(지어내기 금지).\n"
+    "볼 데이터가 거의 없을 때만 정확히 '없음'."
 )
 
 
@@ -91,7 +92,7 @@ def generate_all(target: Optional[datetime.date] = None) -> Dict[str, Any]:
         if not ctx or len(ctx) < 12:
             continue
         try:
-            r = llm.call(alias, f"[{label}] 최근 기록이야:\n{ctx}\n\n여기서 발견한 한 줄(없으면 '없음'):", system=_SYSTEM)
+            r = llm.call(alias, f"[{label}] 최근 기록이야:\n{ctx}\n\n여기서 눈에 띄는 한 줄(볼 게 거의 없으면 '없음'):", system=_SYSTEM)
             text = (r.get("text") or "").strip()
         except Exception as e:
             print(f"[discovery] {menu} LLM 실패: {e}", flush=True)
