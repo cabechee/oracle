@@ -104,3 +104,41 @@ def test_dedup_signals_keeps_distinct_senders():
         {"_id": "b", "kind": "sms", "sender": "아빠", "body": "밥 먹었니"},  # 발신자 다름
     ]
     assert len(signals._dedup_signals(pending)) == 2
+
+
+# ── 발신자별 카테고리 학습 (재분류 → 눌러붙음) ──
+def test_sender_prefs_filters_invalid(monkeypatch):
+    class _S:
+        def find_one(self, q): return {"_id": "x", "A": "spam", "B": "bogus", "C": 123}
+    monkeypatch.setattr(signals.db, "settings", lambda: _S())
+    assert signals._sender_prefs() == {"A": "spam"}   # _id·비유효·비문자 제거
+
+
+def test_apply_sender_prefs_sticks_but_keeps_action(monkeypatch):
+    class _S:
+        def find_one(self, q): return {"29CM": "spam", "최진주": "attention", "병원": "low"}
+    monkeypatch.setattr(signals.db, "settings", lambda: _S())
+    items = [
+        {"sender": "29CM", "category": "attention"},      # → spam(지정대로)
+        {"sender": "최진주", "category": "low"},           # → attention
+        {"sender": "병원", "category": "action_needed"},  # 지정 low여도 긴급이면 유지
+        {"sender": "모름", "category": "low"},             # 지정 없음 → 그대로
+    ]
+    out = signals._apply_sender_prefs(items)
+    assert [it["category"] for it in out] == ["spam", "attention", "action_needed", "low"]
+
+
+def test_recategorize_learns_sender(monkeypatch):
+    saved = {}
+    briefs = [{"_id": "b1", "items": [
+        {"signal_ids": ["sig-1"], "sender": "29CM", "category": "attention"}]}]
+    class _Briefs:
+        def find(self, q): return list(briefs)
+        def update_one(self, q, u): briefs[0]["items"] = u["$set"]["items"]
+    class _Settings:
+        def update_one(self, q, u, upsert=False): saved.update(u["$set"])
+    monkeypatch.setattr(signals.db, "signal_briefs", lambda: _Briefs())
+    monkeypatch.setattr(signals.db, "settings", lambda: _Settings())
+    n = signals.recategorize(["sig-1"], "spam")
+    assert n == 1 and briefs[0]["items"][0]["category"] == "spam"
+    assert saved.get("29CM") == "spam"   # 다음부터 29CM은 spam으로 학습됨
