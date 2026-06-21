@@ -16,15 +16,16 @@ def test_say_empty_response(monkeypatch):
 
 
 def test_say_capture_before_context(monkeypatch):
-    # 눈앞 캡처가 맥락보다 앞 — 쿠키가 맥락(시간대·옛일, 예: '새벽')에 안 꽂히게.
+    # 캡처가 맥락보다 앞 + 행동지시(짧게 등)는 role에 일임 — 유저 프롬프트엔 데이터만.
     cap = {}
     monkeypatch.setattr(quick.personas, "quick_system", lambda: "SYS")
     monkeypatch.setattr(quick.llm, "call",
                         lambda alias, prompt, **k: cap.update(prompt=prompt, kw=k) or {"text": "ok"})
     quick.say("g", user_input="", media=[{"type": "image"}], context="새벽 04:30 기상 기록")
     p = cap["prompt"]
-    assert p.index("방금 들어온 것") < p.index("참고용 배경")   # 캡처가 맥락보다 먼저
-    assert "사진 속" in p                                      # 사진에 반응하라 명시
+    assert p.index("방금 들어온 것") < p.index("오늘 흐름")     # 캡처가 맥락보다 먼저
+    assert "그 안에 보이는 것" in p                            # 사진만이면 이미지 보라고
+    assert "쿠키답게" not in p                                 # 행동지시는 role에(중복 제거)
     assert cap["kw"].get("images") == [{"type": "image"}]      # 이미지 전달됨
 
 
@@ -35,4 +36,4 @@ def test_say_no_context_no_block(monkeypatch):
     monkeypatch.setattr(quick.llm, "call",
                         lambda alias, prompt, **k: cap.update(prompt=prompt) or {"text": "ok"})
     quick.say("g", user_input="라면")
-    assert "참고용 배경" not in cap["prompt"] and "라면" in cap["prompt"]
+    assert "오늘 흐름" not in cap["prompt"] and "라면" in cap["prompt"]

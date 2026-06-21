@@ -130,3 +130,29 @@ def test_working_memory_caps_and_keeps_newest(monkeypatch):
     assert "2026-06-01" not in out
     # 시간순(과거→최근) 유지
     assert out.index("2026-06-06") < out.index("2026-06-07")
+
+
+# ── today_flow: 오늘 캡처만 (쿠키 1차 반응용 — 일기 제외) ──
+def test_today_flow_today_only(monkeypatch):
+    now = datetime(2026, 6, 21, 9, 0, 0)
+    records = [
+        {"ts": datetime(2026, 6, 21, 7, 25), "user_comment": "",
+         "insight": {"text": "샐러드네요"}, "reactions": {}},
+        {"ts": datetime(2026, 6, 21, 8, 0), "user_comment": "라면",
+         "insight": {}, "reactions": {}},
+        {"ts": datetime(2026, 6, 21, 8, 30), "user_comment": "비밀",
+         "insight": {}, "reactions": {"x": "dislike"}},   # '싫어' → 제외
+    ]
+
+    class _Col:
+        def __init__(self, docs): self._docs = docs
+        def find(self, q, *_a, **_k): return self
+        def sort(self, key, direction):
+            return sorted(self._docs, key=lambda x: x["ts"], reverse=(direction == -1))
+
+    monkeypatch.setattr(memory.db, "records", lambda: _Col(records))
+    out = memory.today_flow(now)
+    assert "07:25" in out and "샐러드네요" in out and "라면" in out
+    assert "비밀" not in out                            # 싫어 제외
+    assert "일기" not in out                            # 지난 며칠 일기 안 들어감
+    assert out.index("07:25") < out.index("08:00")     # 시간순

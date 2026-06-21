@@ -227,14 +227,28 @@ def working_memory(now: Optional[datetime] = None, days: Optional[int] = None) -
     if jblocks:
         parts.append("[지난 며칠의 일기]\n" + "\n\n".join(jblocks))
 
-    # 2) 오늘 raw 캡처 (시간순) — '싫어' 표시한 건 제외(사용자가 부정한 건 기억에 안 남김)
+    # 2) 오늘 raw 캡처 (시간순)
+    flow = today_flow(now)
+    if flow:
+        parts.append("[오늘 (시간순)]\n" + flow)
+
+    return "\n\n".join(parts)
+
+
+def today_flow(now: Optional[datetime] = None) -> str:
+    """오늘 raw 캡처만 (시간순, '싫어'는 제외). 쿠키 1차 반응처럼 '지금 흐름'만 필요할 때.
+
+    working_memory의 [오늘] 파트와 동일 내용 — 지난 며칠 서술 일기(분량 크고 옛 시간대 많음)는 뺀다.
+    """
+    now = now or datetime.now()
+    today_start = datetime(now.year, now.month, now.day)
     rcur = db.records().find(
         {"ts": {"$gte": today_start, "$lt": now}},
         {"user_comment": 1, "insight": 1, "ts": 1, "reactions": 1},
     ).sort("ts", 1)
     lines: List[str] = []
     for r in rcur:
-        if "dislike" in (r.get("reactions") or {}).values():
+        if "dislike" in (r.get("reactions") or {}).values():   # 사용자가 부정한 건 기억서 제외
             continue
         ts = r.get("ts")
         tstr = ts.strftime("%H:%M") if hasattr(ts, "strftime") else ""
@@ -247,7 +261,4 @@ def working_memory(now: Optional[datetime] = None, days: Optional[int] = None) -
             seg.append(f"나: {ins[:160]}")
         if seg:
             lines.append(f"[{tstr}] " + " / ".join(seg))
-    if lines:
-        parts.append("[오늘 (시간순)]\n" + "\n".join(lines))
-
-    return "\n\n".join(parts)
+    return "\n".join(lines)

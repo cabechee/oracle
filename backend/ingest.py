@@ -384,9 +384,10 @@ def _quick_react(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         media += nest_client.audio_from_paths(audio_abs)
     if video_abs:
         media += nest_client.video_from_paths(video_abs)
-    # 베르(insight)와 동일한 맥락을 쿠키에게도 — 빠른 응답도 흐름을 알고 답하게.
+    # 쿠키 1차 반응은 '오늘 흐름'만 — 지난 며칠 서술 일기(분량 크고 옛 시간대 많음)는 빼서
+    # 캡처 대신 맥락에 쏠리지 않게. 베르(insight)는 working_memory(일기 포함) 그대로.
     # (백필=지난 사진은 맥락 미주입 — 베르와 같은 규칙.)
-    context = "" if ctx.get("backfill") else memory_mod.working_memory(ctx.get("ts"))
+    context = "" if ctx.get("backfill") else memory_mod.today_flow(ctx.get("ts"))
     try:
         text = quick_mod.say(alias, user_input=ctx.get("user_comment") or "",
                              media=media or None, context=context)

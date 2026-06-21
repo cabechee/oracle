@@ -15,23 +15,20 @@ def say(alias: str, user_input: str = "",
         context: str = "") -> str:
     """쿠키의 짧은 한마디 (페르소나). 멀티모달 전제.
 
-    **눈앞의 캡처(사진/글)에 먼저 반응**하게 — context는 배경 참고일 뿐.
-    (예전엔 맥락을 프롬프트 앞에 둬서, 사진은 두고 맥락 속 시간대·옛일—예: '새벽'—에
-    꽂히는 일이 있었음. 베르는 분석 JSON으로 사진에 고정되지만 쿠키는 1차 반응이라 안 그래서.)
+    유저 프롬프트는 **데이터만**(캡처 + 오늘 흐름 배경). '어떻게 반응할지'(캡처에·짧게)는
+    quick_role(시스템)에 있으니 중복 지시 안 함. context는 배경 참고일 뿐 — 캡처가 맨 앞,
+    배경은 '꽂히지 마'로 눌러 1차 반응이 옛 시간대(예: '새벽')에 쏠리지 않게.
     """
     if user_input.strip():
         body = user_input.strip()
     elif media:
-        body = "(글 없이 사진/미디어만 — 그 안에 보이는 걸 보고 첫인상)"
+        body = "(사진/미디어만 — 그 안에 보이는 것)"
     else:
         body = "(들어온 게 없음)"
     ctx_block = (
-        f"\n\n[참고용 배경 — 최근 흐름. 눈앞의 것과 자연스레 이어질 때만 슬쩍, "
-        f"억지로 끌어오지 말고 시간대·옛일에 꽂히지 마]\n{context.strip()}"
+        f"\n\n[오늘 흐름 — 배경 참고만. 눈앞의 것과 자연스레 이어질 때만 슬쩍, "
+        f"시간대·옛일에 꽂히지 마]\n{context.strip()}"
         if (context or "").strip() else "")
-    prompt = (
-        f"[방금 들어온 것]\n{body}\n\n"
-        f"바로 이 **방금 들어온 것**(사진이 있으면 그 사진 속에 보이는 것)에 쿠키답게 "
-        f"짧게 첫인상 한마디. 눈앞의 것에 먼저 반응해.{ctx_block}")
+    prompt = f"[방금 들어온 것]\n{body}{ctx_block}"
     r = llm.call(alias, prompt, images=media or None, system=personas.quick_system())
     return (r.get("text") or "").strip()

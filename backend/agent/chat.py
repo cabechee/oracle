@@ -137,12 +137,12 @@ def chat(message: str, mention_ids: Optional[List[str]] = None,
 
 def _chat_quick(message: str, reply: str,
                 now: Optional[datetime] = None) -> Optional[Dict[str, str]]:
-    """대화에 쿠키 한마디 — 베르 답을 보고 거듦. 베르와 동일한 맥락(워킹메모리)도 받음."""
+    """대화에 쿠키 한마디 — 베르 답을 보고 거듦. 맥락은 '오늘 흐름'만(1차 반응이라 일기 불필요)."""
     alias = task_alias("quick") or ""
     if not alias or not reply or reply.startswith("("):
         return None
     try:
-        context = memory_mod.working_memory(now or datetime.now())
+        context = memory_mod.today_flow(now or datetime.now())
         text = quick_mod.say(
             alias, user_input=f"오빠: {message}\n[베르의 답] {reply}",
             context=context)
