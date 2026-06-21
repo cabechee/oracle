@@ -103,6 +103,35 @@ object Backend {
         return post(Prefs.baseUrl(ctx) + "/visits", body)
     }
 
+    /// 공유받은 영수증 이미지/PDF → 가계부 드롭존(/ledger/receipt) multipart 업로드.
+    fun uploadReceipt(ctx: Context, bytes: ByteArray, filename: String): JSONObject? {
+        val boundary = "----oracle" + System.currentTimeMillis()
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL(Prefs.baseUrl(ctx) + "/ledger/receipt").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15000
+                readTimeout = 280000          // PDF·여러 영수증 비전 처리 — 길게
+                doOutput = true
+                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            }
+            conn.outputStream.use { out ->
+                out.write(("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; " +
+                    "filename=\"$filename\"\r\nContent-Type: application/octet-stream\r\n\r\n").toByteArray(Charsets.UTF_8))
+                out.write(bytes)
+                out.write("\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8))
+            }
+            if (conn.responseCode in 200..299) {
+                val txt = conn.inputStream.bufferedReader().use { it.readText() }
+                if (txt.isNotBlank()) JSONObject(txt) else JSONObject()
+            } else null
+        } catch (e: Exception) {
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
     private fun get(urlStr: String): JSONObject? {
         var conn: HttpURLConnection? = null
         return try {
