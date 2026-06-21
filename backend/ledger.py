@@ -476,6 +476,16 @@ def reconcile_card_notes(target: Optional[date] = None) -> int:
     return fixed
 
 
+def set_category_learn(pay_id: str, cat: str) -> Dict[str, Any]:
+    """거래 분류 수정 + 그 가맹점 규칙 즉시 학습(규칙 없던 가맹점이면 규칙 생성·재분류)."""
+    r = db.ledger().find_one({"_id": pay_id})
+    if not r:
+        return {"ok": False}
+    set_fields(pay_id, {"category": cat})
+    learned = category.learn(r.get("merchant"), r.get("items"), r.get("sender", ""), cat)
+    return {"ok": True, "learned": learned}
+
+
 # ── 조회 ─────────────────────────────────────────────────────────
 def _row_view(r: Dict[str, Any]) -> Dict[str, Any]:
     return {

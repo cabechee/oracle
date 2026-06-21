@@ -826,7 +826,7 @@ function editCat(id,el){
   const cur=el.textContent.trim(), cats=window.LCATS||[];
   const sel=document.createElement('select'); sel.style.cssText='font-size:12px';
   sel.innerHTML='<option value="">—</option>'+cats.map(c=>`<option ${c===cur?'selected':''}>${c}</option>`).join('');
-  sel.onchange=async()=>{ try{ await fetch('/ledger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:sel.value})}); renderLedger(); }catch(e){ alert('저장 실패: '+e.message); } };
+  sel.onchange=async()=>{ try{ await fetch('/ledger/'+encodeURIComponent(id)+'/category',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:sel.value})}); renderLedger(); }catch(e){ alert('저장 실패: '+e.message); } };
   sel.onblur=()=>renderLedger(); el.replaceWith(sel); sel.focus();
 }
 async function upgradeCats(btn){ btn.disabled=true; const msg=document.getElementById('catmsg'); msg.textContent='LLM이 품목 보고 분류 중…';

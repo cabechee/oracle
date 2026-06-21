@@ -207,6 +207,16 @@ def ep_resolve_diff(pay_id: str, body: AmountIn):
     return {"ok": ledger_mod.resolve_diff(pay_id, body.amount)}
 
 
+class CatIn(BaseModel):
+    category: str
+
+
+@router.post("/ledger/{pay_id}/category")
+def ep_set_category(pay_id: str, body: CatIn):
+    """거래 분류 수정 — 그 가맹점 규칙도 즉시 학습(규칙 없던 가맹점이면 생성·재분류)."""
+    return ledger_mod.set_category_learn(pay_id, body.category)
+
+
 class FieldsIn(BaseModel):
     merchant: Optional[str] = None
     category: Optional[str] = None

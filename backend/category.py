@@ -116,6 +116,21 @@ def delete_rule(rule_id: str) -> bool:
     return db.category_rules().delete_one({"_id": rule_id}).deleted_count > 0
 
 
+def learn(merchant: str, items, sender: str, cat: str) -> bool:
+    """사용자가 분류를 고치면 그 가맹점 규칙을 즉시 학습 — 규칙 없는 가맹점일 때만 생성.
+
+    이미 규칙이 있으면 일회성 정정으로 보고 규칙은 안 건드림(시드·기존 규칙 보호). 만든 뒤 재분류.
+    """
+    m = (merchant or "").strip()
+    if not m or cat not in CATEGORIES:
+        return False
+    if match(m, items, sender):          # 이미 규칙에 걸리는 가맹점 → 규칙 안 만듦
+        return False
+    upsert_rule(m, re.escape(m), cat, fields=["merchant"])
+    recategorize()
+    return True
+
+
 # ── 전체 재분류 (규칙 적용) ──────────────────────────────────────
 def recategorize() -> int:
     """모든 지출에 규칙 재적용 — category + 가맹점 보정. 바뀐 건수 반환."""
