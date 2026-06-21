@@ -727,13 +727,16 @@ async function renderLedger(){
         const desc = it.merchant || it.memo || (inc2?'입금':'결제');
         const tag = (it.needs&&it.needs.length)?' <span style="color:var(--vermilion);font-size:11px">확인필요</span>':'';
         const cat = it.category?` <span style="color:var(--faint);font-size:11px">${it.category}</span>`:'';
+        const parts = it.amount_parts||[];
+        const sumTag = parts.length>1?` <span style="color:var(--vermilion);font-size:11px" title="여러 영수증 합산 — diff 확인하고 틀리면 수정">⚠합산</span>`:'';
+        const breakdown = parts.length>1?`<div style="color:var(--faint);font-size:10.5px;white-space:nowrap">${parts.map(won).join(' + ')}</div>`:'';
         const views = (it.receipt_images||[]).map((im,k)=>` <a href="/photos/${im}" target="_blank" title="영수증 ${k+1} 보기" style="text-decoration:none">📷</a>`).join('');
         const rcpt = ` <label style="cursor:pointer" title="이 건에 영수증 올리기">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`+views;
         return `<tr>
           <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
-          <td style="${TD}">${desc}${tag}${cat}${rcpt}</td>
+          <td style="${TD}">${desc}${sumTag}${tag}${cat}${rcpt}</td>
           <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
-          <td style="${TD};${R};color:${inc2?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
+          <td style="${TD};${R};color:${inc2?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}${breakdown}</td></tr>`;
       }).join('')
     : `<tr><td style="${TD};color:var(--faint)" colspan="4">거래내역 없음</td></tr>`;
   const needs=(inc.items||[]).length

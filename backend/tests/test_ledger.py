@@ -205,7 +205,37 @@ def test_merge_by_approval(monkeypatch):
     assert r == "merged" and len(fake.docs) == 1
     d = fake.docs[0]
     assert d["merchant"] == "쿠팡" and d["approval_no"] == "12345678"
+    assert d["amount"] == 100000 and d["amount_parts"] == [50000, 50000]   # 무조건 합산
     assert "images/card.png" in d["receipt_images"] and "images/shop.png" in d["receipt_images"]
+
+
+def test_approval_sum_distinct_amounts(monkeypatch):
+    # 같은 승인번호·다른 금액(쇼핑몰 vs 카드 총액 차이) → 합산 + 부분 금액 보존(diff 판독용)
+    fake = _FakeLedger([{
+        "_id": "pay-1", "date": "2026-06-20", "kind": "expense", "amount": 10000,
+        "merchant": "쿠팡", "approval_no": "999", "source": "receipt",
+        "amount_parts": [10000], "receipt_images": ["images/a.png"],
+    }])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.from_receipt("rec-z", datetime(2026, 6, 21, 9, 0), {
+        "amount": 8000, "merchant": "쿠팡", "approval": "999", "image": "images/b.png"})
+    d = fake.docs[0]
+    assert d["amount"] == 18000 and d["amount_parts"] == [10000, 8000]
+    assert d["receipt_images"] == ["images/a.png", "images/b.png"]
+
+
+def test_amount_date_merge_does_not_sum(monkeypatch):
+    # 승인번호 없는 카드알림 ↔ 영수증(같은 금액·날짜) → 같은 거래라 금액 유지(합산 X)
+    fake = _FakeLedger([{
+        "_id": "pay-n", "date": "2026-06-21", "kind": "expense", "amount": 23000,
+        "method": "현대카드", "merchant": "", "source": "notification",
+        "needs": ["merchant"], "complete": False,
+    }])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.from_receipt("rec-n", datetime(2026, 6, 21, 12, 0),
+                        {"amount": 23000, "merchant": "김밥천국"})
+    d = fake.docs[0]
+    assert d["amount"] == 23000 and not d.get("amount_parts")   # 합산 안 됨
 
 
 def test_attach_receipt_fills_entry(monkeypatch):

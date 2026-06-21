@@ -212,9 +212,24 @@ def _same_payment(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     return bool(am) and am == bm
 
 
-def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
-    """두 결제 합치기 — 빈 필드를 채운다. 영수증의 가맹점·품목·카테고리 우선."""
+def _parts_of(doc: Dict[str, Any]) -> List[int]:
+    """이 항목을 이루는 부분 금액들(합산 내역). 없으면 [amount]."""
+    p = [int(x) for x in (doc.get("amount_parts") or []) if x]
+    return p or ([int(doc["amount"])] if doc.get("amount") else [])
+
+
+def _merge_fields(existing: Dict[str, Any], incoming: Dict[str, Any],
+                  sum_amount: bool = False) -> Dict[str, Any]:
+    """두 결제 합치기 — 빈 필드를 채운다. 영수증의 가맹점·품목·카테고리 우선.
+
+    sum_amount=True(승인번호 매칭): 금액을 더하고 합산 내역(amount_parts) 보존 — 잘못되면
+    어드민에서 부분 금액들이 diff로 보여 직접 판독. False(금액+날짜): 같은 거래라 금액 유지.
+    """
     out: Dict[str, Any] = {}
+    if sum_amount:
+        parts = _parts_of(existing) + _parts_of(incoming)
+        out["amount_parts"] = parts
+        out["amount"] = sum(parts)
     for f in ("merchant", "category"):
         v = incoming.get(f) or existing.get(f)
         if v:
@@ -258,7 +273,8 @@ def _merge_or_insert(doc: Dict[str, Any]) -> str:
     if appr:
         cand = db.ledger().find_one({"approval_no": appr, "_id": {"$ne": doc["_id"]}})
         if cand:
-            db.ledger().update_one({"_id": cand["_id"]}, {"$set": _merge_fields(cand, doc)})
+            db.ledger().update_one({"_id": cand["_id"]},
+                                   {"$set": _merge_fields(cand, doc, sum_amount=True)})
             return "merged"
     # 2) 금액 + 날짜(±1일) — 승인번호 없을 때 폴백.
     try:
@@ -369,6 +385,7 @@ def _row_view(r: Dict[str, Any]) -> Dict[str, Any]:
         "source": r.get("source", "notification"),
         "receipt_images": _images_of(r),               # 여러 장 — /photos/{경로}로 열람
         "approval_no": r.get("approval_no", ""),
+        "amount_parts": [int(x) for x in (r.get("amount_parts") or []) if x],  # 합산 내역(diff)
         "ts": r["ts"].isoformat() if isinstance(r.get("ts"), datetime) else None,
     }
 
