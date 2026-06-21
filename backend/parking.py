@@ -41,7 +41,7 @@ def _view(d: Dict[str, Any]) -> Dict[str, Any]:
     ts = d.get("ts")
     return {"id": d["_id"], "lat": d.get("lat"), "lng": d.get("lng"),
             "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts,
-            "place": _place_of(d)}
+            "place": _place_of(d), "error": bool(d.get("error"))}
 
 
 def record(lat: float, lng: float, ts: Any = None,

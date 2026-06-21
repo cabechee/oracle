@@ -89,7 +89,8 @@ def visits_for_day(target: date) -> List[Dict[str, Any]]:
     t0 = datetime.combine(target, dtime.min)
     t1 = datetime.combine(target, dtime.max)
     out: List[Dict[str, Any]] = []
-    for v in db.visits().find({"start": {"$gte": t0, "$lte": t1}}).sort("start", 1):
+    for v in db.visits().find({"start": {"$gte": t0, "$lte": t1},
+                               "error": {"$ne": True}}).sort("start", 1):   # 오류 위치 제외(일기)
         out.append({
             "id": v["_id"],
             "place": v.get("place"),
@@ -114,6 +115,7 @@ def recent(limit: int = 100) -> List[Dict[str, Any]]:
             "name": _live_name(v),          # 등록 장소로 live 매칭 — 없으면 None(어드민 '미지정')
             "minutes": v.get("minutes", 0),
             "lat": v.get("lat"), "lng": v.get("lng"),
+            "error": bool(v.get("error")),  # 위치 오류 플래그(사용자 표시)
             "start": s.isoformat() if isinstance(s, datetime) else None,
             "end": e.isoformat() if isinstance(e, datetime) else None,
         })

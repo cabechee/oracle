@@ -125,3 +125,49 @@ def ep_label(body: LabelIn):
     else:
         place = places_mod.upsert(name=name, kind="place", lat=body.lat, lng=body.lng)
     return {"ok": True, "place": place, "updated": bool(existing)}
+
+
+def _loc_coll(kind: str):
+    import db
+    if kind == "visit":
+        return db.visits()
+    if kind == "parking":
+        return db.parking()
+    raise HTTPException(400, "kind는 visit|parking")
+
+
+class EditLocIn(BaseModel):
+    kind: str
+    id: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    error: Optional[bool] = None    # 위치 오류 플래그(켜면 일기·동반자 맥락서 제외)
+
+
+@router.post("/locations/edit")
+def ep_edit_location(body: EditLocIn):
+    """수집기록 위치 보정 — 좌표 직접 수정 / 오류 플래그(잘못 찍힌 위치)."""
+    coll = _loc_coll(body.kind)
+    upd: dict = {}
+    if body.lat is not None:
+        upd["lat"] = body.lat
+    if body.lng is not None:
+        upd["lng"] = body.lng
+    if body.error is not None:
+        upd["error"] = bool(body.error)
+    if not upd:
+        raise HTTPException(400, "수정할 내용 없음(lat/lng/error)")
+    coll.update_one({"_id": body.id}, {"$set": upd})
+    return {"ok": True, "updated": upd}
+
+
+class DelLocIn(BaseModel):
+    kind: str
+    id: str
+
+
+@router.post("/locations/delete")
+def ep_delete_location(body: DelLocIn):
+    """수집기록 위치 삭제(오기록 정리)."""
+    n = _loc_coll(body.kind).delete_one({"_id": body.id}).deleted_count
+    return {"ok": n > 0}

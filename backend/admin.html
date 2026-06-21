@@ -637,14 +637,19 @@ async function renderCollected(){
   // 위치 라벨: 좌표 있는 기록에 '이 자리를 장소로 등록' — 다음부터 자동 인식(집·사무실처럼)
   const labelUI = (kind, id, lat, lng) => (lat!=null && lng!=null)
     ? `<span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center">
-        <input id="ll-${kind}-${id}" placeholder="장소 라벨" style="width:108px;font-size:12px" onclick="event.stopPropagation()">
+        <input id="ll-${kind}-${id}" placeholder="장소 라벨" style="width:104px;font-size:12px" onclick="event.stopPropagation()">
         <button style="font-size:11px;padding:2px 7px" onclick="saveLocLabel('${kind}','${id}','ll-${kind}-${id}',${lat},${lng})">장소로 저장</button></span>`
     : '';
-  const visitRows = v.length ? v.map(x => `<div style="${rowStyle}">
-      <b>${x.name?esc(x.name):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span>${labelUI('visit',x.id,x.lat,x.lng)}</div>`).join('')
+  // ⚠ 오류 플래그 · ✎ 좌표 수정 · 🗑 삭제
+  const actUI = (kind, id, lat, lng, err) => `<span style="display:inline-flex;gap:6px;margin-left:6px;font-size:11.5px">
+      <span onclick="toggleErr('${kind}','${id}',${err?'false':'true'})" style="cursor:pointer;color:${err?'var(--vermilion)':'var(--faint)'}" title="${err?'오류 해제':'위치 오류로 표시'}">⚠${err?'오류':''}</span>
+      <span onclick="editCoords('${kind}','${id}',${lat},${lng})" style="cursor:pointer;color:var(--faint)" title="좌표 수정">✎</span>
+      <span onclick="delLoc('${kind}','${id}')" style="cursor:pointer;color:var(--faint)" title="삭제">🗑</span></span>`;
+  const visitRows = v.length ? v.map(x => `<div style="${rowStyle}${x.error?';opacity:.5':''}">
+      <b>${x.error?'⚠ ':''}${x.name?esc(x.name):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.start)}${x.end?('–'+hm(x.end)):''} · ${x.minutes}분${mapsLink(x.lat,x.lng)}</span>${actUI('visit',x.id,x.lat,x.lng,x.error)}${labelUI('visit',x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">여정 기록 없음</div>';
-  const parkRows = pk.length ? pk.map(x => `<div style="${rowStyle}">
-      🅿 <b>${x.place?esc(x.place):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span>${labelUI('parking',x.id,x.lat,x.lng)}</div>`).join('')
+  const parkRows = pk.length ? pk.map(x => `<div style="${rowStyle}${x.error?';opacity:.5':''}">
+      🅿 <b>${x.error?'⚠ ':''}${x.place?esc(x.place):'<span style="color:var(--faint)">미지정</span>'}</b> <span class="hint">${fmtWhen(x.ts)}${mapsLink(x.lat,x.lng)}</span>${actUI('parking',x.id,x.lat,x.lng,x.error)}${labelUI('parking',x.id,x.lat,x.lng)}</div>`).join('')
     : '<div class="empty">주차 기록 없음</div>';
   const sigRows = sg.length ? sg.map(x => `<div style="${rowStyle}">
       <span class="hint">[${SKIND[x.kind]||x.kind}] ${fmtWhen(x.ts)}</span> <b>${esc(x.sender||'')}</b> ${esc((x.body||'').slice(0,60))}</div>`).join('')
@@ -670,6 +675,29 @@ async function saveLocLabel(kind, id, inputId, lat, lng){
       body:JSON.stringify({kind, id, name, lat, lng})})).json();
     renderCollected();
   }catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
+}
+// 위치 오류 플래그(잘못 찍힌 위치 — 일기·동반자 맥락서 제외)
+async function toggleErr(kind, id, val){
+  try{ await fetch('/locations/edit',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind, id, error: val==='true'||val===true})}); renderCollected(); }
+  catch(e){ alert('실패: '+e.message); }
+}
+// 좌표 직접 수정 — 잘못 찍힌 위치를 임의 좌표로
+async function editCoords(kind, id, lat, lng){
+  const cur=(lat!=null&&lng!=null)?lat+','+lng:'';
+  const v=prompt('새 좌표 (위도,경도)', cur);
+  if(v==null) return;
+  const m=v.split(',').map(s=>parseFloat(s.trim()));
+  if(m.length!==2||isNaN(m[0])||isNaN(m[1])){ alert('형식: 위도,경도 (예: 37.5,127.0)'); return; }
+  try{ await fetch('/locations/edit',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind, id, lat:m[0], lng:m[1]})}); renderCollected(); }
+  catch(e){ alert('실패: '+e.message); }
+}
+async function delLoc(kind, id){
+  if(!confirm('이 기록을 삭제할까요?')) return;
+  try{ await fetch('/locations/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind, id})}); renderCollected(); }
+  catch(e){ alert('삭제 실패: '+e.message); }
 }
 
 // ── 수집기 설정 (Android 네이티브 수집기가 매 사이클 fetch해 적용) ──
