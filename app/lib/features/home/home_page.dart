@@ -48,8 +48,10 @@ class _HomePageState extends State<HomePage>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final OracleApi _api = OracleApi();
   late final TabController _tab;
-  int _lastTab = 3;
-  static const _tabNames = ['오늘', '흐름', '데스크', '기록'];
+  // 웹은 캡처(기록)를 빼고 흐름을 먼저 — 카메라는 폰 전용, 웹은 보기·검색·대화용.
+  int _lastTab = kIsWeb ? 1 : 3;
+  static const _tabNames =
+      kIsWeb ? ['오늘', '흐름', '데스크'] : ['오늘', '흐름', '데스크', '기록'];
 
   late final RecordStore _store;
   late final CaptureController _capture;
@@ -63,7 +65,8 @@ class _HomePageState extends State<HomePage>
     super.initState();
     AppLog.init();
     AppLog.life('앱 시작');
-    _tab = TabController(length: 4, vsync: this, initialIndex: 3); // 첫 실행 = 기록 탭
+    _tab = TabController(length: _tabNames.length, vsync: this,
+        initialIndex: kIsWeb ? 1 : 3); // 웹=흐름 먼저, 폰=기록 먼저
     _tab.addListener(() {
       if (_tab.index != _lastTab) {
         _lastTab = _tab.index;
@@ -375,11 +378,11 @@ class _HomePageState extends State<HomePage>
         ),
         bottom: TabBar(
           controller: _tab,
-          tabs: const [
-            Tab(text: '오늘'),
-            Tab(text: '흐름'),
-            Tab(text: '데스크'),
-            Tab(text: '기록'),
+          tabs: [
+            const Tab(text: '오늘'),
+            const Tab(text: '흐름'),
+            const Tab(text: '데스크'),
+            if (!kIsWeb) const Tab(text: '기록'),
           ],
         ),
         actions: [
@@ -434,34 +437,7 @@ class _HomePageState extends State<HomePage>
               ),
             ),
             DeskScreen(api: _api, embedded: true),
-            kIsWeb ? const _WebCaptureNotice() : RecordTab(c: _capture),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 웹 기록 탭 — 카메라·녹음은 폰 전용이라 안내만.
-class _WebCaptureNotice extends StatelessWidget {
-  const _WebCaptureNotice();
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.photo_camera_outlined,
-                size: 48, color: OracleColors.faint),
-            const SizedBox(height: 16),
-            Text('캡처는 폰 앱에서',
-                style: OracleType.dateHeader, textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            Text('웹에서는 기록을 보고, 검색하고, 대화할 수 있어요.\n'
-                '사진·음성 캡처는 폰에서 이어집니다.',
-                style: OracleType.marginalia, textAlign: TextAlign.center),
+            if (!kIsWeb) RecordTab(c: _capture),
           ],
         ),
       ),
