@@ -754,6 +754,7 @@ async function renderLedger(){
       <span class="hint">${s.start} ~ ${s.end} · ${s.count}건</span>
       <button onclick="LP='week';renderLedger()" ${LP==='week'?'disabled':''}>주간</button>
       <button onclick="LP='month';renderLedger()" ${LP==='month'?'disabled':''}>월간</button></div>
+    ${drop}
     <div style="display:flex;gap:18px;flex-wrap:wrap">
       <table style="${TB};flex:1;min-width:230px"><thead><tr>
         <th style="${TD};text-align:left">수입</th><th style="${TD};${R}">금액</th></tr></thead>
@@ -774,7 +775,6 @@ async function renderLedger(){
       <th style="${TD};text-align:left">결제수단</th><th style="${TD};${R}">금액</th></tr></thead>
       <tbody>${txRows}</tbody></table>
     <h3 style="margin:22px 0 6px">지출내역 확인필요 ${(inc.items||[]).length?`(${inc.items.length})`:''}</h3>
-    ${drop}
     ${needs}`;
 }
 async function dropReceipt(e){
