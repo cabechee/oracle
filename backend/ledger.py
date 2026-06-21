@@ -242,12 +242,14 @@ def _recompute_amount(parts: List[Dict[str, Any]]):
     - 같은 판매처에 **카드전표**가 있으면 그게 진실 — 쇼핑몰 금액과 다르면 **diff**(직접 판독).
     - 그 외(쇼핑몰만) → 합산. 같은 영수증(key) 재처리는 멱등.
     """
-    seen, uniq = set(), []
+    seen_k, seen_c, uniq = set(), set(), []
     for p in parts:
         k = p.get("key")
-        if k in seen:
+        c = (p.get("merchant"), p.get("amount"), p.get("rtype"))   # 내용 동일 = 같은 영수증
+        if k in seen_k or c in seen_c:
             continue
-        seen.add(k)
+        seen_k.add(k)
+        seen_c.add(c)
         uniq.append(p)
     merchants = {p.get("merchant") for p in uniq if p.get("merchant")}
     if len(merchants) > 1:                     # 여러 판매처 = 멀티셀러 한 주문 → 합산

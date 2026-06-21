@@ -246,6 +246,19 @@ def test_approval_card_match_no_diff(monkeypatch):
     assert d["amount"] == 5820 and d["diff"] is False
 
 
+def test_redrop_no_double_legacy(monkeypatch):
+    # 구 항목(parts 없음) 위에 같은 영수증 재드롭 → 내용(판매처+금액) dedup으로 이중합산 방지
+    fake = _FakeLedger([{
+        "_id": "pay-old", "date": "2026-06-21", "kind": "expense", "amount": 91700,
+        "merchant": "쿠팡", "approval_no": "594823", "source": "receipt",
+        "receipt_images": ["a.png"], "needs": [], "complete": True,
+    }])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    ledger.from_receipt("drop-594823-91700", datetime(2026, 6, 21, 9, 0), {
+        "amount": 91700, "merchant": "쿠팡", "approval": "594823", "rtype": "shop", "image": "b.png"})
+    assert fake.docs[0]["amount"] == 91700      # 두 배 안 됨
+
+
 def test_approval_idempotent_reprocess(monkeypatch):
     # 같은 영수증(key) 재처리 → 이중합산 안 됨
     fake = _FakeLedger([_shop_entry("pay-1", 19800, "딩전과학기술", "403880", "r1", "a.png")])
