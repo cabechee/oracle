@@ -94,7 +94,8 @@ def _speak(kind: str, situation: str,
         real_ctx = real_ctx.replace("아빠", term)
     ctx_block = (
         f"[요즘 상황 — 이 중 자연스러운 게 있으면 하나만 슬쩍 녹여도 좋아. 다 나열하지 말고, "
-        f"억지로 엮지 말고, 없으면 그냥 가볍게.]\n{real_ctx}\n\n" if real_ctx else "")
+        f"억지로 엮지 말고, 없으면 그냥 가볍게. **단, 오늘 기록에 이미 한 일(예: 점심을 이미 "
+        f"먹었으면)은 또 하라고 권하지 마 — 이미 한 걸 아니까.**]\n{real_ctx}\n\n" if real_ctx else "")
     prompt = (
         f"지금은 네가 **먼저** {term}에게 톡 말을 거는 상황이야. {term}가 너한테 무슨 말을 한 게 "
         f"아니라({term}는 아직 아무 말도 안 했어), {term} 생각이 나서 네가 문득 말 거는 거야.\n\n"
@@ -408,6 +409,25 @@ def _parse_banter(text: str) -> List[Tuple[str, str]]:
     return out[:4]
 
 
+def _recent_arrival(place: Optional[str], now: datetime, within_min: int = 10) -> bool:
+    """최근 N분 내 같은 장소 '도착' 발화가 이미 흐름에 있나 — 차 주차('집 도착')와
+    WiFi 체류('집에 도착했다')가 같은 도착에 둘 다 인사하는 이중 발화 방지.
+    두 트리거 모두 '{장소}…도착'을 포함하므로 그걸로 본다."""
+    if not place:
+        return False
+    import re
+    since = now - timedelta(minutes=within_min)
+    try:
+        doc = db.conversations().find_one({
+            "companion": True,
+            "ts": {"$gte": since},
+            "trigger": {"$regex": re.escape(place) + r".*도착"},
+        })
+        return doc is not None
+    except Exception:
+        return False
+
+
 def banter(event: str, place: Optional[str] = None,
            minutes: Optional[int] = None) -> Dict[str, Any]:
     """베르·쿠키가 아빠 움직임에 흐름(conversations)에 자기들끼리 주고받는 짧은 수다.
@@ -418,6 +438,10 @@ def banter(event: str, place: Optional[str] = None,
     """
     now = datetime.now()
     if not cc.should_speak("banter", now):
+        return {"turns": [], "notify": {"speaker": "", "text": ""}, "gated": True}
+    # 차로 도착하면 car_parking('집 도착')이 이미 인사함 → 직후 WiFi 체류의 도착 수다는 억제(이중 방지).
+    if event == "arrive" and _recent_arrival(place, now):
+        print(f"[companion] banter arrive 억제 — 최근 '{place}' 도착 발화 있음", flush=True)
         return {"turns": [], "notify": {"speaker": "", "text": ""}, "gated": True}
 
     info = None

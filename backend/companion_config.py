@@ -241,9 +241,18 @@ def gather_context(now: Optional[datetime] = None) -> str:
         pass
     try:
         t0 = datetime.combine(now.date(), dtime.min)
-        n = db.records().count_documents(
-            {"ts": {"$gte": t0, "$lte": now}, "hidden": {"$ne": True}})
-        bits.append(f"오늘 아빠가 남긴 기록 {n}건")
+        recs = list(db.records().find(
+            {"ts": {"$gte": t0, "$lte": now}, "hidden": {"$ne": True}}).sort("ts", 1))
+        if recs:
+            # 건수만이 아니라 내용까지 — '점심 먹은 거 아는데 또 점심 챙겨 드세요' 같은 모순 방지.
+            lines = []
+            for r in recs[-6:]:
+                rt = r.get("ts")
+                hm = rt.strftime("%H시%M분") if hasattr(rt, "strftime") else ""
+                snip = ((r.get("insight") or {}).get("text") or r.get("quick")
+                        or r.get("comment") or "").replace("\n", " ").strip()[:45]
+                lines.append(f"{hm} {snip}".strip())
+            bits.append(f"오늘 아빠가 남긴 기록 {len(recs)}건 — " + "; ".join(lines))
     except Exception:
         pass
     try:
