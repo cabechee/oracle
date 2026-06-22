@@ -11,7 +11,7 @@ from pathlib import Path
 
 import db
 import embedding as embedding_mod
-from agent import llm
+from agent import llm, personas
 from config import VAULT_DIR
 from nightly_common import records_brief, resolve_alias
 
@@ -22,15 +22,15 @@ _DIGEST_TIMEOUT = 900
 
 # ── 프롬프트 ────────────────────────────────────────────────
 
-DAILY_JOURNAL_SYSTEM = """당신은 유저의 하루를 '일기'로 적습니다. 요약·압축이 아니라, 그날 있었던 일을 시간 순서대로 서술합니다.
+DAILY_JOURNAL_SYSTEM = f"""당신은 유저의 하루를 '일기'로 적습니다. 요약·압축이 아니라, 그날 있었던 일을 시간 순서대로 서술합니다.
 
 **메타 발언 절대 금지**: "형식이 정해져 있지 않으니", "여기 작성해드릴게요", "필요하면 다른 형식으로" 같은 자기 진행상황·옵션 안내 일절 X. 첫 줄부터 본문 시작.
 
 원칙:
 - **화자 구분 — 누가 한 말인지 절대 헷갈리지 말 것.** 재료엔 아빠가 아닌 사람·동반자의 말이 섞여 있다.
   · 기록의 `user_comment`만 아빠가 직접 쓴 말이다. `insight`·`suggestion`·`vlm`은 **네(베르)가 그 사진/메모에 단 코멘트**지 아빠 말이 아니다.
-  · `📨 받은 연락`(문자·카톡·슬랙 등)은 **남이 아빠에게, 또는 남들끼리 보낸 것** — 그 안의 말·감정·바람·계획은 전부 **보낸 사람 것**이고, 거기 '너·네·당신·오빠'는 아빠를 가리킨다. **보낸 사람의 말·기분을 아빠가 한 것·아빠의 속마음인 양 옮겨 적지 마라.** (예: 누가 "질투나고 오래 같이 있고 싶다"고 보냈으면 그건 그 사람 마음이지 아빠가 적은 속마음이 아니다. "정리는 네가 해"라고 왔으면 그건 아빠더러 하란 말이지 누가 떠맡은 게 아니다.) 아빠가 '흐름'에서 직접 한 말이 아니면, 다 아빠에게 온 말이거나 아빠 곁에서 남들끼리 오간 말이다.
-- **누가 냈나(대접 추론)**: 식사·외출을 '대접받았다·얻어먹었다·한 상 받았다'처럼 **남이 사준 양 단정하지 마라.** `💳 결제 내역`에 그 무렵 아빠가 낸 돈이 있으면 **아빠가 낸 것**이다 — 혼자면 그냥 사 먹은 것, 일행이 있으면 아빠가 대접한 것. 상대가 결제했다거나 "내가 살게" 같은 분명한 근거가 있을 때만 '받았다/대접받았다'고 적는다.
+  · {personas.SENDER_ATTRIBUTION} 아빠가 '흐름'에서 직접 한 말이 아니면, 다 아빠에게 온 말이거나 아빠 곁에서 남들끼리 오간 말이다.
+- {personas.WHO_PAID}
 - **요약하지 말 것.** 그날의 구체적 디테일(무엇을·언제·어떤 맥락이었는지)을 살려 시간 순서로 서술한다. 사소하거나 드물어 보이는 디테일도 버리지 않는다 — 나중에 검색·회상의 단서가 된다.
 - 1인칭 관찰자 시점의 자연스러운 한국어 산문. 아침·낮·저녁의 흐름이 드러나게. 정형 헤더·불릿 나열보다 흐르는 문장.
 - 기록이 적은 날은 짧게, 많은 날은 길게. 억지로 늘이거나 줄이지 않는다.
@@ -106,7 +106,7 @@ def make_daily_journal(
         parts.append("\n## 📍 오늘 다닌 곳 (체류 감지 — 동선·머문 시간. 하루 흐름의 뼈대로 자연스럽게 녹이되 나열하듯 늘어놓지 말 것)")
         parts.append("\n".join(f"- {ln}" for ln in visits))
     if signals:
-        parts.append("\n## 📨 오늘 받은 연락 (문자·카톡·슬랙 등 — **남이 아빠에게/남들끼리 보낸 것**. 말·감정·바람은 보낸 사람 것이지 아빠 것이 아니다. 의미 있는 배경만 자연스럽게 녹이고 광고·스팸은 무시)")
+        parts.append(f"\n## 📨 오늘 받은 연락 (문자·카톡·슬랙 등 — {personas.SENDER_ATTRIBUTION_SHORT}. 의미 있는 배경만 자연스럽게 녹이고 광고·스팸은 무시)")
         parts.append(json.dumps(signals, ensure_ascii=False, indent=1))
     try:
         import ledger as ledger_mod
@@ -115,9 +115,7 @@ def make_daily_journal(
     except Exception:
         _pays = []
     if _pays:
-        parts.append("\n## 💳 이 날 아빠가 결제한 내역 (**아빠가 낸 돈**. 식사·외출이 이 결제와 "
-                     "맞물리면 아빠가 낸 것 — 직접 사 먹었거나 일행이 있으면 아빠가 대접한 것이다. "
-                     "'대접받았다·얻어먹었다·한 상 받았다'로 단정하지 말 것)")
+        parts.append(f"\n## 💳 이 날 아빠가 결제한 내역 ({personas.WHO_PAID_SHORT})")
         parts.append("\n".join(
             f"- {it.get('merchant') or it.get('memo') or '결제'} {it.get('amount', 0):,}원"
             f"{' (' + it['method'] + ')' if it.get('method') else ''}" for it in _pays))

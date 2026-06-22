@@ -73,9 +73,7 @@ def run_morning(target: Optional[date] = None) -> Dict[str, Any]:
     sig = [b.get("summary", "") for b in briefs if b.get("summary")]
     if sig:
         parts.append(
-            "[밤새 온 연락 — 남이 아빠에게/남들끼리 보낸 것. 그 말·감정·바람은 보낸 사람 "
-            "것이지 아빠 것이 아니고, 거기 '너·네가·오빠'는 아빠를 가리킴. 보낸 사람 말을 "
-            "아빠가 한 것·떠맡은 것처럼 쓰지 마]\n" + "\n".join(sig))
+            f"[밤새 온 연락 — {personas.SENDER_ATTRIBUTION_SHORT}]\n" + "\n".join(sig))
 
     line = _yesterday_journal_line(today)
     if line:
@@ -112,8 +110,7 @@ def run_evening(target: Optional[date] = None) -> Dict[str, Any]:
         pays = []
     if pays:
         parts.append(
-            "[오늘 아빠가 결제한 내역 — 아빠가 낸 돈. 식사·외출이 이 결제와 맞물리면 아빠가 "
-            "낸 것(혼자면 사 먹은 것, 일행 있으면 대접한 것)이지 '대접받은' 게 아니다]\n"
+            f"[오늘 아빠가 결제한 내역 — {personas.WHO_PAID_SHORT}]\n"
             + "\n".join(f"- {it.get('merchant') or it.get('memo') or '결제'} "
                         f"{it.get('amount', 0):,}원" for it in pays))
 
