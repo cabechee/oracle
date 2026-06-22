@@ -286,8 +286,18 @@ async function runDisco(btn){ btn.disabled=true; btn.textContent='생성 중…'
 //  기록: 신호 (발신자별 분류 — 바꾸면 그 발신자는 앞으로 그 분류로 학습)
 // ══════════════════════════════════════════════════════════════
 const SIGCAT={action_needed:'당장처리',attention:'관심',acquaintance:'지인',low:'일반',spam:'스팸'};
+let SIGTAB='class';
 async function renderSignals(){
-  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+  $('#main').innerHTML=`<div class="bar"><h2>신호</h2></div>
+    <div class="tabs">
+      <div class="tab ${SIGTAB==='class'?'on':''}" onclick="SIGTAB='class';SKIP=0;Q='';render()">분류</div>
+      <div class="tab ${SIGTAB==='raw'?'on':''}" onclick="SIGTAB='raw';SKIP=0;Q='';render()">기록</div>
+    </div><div id="sigbody"><div class="empty">로딩…</div></div>`;
+  if(SIGTAB==='raw') return renderCollection('signals','#sigbody');   // 원본 신호 브라우저(검색·페이징)
+  return sigClass();
+}
+async function sigClass(){   // 발신자별 분류 편집(바꾸면 그 발신자 앞으로 그 분류로 학습)
+  const m=$('#sigbody'); m.innerHTML='<div class="empty">로딩…</div>';
   let d; try{ d=await(await fetch('/signals/recent?briefs=60&raw=0')).json(); }
   catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
   const by={};   // 발신자별(브리프는 최신순 — 처음 본 게 최신)
@@ -303,13 +313,13 @@ async function renderSignals(){
       <b style="white-space:nowrap">${esc(g.sender)}</b>
       <span class="hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(g.summ)}</span>
       <span class="hint" style="white-space:nowrap">${fmtWhen(g.ts)}</span></div>`).join('');
-  m.innerHTML=`<div class="bar"><h2>신호</h2><span class="total">발신자별 분류 — 바꾸면 그 발신자는 앞으로 그 분류로 학습됨 · ${window.SIGG.length}명</span></div>`
+  m.innerHTML=`<div class="hint" style="margin-bottom:10px">발신자별 분류 — 바꾸면 그 발신자는 앞으로 그 분류로 학습됨 · ${window.SIGG.length}명</div>`
     +(rows||'<div class="empty">신호 없음</div>');
 }
 async function recatSig(idx,category){
   const g=(window.SIGG||[])[idx]; if(!g||!g.sids.length) return;
   try{ await fetch('/signals/recategorize',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({signal_ids:g.sids, category})}); renderSignals(); }
+    body:JSON.stringify({signal_ids:g.sids, category})}); sigClass(); }
   catch(e){ alert('변경 실패: '+e.message); }
 }
 
@@ -321,12 +331,14 @@ function fmtWhen(d){ if(!d) return ''; const t=new Date(d);
 function summarize(doc){ return doc.user_comment||doc.summary||doc.text||doc.body||
   (doc.insight&&doc.insight.text)||doc.date||doc.label||'—'; }
 
-async function renderCollection(name){
-  const m=$('#main'); m.innerHTML='<div class="empty">로딩…</div>';
+async function renderCollection(name, target){
+  target = target || '#main';                       // '#sigbody' 등으로 임베드 가능(신호 기록 탭)
+  const m=$(target); m.innerHTML='<div class="empty">로딩…</div>';
   let data;
   try{ data=await api(`/collection/${name}?limit=50&skip=${SKIP}&q=${encodeURIComponent(Q)}`); }
   catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
-  const bar=`<div class="bar"><h2>${KNOWN[name]||name}</h2><span class="total">${data.total}건</span>
+  const h2=target==='#main'?`<h2>${KNOWN[name]||name}</h2>`:'';   // 임베드 시 페이지 h2 중복 생략
+  const bar=`<div class="bar">${h2}<span class="total">${data.total}건</span>
     <input type="search" placeholder="검색 (_id·본문·요약·발신인)" value="${esc(Q)}"
       onkeydown="if(event.key==='Enter'){Q=this.value;SKIP=0;render()}"></div>`;
   if(!data.docs.length){ m.innerHTML=bar+'<div class="empty">문서 없음</div>'; return; }
