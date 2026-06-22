@@ -26,7 +26,7 @@ def _use(monkeypatch, docs=None):
 def test_defaults(monkeypatch):
     _use(monkeypatch)
     cfg = lc.get_config()
-    assert cfg["poll_interval_sec"] == 60
+    assert cfg["poll_interval_sec"] == 30
     assert cfg["skip_on_known_wifi"] is True
 
 
