@@ -80,31 +80,50 @@ def _context(menu: str) -> Optional[str]:
     return None
 
 
+def _make_one(menu: str, label: str, alias: str,
+              target: datetime.date, comment: str = "") -> Optional[str]:
+    """발견 한 메뉴 생성 + 저장. 볼 게 없거나 '없음'·실패면 None. comment=재처리 피드백."""
+    from agent import llm, personas
+    ctx = _context(menu)
+    if not ctx or len(ctx) < 12:
+        return None
+    prompt = (f"[{label}] 최근 기록이야:\n{ctx}\n\n여기서 눈에 띄는 한 줄(볼 게 거의 없으면 '없음'):"
+              + personas.feedback_block(comment))
+    try:
+        r = llm.call(alias, prompt, system=_SYSTEM)
+        text = (r.get("text") or "").strip()
+    except Exception as e:
+        print(f"[discovery] {menu} LLM 실패: {e}", flush=True)
+        return None
+    if not text or text.replace(".", "").strip() == "없음" or len(text) < 6:
+        return None
+    db.discoveries().update_one(
+        {"_id": f"{menu}-{target.isoformat()}"},
+        {"$set": {"menu": menu, "date": target.isoformat(), "text": text,
+                  "created": datetime.datetime.now(), "dismissed": False}}, upsert=True)
+    return text
+
+
 def generate_all(target: Optional[datetime.date] = None) -> Dict[str, Any]:
     """자정 배치 — 메뉴마다 발견 한 줄 생성(있으면). 같은 날 재실행은 덮어씀."""
-    from agent import llm
     import ingest
     target = target or datetime.date.today()
     alias = ingest._resolve_alias("discovery", None, prefer_vision=False, fallback_key="insight")
-    made = []
-    for menu, label in MENUS.items():
-        ctx = _context(menu)
-        if not ctx or len(ctx) < 12:
-            continue
-        try:
-            r = llm.call(alias, f"[{label}] 최근 기록이야:\n{ctx}\n\n여기서 눈에 띄는 한 줄(볼 게 거의 없으면 '없음'):", system=_SYSTEM)
-            text = (r.get("text") or "").strip()
-        except Exception as e:
-            print(f"[discovery] {menu} LLM 실패: {e}", flush=True)
-            continue
-        if not text or text.replace(".", "").strip() == "없음" or len(text) < 6:
-            continue
-        db.discoveries().update_one(
-            {"_id": f"{menu}-{target.isoformat()}"},
-            {"$set": {"menu": menu, "date": target.isoformat(), "text": text,
-                      "created": datetime.datetime.now(), "dismissed": False}}, upsert=True)
-        made.append(menu)
+    made = [menu for menu, label in MENUS.items()
+            if _make_one(menu, label, alias, target)]
     return {"generated": len(made), "menus": made}
+
+
+def regenerate(menu: str, comment: str = "",
+               target: Optional[datetime.date] = None) -> Dict[str, Any]:
+    """발견 한 메뉴를 코멘트 반영해 다시 생성(어드민 재처리)."""
+    import ingest
+    if menu not in MENUS:
+        return {"ok": False, "reason": f"알 수 없는 메뉴: {menu}"}
+    target = target or datetime.date.today()
+    alias = ingest._resolve_alias("discovery", None, prefer_vision=False, fallback_key="insight")
+    text = _make_one(menu, MENUS[menu], alias, target, comment=comment)
+    return {"ok": bool(text), "menu": menu, "text": text or ""}
 
 
 def today(menu: str, target: Optional[datetime.date] = None) -> Optional[Dict[str, Any]]:

@@ -131,3 +131,18 @@ def ep_companion_asked(body: AskedIn):
         raise HTTPException(400, "text 비어있음")
     from agent import companion
     return companion.record_asked(body.speaker, body.text, body.ts)
+
+
+class ReprocessIn(BaseModel):
+    msg_id: str                     # 흐름 발화 _id (cmsg-… | bmsg-…)
+    comment: str = ""               # 사용자 피드백(없으면 그냥 다시 생성)
+
+
+@router.post("/companion/reprocess")
+def ep_companion_reprocess(body: ReprocessIn):
+    """흐름의 동반자 발화 한 줄을 코멘트 반영해 다시 쓴다 — 그 자리에서 교체."""
+    from agent import companion
+    r = companion.reprocess_companion(body.msg_id, body.comment)
+    if r is None:
+        raise HTTPException(404, "발화를 찾을 수 없음")
+    return r

@@ -61,16 +61,17 @@ def _situation(event: str, place: Optional[str], minutes: Optional[int]) -> str:
     return s
 
 
-def _speak(kind: str, situation: str,
-           speaker: Optional[str] = None) -> Dict[str, Any]:
+def _speak(kind: str, situation: str, speaker: Optional[str] = None,
+           comment: str = "", force: bool = False) -> Dict[str, Any]:
     """게이팅 통과 시 쿠키/베르 중 하나가 situation에 맞춰 거는 한마디(아빠한테 직접).
 
     say()·car_departure()·car_parking()의 공통 코어 — 페르소나/말투/맥락/LLM 호출.
+    comment=재처리 피드백, force=게이팅·텀 무시(재처리 시 True).
     반환: {speaker, text, alias}. 미설정/실패/게이팅이면 text="".
     """
     now = datetime.now()
     # 지금 말 걸 타이밍인가 — 마스터·새벽 조용구간·텀/쿨다운. (LLM 전에 막아 억제 시 비용 0)
-    if not cc.should_speak(kind, now):
+    if not force and not cc.should_speak(kind, now):
         return {"speaker": "", "text": "", "alias": "", "gated": True}
     who = speaker if speaker in ("cookie", "berr") else random.choice(["cookie", "berr"])
     if who == "cookie":
@@ -103,11 +104,12 @@ def _speak(kind: str, situation: str,
         f"{ctx_block}"
         f"이 상황에 맞춰 {term}에게 짧게 말 걸어 — 한 문장, 길어도 두 문장. 자연스럽고 가볍게, "
         f"부담 주지 말고. {tone} 인사·이름표 없이 그 한마디만. (사용자 호칭은 꼭 '{term}'.)")
+    prompt += personas.feedback_block(comment)   # 재처리면 사용자 지적 반영
     try:
         r = llm.call(alias, prompt, system=system)
         text = (r.get("text") or "").strip()
-        if text:
-            cc.mark_spoken(kind, now)   # 텀/쿨다운 기준 시각 갱신 (빈 응답엔 안 함)
+        if text and not force:
+            cc.mark_spoken(kind, now)   # 텀/쿨다운 기준 시각 갱신 (재처리·빈 응답엔 안 함)
         return {"speaker": name, "text": text, "alias": alias}
     except Exception as e:
         print(f"[companion] _speak 실패: {e}", flush=True)
@@ -188,9 +190,11 @@ def _dest_name(tloc: Optional[Dict[str, Any]]) -> Optional[str]:
 
 def _log_companion(speaker: Optional[str], text: str,
                    trigger: Optional[str] = None,
-                   when: Optional[datetime] = None) -> None:
+                   when: Optional[datetime] = None,
+                   regen: Optional[Dict[str, Any]] = None) -> None:
     """차 출차/주차 멘트를 흐름(conversations)에 자동 저장 — banter처럼 탭 안 해도 흐름에 남게.
 
+    regen={kind,situation,speaker} 저장 시 나중에 코멘트 반영 재처리 가능(reprocess_companion).
     (record_asked가 같은 멘트를 또 저장하지 않게 그쪽에서 최근 동일건은 스킵.)
     """
     text = (text or "").strip()
@@ -204,6 +208,8 @@ def _log_companion(speaker: Optional[str], text: str,
     }
     if trigger:
         doc["trigger"] = trigger            # 흐름 캡션(예: '집 도착', '회사로 출발')
+    if regen:
+        doc["regen"] = regen                # 재처리용 맥락(kind·situation·speaker)
     try:
         db.conversations().insert_one(doc)
     except Exception as e:
@@ -247,7 +253,8 @@ def car_departure(lat: float, lng: float, ts: Any = None,
     if (r.get("text") or "").strip():
         upd["question_ts"] = datetime.now()
         _log_companion(r.get("speaker"), r.get("text"),
-                       trigger=(f"{dest}로 출발" if dest else "차로 출발"))
+                       trigger=(f"{dest}로 출발" if dest else "차로 출발"),
+                       regen={"kind": "car", "situation": situation, "speaker": "berr"})
     db.settings().update_one({"_id": "drive"}, {"$set": upd}, upsert=True)
     print(f"[car] 출차 멘트({'dest=' + dest if dest else '어디가'}): {(r.get('text') or '')!r}",
           flush=True)
@@ -280,7 +287,9 @@ def car_charging_check(lat: float, lng: float,
                  f"서 있는 거구나 — 가볍게 한마디, 짧게.")
     r = _speak("car", situation, speaker)
     if (r.get("text") or "").strip():
-        _log_companion(r.get("speaker"), r.get("text"), trigger="충전 중")
+        _log_companion(r.get("speaker"), r.get("text"), trigger="충전 중",
+                       regen={"kind": "car", "situation": situation,
+                              "speaker": speaker or "berr"})
     return {**r, "charging": True}
 
 
@@ -332,7 +341,8 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     r = _speak("car", situation, "berr")      # 주차(차에서 내릴 때)는 베르 담당
     if (r.get("text") or "").strip():
         _log_companion(r.get("speaker"), r.get("text"),
-                       trigger=(f"{here} 도착" if here else "차 세움"))
+                       trigger=(f"{here} 도착" if here else "차 세움"),
+                       regen={"kind": "car", "situation": situation, "speaker": "berr"})
     print(f"[car] 주차 멘트: {(r.get('text') or '')!r}", flush=True)
     return r
 
@@ -369,7 +379,9 @@ def car_location_poll() -> Dict[str, Any]:
                 text = (r.get("text") or "").strip()
                 print(f"[car] 목적지 변경 {old_dest!r}→{new_dest!r} 쿠키: {text!r}", flush=True)
                 if text:
-                    _log_companion(r.get("speaker"), text, trigger=f"목적지 변경 → {new_dest}")
+                    _log_companion(r.get("speaker"), text, trigger=f"목적지 변경 → {new_dest}",
+                                   regen={"kind": "dest", "speaker": "cookie",
+                                          "situation": f"아빠가 운전 중에 내비 목적지를 '{old_dest}'에서 '{new_dest}'로 바꿨어."})
                     out["notify"] = {"speaker": r.get("speaker"), "text": text}
     except Exception as e:
         print(f"[car] 목적지 변경 감지 실패: {e}", flush=True)
@@ -492,6 +504,7 @@ def banter(event: str, place: Optional[str] = None,
     scene, resident = _banter_scene(event, info)
     if minutes:
         scene += f" (아빠는 거기 약 {minutes}분 있었어)"
+    scene_for_regen = scene   # 재처리(_speak)는 호칭을 스스로 치환 → '아빠' 유지본 보관
     scene = scene.replace("아빠", "그분")   # 서술의 '아빠'는 중립화 — 쿠키가 베껴 '아빠' 쓰는 것 방지
 
     alias = task_alias("quick") or task_alias("insight") or task_alias("chat")
@@ -529,6 +542,8 @@ def banter(event: str, place: Optional[str] = None,
             "_id": f"bmsg-{when.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
             "role": "assistant", "text": text, "ts": when, "referenced": [],
             "speaker": name, "companion": True, "banter": True,
+            "regen": {"kind": "banter", "situation": scene_for_regen,
+                      "speaker": "cookie" if name == "쿠키" else "berr"},
         }
         if i == 0 and trigger:
             doc["trigger"] = trigger     # 무엇이 이 수다를 일으켰는지 — 앱이 캡션으로 표시
@@ -595,3 +610,38 @@ def record_asked(speaker: str, text: str, ts: Any = None) -> Dict[str, Any]:
     out = dict(doc)
     out["ts"] = when.isoformat()
     return out
+
+
+def _speaker_code(name: Optional[str]) -> str:
+    """표시명(베르/쿠키) → 코드(berr/cookie)."""
+    return "cookie" if (name or "").strip() == "쿠키" else "berr"
+
+
+def reprocess_companion(msg_id: str, comment: str = "") -> Optional[Dict[str, Any]]:
+    """흐름의 동반자 발화 한 줄을 코멘트 반영해 다시 쓴다(어드민·앱 재처리).
+
+    regen 메타(kind·situation·speaker)가 있으면 그 맥락으로, 없으면(과거 발화)
+    trigger·기존 말로 맥락을 근사해 재생성. 게이팅·텀은 무시(force=True).
+    """
+    doc = db.conversations().find_one({"_id": msg_id, "companion": True})
+    if not doc:
+        return None
+    regen = doc.get("regen") or {}
+    kind = regen.get("kind") or "checkin"
+    speaker_code = regen.get("speaker") or _speaker_code(doc.get("speaker"))
+    situation = regen.get("situation")
+    if not situation:
+        trig = (doc.get("trigger") or "").strip()
+        prev = (doc.get("text") or "").strip()
+        situation = (f"'{trig}' 상황에서 네가 흐름에 했던 말을 다시 쓰는 거야."
+                     if trig else "네가 흐름에 했던 말을 다시 쓰는 거야.")
+        if prev:
+            situation += f" (원래 한 말: {prev})"
+    r = _speak(kind, situation, speaker_code, comment=comment, force=True)
+    text = (r.get("text") or "").strip()
+    if not text:
+        return {"ok": False, "id": msg_id, "reason": r.get("reason") or "재생성 실패"}
+    db.conversations().update_one({"_id": msg_id}, {"$set": {"text": text}})
+    ts = doc.get("ts")
+    return {"ok": True, "id": msg_id, "speaker": doc.get("speaker"), "text": text,
+            "ts": ts.isoformat() if hasattr(ts, "isoformat") else ts}

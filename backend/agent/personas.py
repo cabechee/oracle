@@ -173,3 +173,16 @@ def morning_system() -> str:
 
 def evening_system() -> str:
     return _berr("evening_role")
+
+
+def feedback_block(comment: str) -> str:
+    """재처리 시 사용자 코멘트를 프롬프트 끝에 붙일 블록. 코멘트 없으면 빈 문자열.
+
+    일기·회고·조간·석간·발견·동반자 발화 — 모든 재생성이 공유(드리프트 방지).
+    """
+    c = (comment or "").strip()
+    if not c:
+        return ""
+    return ("\n\n[다시 쓰기 — 아래는 직전 생성 결과에 대한 사용자의 지적이야. 반드시 반영해서 "
+            "다시 써라. 이전 결과를 그대로 반복하지 말 것]\n"
+            f"{c}\n")

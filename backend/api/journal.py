@@ -21,35 +21,42 @@ def _parse_date(target_date: Optional[str]):
 
 
 @router.post("/digest/run")
-def ep_digest_run(target_date: Optional[str] = None):
+def ep_digest_run(target_date: Optional[str] = None, comment: str = ""):
     """자정 배치 트리거 (launchd plist가 호출 + dev/검증용).
 
-    target_date='YYYY-MM-DD' 지정 → 그 날 일 저널만 재생성.
+    target_date='YYYY-MM-DD' 지정 → 그 날 배치(분류 + 일 저널).
+    comment 지정 → 그 날 일기만 코멘트 반영해 재생성(분류·인덱스 없이, regenerate_day).
     미지정(실제 자정 run) → run_nightly: 어제 일 저널 + (월요일)주간 + (1일)월간.
     """
     d = _parse_date(target_date)
     try:
+        if comment.strip():
+            if not d:
+                raise HTTPException(400, "코멘트 재처리는 target_date(YYYY-MM-DD)가 필요합니다")
+            return journal_svc.regenerate_day(d, comment=comment)
         return nightly.run_daily(d) if d else nightly.run_nightly()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
 @router.post("/journal/weekly")
-def ep_journal_weekly(target_date: Optional[str] = None):
-    """주간 회고 수동 트리거. target_date(그 주의 아무 날) 없으면 지난 주."""
+def ep_journal_weekly(target_date: Optional[str] = None, comment: str = ""):
+    """주간 회고 수동 트리거. target_date(그 주의 아무 날) 없으면 지난 주. comment=재처리 피드백."""
     d = _parse_date(target_date)
     try:
-        return journal_svc.run_weekly(d)
+        return journal_svc.run_weekly(d, comment=comment)
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
 @router.post("/journal/monthly")
-def ep_journal_monthly(target_date: Optional[str] = None):
-    """월간 회고 수동 트리거. target_date(그 달의 아무 날) 없으면 지난 달."""
+def ep_journal_monthly(target_date: Optional[str] = None, comment: str = ""):
+    """월간 회고 수동 트리거. target_date(그 달의 아무 날) 없으면 지난 달. comment=재처리 피드백."""
     d = _parse_date(target_date)
     try:
-        return journal_svc.run_monthly(d)
+        return journal_svc.run_monthly(d, comment=comment)
     except Exception as e:
         raise HTTPException(500, str(e))
 

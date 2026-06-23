@@ -101,3 +101,31 @@ def test_make_daily_journal_empty_response_fails(monkeypatch):
     monkeypatch.setattr(journal.llm, "call_retry", lambda *a, **k: {"text": "   "})
     with pytest.raises(RuntimeError):
         journal.make_daily_journal(_recs(), date(2026, 6, 20))
+
+
+# ── 코멘트 반영 재처리: 피드백 블록 주입 ──────────────────────────────
+
+def test_feedback_block():
+    from agent import personas
+    assert personas.feedback_block("") == ""
+    assert personas.feedback_block("   ") == ""
+    b = personas.feedback_block("더 짧게 써")
+    assert "더 짧게 써" in b and "다시 써" in b
+
+
+def test_make_daily_journal_injects_comment(monkeypatch):
+    cap = {}
+    monkeypatch.setattr(journal, "resolve_alias", lambda k: "a")
+    monkeypatch.setattr(journal.llm, "call_retry",
+                        lambda alias, prompt, **k: cap.update(prompt=prompt) or {"text": "본문"})
+    journal.make_daily_journal(_recs(), date(2026, 6, 20), comment="쿠키 호칭을 오빠로")
+    assert "쿠키 호칭을 오빠로" in cap["prompt"]
+
+
+def test_make_daily_journal_no_comment_no_block(monkeypatch):
+    cap = {}
+    monkeypatch.setattr(journal, "resolve_alias", lambda k: "a")
+    monkeypatch.setattr(journal.llm, "call_retry",
+                        lambda alias, prompt, **k: cap.update(prompt=prompt) or {"text": "본문"})
+    journal.make_daily_journal(_recs(), date(2026, 6, 20))
+    assert "다시 쓰기" not in cap["prompt"]

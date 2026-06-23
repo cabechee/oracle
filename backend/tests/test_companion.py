@@ -150,3 +150,62 @@ def test_banter_scene_neutralized(monkeypatch):
     companion.banter("arrive", "작업실")
     scene_part = cap["prompt"].split("[지금 상황]")[1].split("\n\n")[0]
     assert "아빠" not in scene_part and "그분" in scene_part   # 장면 서술 중립화
+
+
+# ── 흐름 발화 재처리 — regen 맥락으로 코멘트 반영해 그 자리에서 교체 ──
+class _FakeConv:
+    def __init__(self, doc=None):
+        self.doc = doc
+        self.updated = None
+
+    def find_one(self, q):
+        return self.doc
+
+    def update_one(self, q, u):
+        self.updated = u
+
+
+def test_reprocess_companion_with_regen(monkeypatch):
+    doc = {"_id": "cmsg-x", "speaker": "베르", "companion": True, "text": "옛 말",
+           "regen": {"kind": "car", "situation": "아빠가 회사 가는 중", "speaker": "berr"}}
+    conv = _FakeConv(doc)
+    monkeypatch.setattr(companion.db, "conversations", lambda: conv)
+    cap = _capture_speak_prompt(monkeypatch)
+    out = companion.reprocess_companion("cmsg-x", comment="더 다정하게")
+    assert out["ok"] is True
+    assert out["text"] == "ok"                          # _speak mock 반환으로 교체
+    assert conv.updated["$set"]["text"] == "ok"         # 그 자리에서 갱신
+    assert "더 다정하게" in cap["prompt"]                # 코멘트가 프롬프트에 주입
+
+
+def test_reprocess_companion_not_found(monkeypatch):
+    monkeypatch.setattr(companion.db, "conversations", lambda: _FakeConv(None))
+    assert companion.reprocess_companion("nope") is None
+
+
+def test_reprocess_companion_force_bypasses_gate(monkeypatch):
+    # 게이팅이 닫혀 있어도 재처리는 force=True라 생성된다(사용자가 명시 요청).
+    doc = {"_id": "bmsg-y", "speaker": "쿠키", "companion": True, "text": "옛",
+           "regen": {"kind": "banter", "situation": "그분 도착", "speaker": "cookie"}}
+    conv = _FakeConv(doc)
+    monkeypatch.setattr(companion.db, "conversations", lambda: conv)
+    monkeypatch.setattr(companion.personas, "current", lambda k: "SYS")
+    monkeypatch.setattr(companion, "task_alias", lambda k: "haiku")
+    monkeypatch.setattr(companion.cc, "should_speak", lambda *a, **k: False)   # 닫힘
+    monkeypatch.setattr(companion.cc, "gather_context", lambda *a, **k: "")
+    monkeypatch.setattr(companion.cc, "mark_spoken", lambda *a, **k: None)
+    monkeypatch.setattr(companion.llm, "call", lambda *a, **k: {"text": "새 말"})
+    out = companion.reprocess_companion("bmsg-y", comment="짧게")
+    assert out["ok"] is True and out["text"] == "새 말"
+
+
+def test_reprocess_companion_no_regen_uses_trigger(monkeypatch):
+    # regen 없는 과거 발화 — trigger·기존 말로 맥락 근사.
+    doc = {"_id": "cmsg-z", "speaker": "베르", "companion": True,
+           "text": "원래 말", "trigger": "집 도착"}
+    conv = _FakeConv(doc)
+    monkeypatch.setattr(companion.db, "conversations", lambda: conv)
+    cap = _capture_speak_prompt(monkeypatch)
+    out = companion.reprocess_companion("cmsg-z", comment="짧게")
+    assert out["ok"] is True
+    assert "집 도착" in cap["prompt"] and "원래 말" in cap["prompt"]

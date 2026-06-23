@@ -14,8 +14,10 @@ def ep_log(limit: int = 80):
 
 
 @router.post("/discovery/run")
-def ep_run():
-    """발견 수동 생성(자정 배치와 동일) — 지금 한 번 돌림."""
+def ep_run(menu: str = "", comment: str = ""):
+    """발견 생성 — menu 지정 시 그 메뉴만(코멘트 반영) 재생성, 미지정이면 전체(자정 배치와 동일)."""
+    if menu:
+        return disco.regenerate(menu, comment=comment)
     return disco.generate_all()
 
 

@@ -93,8 +93,9 @@ def make_daily_journal(
     reactions: Optional[Dict[str, int]] = None,
     signals: Optional[List[Dict[str, Any]]] = None,
     visits: Optional[List[str]] = None,
+    comment: str = "",
 ) -> str:
-    """그날 기록 → 시간순 서술 일기 본문(# 날짜 헤더 포함)."""
+    """그날 기록 → 시간순 서술 일기 본문(# 날짜 헤더 포함). comment=재처리 피드백."""
     alias = resolve_alias("daily_digest")
     if not alias:
         return f"# {target.isoformat()}\n\n(daily_digest alias 미설정 — Nest에 enabled 모델 없음)\n"
@@ -127,7 +128,8 @@ def make_daily_journal(
         parts.append(json.dumps(reactions, ensure_ascii=False))
         parts.append("(긍정 반응(comment:like·discovery:interesting 등) 항목들의 공통점을 취향 메모에 살짝. "
                      "comment:dislike·analysis:wrong이 보이면 어떤 게 아빠와 안 맞았는지도 한 줄.)")
-    prompt = "\n".join(parts) + "\n\n위 기록으로 오늘의 일기를 시간 순서대로 서술하세요(요약 금지)."
+    prompt = ("\n".join(parts) + "\n\n위 기록으로 오늘의 일기를 시간 순서대로 서술하세요(요약 금지)."
+              + personas.feedback_block(comment))
     # 실패(타임아웃·과부하·인증 등)는 호출자로 전파 — 실패 문자열을 본문으로 저장하지 않기
     # 위해. 일시적 오류는 call_retry가 백오프 재시도, 영구 오류(401 등)는 즉시 raise.
     r = llm.call_retry(alias, prompt, system=DAILY_JOURNAL_SYSTEM, timeout=_DIGEST_TIMEOUT)
@@ -192,10 +194,37 @@ def save_day_journal(
     )
 
 
+def regenerate_day(target: date, comment: str = "") -> Dict[str, Any]:
+    """그 날 일기만 다시 생성(분류·인덱스 없이) — 코멘트 반영 재처리·실패 복구용.
+
+    실패하면 make_daily_journal이 예외를 던지고 저장은 일어나지 않는다(기존 정상본 유지·빈 슬롯).
+    """
+    start = datetime.combine(target, datetime.min.time())
+    end = start + timedelta(days=1)
+    records = list(db.records().find({"ts": {"$gte": start, "$lt": end}}).sort("ts", 1))
+    if not records:
+        return {"ok": True, "date": target.isoformat(), "records": 0, "skipped": "no records"}
+    reactions = aggregate_reactions(records)
+    import threads as threads_mod
+    import signals as signals_mod
+    import visits as visits_mod
+    silent = threads_mod.silent_threads(min_days=3, max_days=30)
+    day_signals = signals_mod.signals_for_day(target)
+    day_visits = visits_mod.day_lines(target)
+    digest_text = make_daily_journal(
+        records, target, silent, reactions, day_signals, day_visits, comment=comment)
+    write_daily_digest_file(target, digest_text)
+    summary3 = make_day_summary3(digest_text)
+    embedded = save_day_journal(
+        target, digest_text, len(records), reactions, start, end, summary3=summary3)
+    return {"ok": True, "date": target.isoformat(), "records": len(records),
+            "journal_embedded": embedded, "preview": digest_text[:200]}
+
+
 # ── 주/월 회고 ──────────────────────────────────────────────
 
-def run_weekly(target: Optional[date] = None) -> Dict[str, Any]:
-    """주간 회고 — target(또는 지난 주)이 속한 월~일 주를 일별 일기로 회고."""
+def run_weekly(target: Optional[date] = None, comment: str = "") -> Dict[str, Any]:
+    """주간 회고 — target(또는 지난 주)이 속한 월~일 주를 일별 일기로 회고. comment=재처리 피드백."""
     base = target or (date.today() - timedelta(days=7))
     monday = base - timedelta(days=base.weekday())
     start = datetime.combine(monday, datetime.min.time())
@@ -215,7 +244,7 @@ def run_weekly(target: Optional[date] = None) -> Dict[str, Any]:
     body = _make_period_journal(
         WEEKLY_JOURNAL_SYSTEM, f"# {label} 주간 회고",
         f"{label} ({monday.isoformat()}~{(end - timedelta(days=1)).date().isoformat()})",
-        day_journals, reactions, "weekly_journal", settle,
+        day_journals, reactions, "weekly_journal", settle, comment=comment,
     )
     _write_period_vault(jid, body)
     embedded = _upsert_journal(jid, "week", label, start, end, body, record_count, reactions)
@@ -223,8 +252,8 @@ def run_weekly(target: Optional[date] = None) -> Dict[str, Any]:
             "embedded": embedded, "preview": body[:200]}
 
 
-def run_monthly(target: Optional[date] = None) -> Dict[str, Any]:
-    """월간 회고 — target(또는 지난 달)의 일별 일기 + 주간 회고를 재료로."""
+def run_monthly(target: Optional[date] = None, comment: str = "") -> Dict[str, Any]:
+    """월간 회고 — target(또는 지난 달)의 일별 일기 + 주간 회고를 재료로. comment=재처리 피드백."""
     base = target or (date.today().replace(day=1) - timedelta(days=1))
     month_first = base.replace(day=1)
     if month_first.month == 12:
@@ -247,7 +276,7 @@ def run_monthly(target: Optional[date] = None) -> Dict[str, Any]:
     settle = ledger_mod.settlement_material("month", month_first)
     body = _make_period_journal(
         MONTHLY_JOURNAL_SYSTEM, f"# {label} 월간 회고", label,
-        day_journals + week_journals, reactions, "monthly_journal", settle,
+        day_journals + week_journals, reactions, "monthly_journal", settle, comment=comment,
     )
     _write_period_vault(jid, body)
     embedded = _upsert_journal(jid, "month", label, start, end, body, record_count, reactions)
@@ -285,8 +314,9 @@ def _make_period_journal(
     reactions: Dict[str, int],
     alias_key: str,
     settlement: str = "",
+    comment: str = "",
 ) -> str:
-    """일/주 저널 재료 → 주/월 회고 본문(header 포함). settlement=가계부 결산(있으면 녹임)."""
+    """일/주 저널 재료 → 주/월 회고 본문(header 포함). settlement=가계부 결산, comment=재처리 피드백."""
     alias = resolve_alias(alias_key) or resolve_alias("daily_digest")
     if not alias:
         return f"{header}\n\n(회고 alias 미설정 — Nest에 enabled 모델 없음)\n"
@@ -301,7 +331,8 @@ def _make_period_journal(
         parts.append("\n## 💰 이 기간 가계부 결산 (회고 끝에 소비 흐름을 자연스럽게 한두 줄로 "
                      "짚어줘 — 숫자 나열 말고 눈에 띄는 것 한둘. 예: '이번 달은 외식이 늘었네요')\n"
                      + settlement)
-    prompt = "\n\n".join(parts) + "\n\n위 저널들로 회고를 서술하세요(압축 요약 금지, 회고+피드백)."
+    prompt = ("\n\n".join(parts) + "\n\n위 저널들로 회고를 서술하세요(압축 요약 금지, 회고+피드백)."
+              + personas.feedback_block(comment))
     # 실패는 전파 — run_weekly/monthly가 저장 전에 호출하므로 예외 시 저장 스킵(빈 슬롯).
     r = llm.call_retry(alias, prompt, system=system, timeout=_DIGEST_TIMEOUT)
     body = (r.get("text") or "").strip()

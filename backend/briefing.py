@@ -54,8 +54,8 @@ def _on_this_day(today: date) -> List[str]:
     return out
 
 
-def run_morning(target: Optional[date] = None) -> Dict[str, Any]:
-    """조간 합성 — 어젯밤 수면 + 밤새 신호 + 어제 한 줄 + On This Day."""
+def run_morning(target: Optional[date] = None, comment: str = "") -> Dict[str, Any]:
+    """조간 합성 — 어젯밤 수면 + 밤새 신호 + 어제 한 줄 + On This Day. comment=재처리 피드백."""
     today = target or date.today()
     # 밤새 신호 먼저 요약(미요약분 포함) — 아침에 다 모아 보여주기
     try:
@@ -83,11 +83,11 @@ def run_morning(target: Optional[date] = None) -> Dict[str, Any]:
     if otd:
         parts.append("[그날의 오늘]\n" + "\n".join(otd))
 
-    return _compose("morning", today, parts, personas.morning_system())
+    return _compose("morning", today, parts, personas.morning_system(), comment=comment)
 
 
-def run_evening(target: Optional[date] = None) -> Dict[str, Any]:
-    """석간 합성 — 오늘 기록 흐름 + 펜딩 환기 + 한 줄 권유."""
+def run_evening(target: Optional[date] = None, comment: str = "") -> Dict[str, Any]:
+    """석간 합성 — 오늘 기록 흐름 + 펜딩 환기 + 한 줄 권유. comment=재처리 피드백."""
     today = target or date.today()
     t0, t1 = _day_range(today)
     recs = list(db.records().find({"ts": {"$gte": t0, "$lte": t1}}).sort("ts", 1))
@@ -114,16 +114,17 @@ def run_evening(target: Optional[date] = None) -> Dict[str, Any]:
             + "\n".join(f"- {it.get('merchant') or it.get('memo') or '결제'} "
                         f"{it.get('amount', 0):,}원" for it in pays))
 
-    return _compose("evening", today, parts, personas.evening_system())
+    return _compose("evening", today, parts, personas.evening_system(), comment=comment)
 
 
 def _compose(kind: str, target: date, material: List[str],
-             system: str) -> Dict[str, Any]:
+             system: str, comment: str = "") -> Dict[str, Any]:
     alias = _alias()
     if not alias:
         return {"ok": False, "reason": "alias 미설정"}
     body = "\n\n".join(material)
-    prompt = f"[오늘 {target.isoformat()}]\n\n{body}\n\n위 재료로 작성해주세요."
+    prompt = (f"[오늘 {target.isoformat()}]\n\n{body}\n\n위 재료로 작성해주세요."
+              + personas.feedback_block(comment))
     try:
         r = llm.call_retry(alias, prompt, system=system)
         text = (r.get("text") or "").strip()
