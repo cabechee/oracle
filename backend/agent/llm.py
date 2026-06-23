@@ -44,6 +44,44 @@ def call(
     )
 
 
+# 생성 호출 재시도 — 일시적 실패만 다시 시도. 인증(401)·권한 같은 영구 오류는
+# 재시도해도 같으니 즉시 포기 → 호출자가 결과를 저장하지 않고 슬롯을 비운다.
+_TRANSIENT_HINTS = (
+    "overloaded", "529", "500", "502", "503", "504",
+    "timeout", "timed out", "temporarily", "rate limit", "429", "connection",
+)
+
+
+def _is_transient(err: Exception) -> bool:
+    """재시도할 가치가 있는 일시적 오류인가. 인증·권한 등 영구 오류면 False."""
+    import httpx
+    if isinstance(err, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError,
+                        httpx.WriteError, httpx.RemoteProtocolError, httpx.PoolTimeout)):
+        return True
+    msg = str(err).lower()
+    return any(h in msg for h in _TRANSIENT_HINTS)
+
+
+def call_retry(alias: str, prompt: str, *, tries: int = 3,
+               base_delay: float = 2.0, **kw: Any) -> Dict[str, Any]:
+    """긴 생성(일기·회고·조간)용 call — 일시적 실패는 지수 백오프로 재시도.
+
+    인증(401)·권한 같은 영구 오류, 또는 마지막 시도까지 실패하면 raise한다 →
+    호출자가 결과를 저장하지 않고 슬롯을 비운다(실패 문자열을 본문으로 남기지 않음).
+    """
+    import time
+    last: Optional[Exception] = None
+    for attempt in range(max(1, tries)):
+        try:
+            return call(alias, prompt, **kw)
+        except Exception as e:   # 분류 후 재시도하거나 전파
+            last = e
+            if attempt == tries - 1 or not _is_transient(e):
+                raise
+            time.sleep(base_delay * (2 ** attempt))
+    raise last   # 루프가 항상 return/raise — 도달하지 않음
+
+
 def call_text(alias: str, prompt: str, **kw: Any) -> str:
     return (call(alias, prompt, **kw).get("text") or "").strip()
 

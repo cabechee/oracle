@@ -128,12 +128,13 @@ def make_daily_journal(
         parts.append("(긍정 반응(comment:like·discovery:interesting 등) 항목들의 공통점을 취향 메모에 살짝. "
                      "comment:dislike·analysis:wrong이 보이면 어떤 게 아빠와 안 맞았는지도 한 줄.)")
     prompt = "\n".join(parts) + "\n\n위 기록으로 오늘의 일기를 시간 순서대로 서술하세요(요약 금지)."
-    try:
-        r = llm.call(alias, prompt, system=DAILY_JOURNAL_SYSTEM, timeout=_DIGEST_TIMEOUT)
-        body = (r.get("text") or "").strip()
-        return f"# {target.isoformat()}\n\n{body}\n"
-    except Exception as e:
-        return f"# {target.isoformat()}\n\n(일기 생성 실패: {e})\n"
+    # 실패(타임아웃·과부하·인증 등)는 호출자로 전파 — 실패 문자열을 본문으로 저장하지 않기
+    # 위해. 일시적 오류는 call_retry가 백오프 재시도, 영구 오류(401 등)는 즉시 raise.
+    r = llm.call_retry(alias, prompt, system=DAILY_JOURNAL_SYSTEM, timeout=_DIGEST_TIMEOUT)
+    body = (r.get("text") or "").strip()
+    if not body:
+        raise RuntimeError("일기 생성: 빈 응답")
+    return f"# {target.isoformat()}\n\n{body}\n"
 
 
 DAY_SUMMARY3_SYSTEM = """당신은 유저의 하루 일기를 딱 3줄로 요약합니다.
@@ -156,14 +157,14 @@ def make_day_summary3(body_text: str) -> str:
     if not alias or "(일기 생성 실패" in body or len(core) < 20:
         return ""
     try:
-        r = llm.call(alias,
-                     f"[오늘의 일기]\n{body}\n\n이 하루를 3줄로 요약하세요.",
-                     system=DAY_SUMMARY3_SYSTEM, timeout=_DIGEST_TIMEOUT)
+        r = llm.call_retry(alias,
+                           f"[오늘의 일기]\n{body}\n\n이 하루를 3줄로 요약하세요.",
+                           system=DAY_SUMMARY3_SYSTEM, timeout=_DIGEST_TIMEOUT)
         lines = [ln.strip(" -·•\t0123456789.")
                  for ln in (r.get("text") or "").splitlines() if ln.strip()]
         return "\n".join([ln for ln in lines if ln][:3])
     except Exception:
-        return ""
+        return ""   # 요약은 부가물 — 실패해도 빈 문자열(일기 본문엔 영향 없음)
 
 
 def write_daily_digest_file(target: date, text: str) -> str:
@@ -301,12 +302,12 @@ def _make_period_journal(
                      "짚어줘 — 숫자 나열 말고 눈에 띄는 것 한둘. 예: '이번 달은 외식이 늘었네요')\n"
                      + settlement)
     prompt = "\n\n".join(parts) + "\n\n위 저널들로 회고를 서술하세요(압축 요약 금지, 회고+피드백)."
-    try:
-        r = llm.call(alias, prompt, system=system, timeout=_DIGEST_TIMEOUT)
-        body = (r.get("text") or "").strip()
-        return f"{header}\n\n{body}\n"
-    except Exception as e:
-        return f"{header}\n\n(회고 생성 실패: {e})\n"
+    # 실패는 전파 — run_weekly/monthly가 저장 전에 호출하므로 예외 시 저장 스킵(빈 슬롯).
+    r = llm.call_retry(alias, prompt, system=system, timeout=_DIGEST_TIMEOUT)
+    body = (r.get("text") or "").strip()
+    if not body:
+        raise RuntimeError("회고 생성: 빈 응답")
+    return f"{header}\n\n{body}\n"
 
 
 def _write_period_vault(jid: str, text: str) -> None:

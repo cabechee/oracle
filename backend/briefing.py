@@ -125,7 +125,7 @@ def _compose(kind: str, target: date, material: List[str],
     body = "\n\n".join(material)
     prompt = f"[오늘 {target.isoformat()}]\n\n{body}\n\n위 재료로 작성해주세요."
     try:
-        r = llm.call(alias, prompt, system=system)
+        r = llm.call_retry(alias, prompt, system=system)
         text = (r.get("text") or "").strip()
     except Exception as e:
         return {"ok": False, "reason": str(e)}

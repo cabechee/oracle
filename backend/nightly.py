@@ -150,17 +150,28 @@ def _run_daily_inner(target_date: Optional[date] = None) -> Dict[str, Any]:
     day_visits = visits_mod.day_lines(target)
     result["visit_count"] = len(day_visits)
 
-    # 5) 일 저널 (LLM, silent + reactions + signals + visits 포함된 풍부한 prompt) → vault digest + journals
-    digest_text = journal.make_daily_journal(
-        records, target, silent, reactions, day_signals, day_visits)
-    result["digest_path"] = journal.write_daily_digest_file(target, digest_text)
-    result["digest_preview"] = digest_text[:200]
-    summary3 = journal.make_day_summary3(digest_text)
-    result["day_summary3"] = summary3
-    result["journal_embedded"] = journal.save_day_journal(
-        target, digest_text, len(records), reactions, start, end, summary3=summary3)
+    # 5) 일 저널 (LLM) → vault digest + journals.
+    #    실패하면 실패 문자열을 본문으로 저장하지 않고 슬롯을 비운다 — 기존 정상본이 있으면
+    #    덮어쓰지 않고, 빠진 날은 수동 재처리(/digest/run?target_date=)로 채운다.
+    digest_text = None
+    try:
+        digest_text = journal.make_daily_journal(
+            records, target, silent, reactions, day_signals, day_visits)
+    except Exception as e:
+        result["ok"] = False
+        result["journal_failed"] = str(e)
+        print(f"[nightly] {target.isoformat()} 일기 생성 실패 — 저장 스킵(슬롯 비움): {e}",
+              flush=True)
 
-    # 6) 상위 인덱스 갱신 (코드 aggregate, vault master.md + MongoDB index_meta)
+    if digest_text:
+        result["digest_path"] = journal.write_daily_digest_file(target, digest_text)
+        result["digest_preview"] = digest_text[:200]
+        summary3 = journal.make_day_summary3(digest_text)
+        result["day_summary3"] = summary3
+        result["journal_embedded"] = journal.save_day_journal(
+            target, digest_text, len(records), reactions, start, end, summary3=summary3)
+
+    # 6) 상위 인덱스 갱신 (일기와 독립 — 일기 실패해도 갱신)
     result["index"] = index_mod.update_master_index(target)
 
     return result
