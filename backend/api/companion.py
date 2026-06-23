@@ -106,15 +106,13 @@ def ep_car_parking(body: CarParkIn):
 
 @router.get("/car/location")
 def ep_car_location():
-    """차 현재 GPS — 운전 중 수집기가 메인 위치로 사용(폰 GPS보다 정확).
+    """차 현재 GPS(메인 위치) + 네비 목적지 변경 감지 — 운전 중 수집기가 10초마다 호출.
 
-    자는 차는 안 깨우고 None(tesla.location이 online 아니면 None) — 운전 중만 좌표가 온다.
+    자는 차는 안 깨우고 None. 운전 중 목적지가 바뀌면 쿠키 한마디가 notify로 따라온다
+    (출차/주차=베르, 도중 목적지 변경=쿠키).
     """
-    import tesla
-    loc = tesla.location()
-    if not loc or loc.get("lat") is None or loc.get("lng") is None:
-        return {"lat": None, "lng": None}
-    return {"lat": loc["lat"], "lng": loc["lng"], "driving": bool(loc.get("driving"))}
+    from agent import companion
+    return companion.car_location_poll()
 
 
 class AskedIn(BaseModel):

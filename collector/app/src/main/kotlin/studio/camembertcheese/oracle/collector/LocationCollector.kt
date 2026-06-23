@@ -62,14 +62,23 @@ object LocationCollector {
     private fun bestLoc(ctx: Context, driving: Boolean): Location? {
         val phone = Geo.currentLocation(ctx)
         if (driving) {
-            val t = Backend.carLocation(ctx)
-            if (t != null) {
-                val p = if (phone != null) " · 폰(%.5f,%.5f)".format(phone.latitude, phone.longitude) else " · 폰없음"
-                L.i("운전중 위치 Tesla 메인(%.5f,%.5f)".format(t.first, t.second) + p)
-                return Location("tesla").apply {
-                    latitude = t.first; longitude = t.second; accuracy = 5f
-                    time = System.currentTimeMillis()
-                    elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+            val r = Backend.carLocation(ctx)
+            if (r != null) {
+                val nt = r.optJSONObject("notify")          // 목적지 변경 = 쿠키 한마디
+                if (nt != null) {
+                    val txt = nt.optString("text")
+                    if (txt.isNotBlank()) { Notify.companion(ctx, nt.optString("speaker"), txt); L.i("목적지 변경 알림: $txt") }
+                }
+                val lat = r.optDouble("lat", Double.NaN)
+                val lng = r.optDouble("lng", Double.NaN)
+                if (!lat.isNaN() && !lng.isNaN()) {
+                    val p = if (phone != null) " · 폰(%.5f,%.5f)".format(phone.latitude, phone.longitude) else " · 폰없음"
+                    L.i("운전중 위치 Tesla 메인(%.5f,%.5f)".format(lat, lng) + p)
+                    return Location("tesla").apply {
+                        latitude = lat; longitude = lng; accuracy = 5f
+                        time = System.currentTimeMillis()
+                        elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+                    }
                 }
             }
             L.i("운전중 위치 Tesla 없음 → 폰 폴백")

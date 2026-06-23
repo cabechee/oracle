@@ -51,11 +51,13 @@ DEFAULTS: Dict[str, Any] = {
     # 차량 출차/주차 말 걸기 ('어디 가?' / '잘 도착했어?') — 매 운행마다, 새벽만 침묵
     "car_enabled": True,
     "car_cooldown_min": 3,          # BT 깜빡임·디바운스 경계 중복 질문 방지(운행은 보통 더 띄엄띄엄)
+    "dest_cooldown_min": 1,         # 운전 중 목적지 변경(쿠키) 최소 간격 — 베르 출차 쿨다운과 별개
 }
 
 _HOUR_KEYS = ("quiet_start_hour", "quiet_end_hour",
               "checkin_start_hour", "checkin_end_hour")
-_MIN_KEYS = ("location_cooldown_min", "banter_cooldown_min", "car_cooldown_min")
+_MIN_KEYS = ("location_cooldown_min", "banter_cooldown_min", "car_cooldown_min",
+             "dest_cooldown_min")
 _BOOL_KEYS = ("enabled", "checkin_enabled", "location_enabled", "car_enabled")
 
 
@@ -175,6 +177,10 @@ def should_speak(kind: str, now: Optional[datetime] = None,
             return False
         return _minutes_since(st.get("last_car"), now) >= int(
             cfg.get("car_cooldown_min", 3))
+    if kind == "dest":
+        # 운전 중 목적지 변경 — 쿠키 전담. 베르 출차 쿨다운(car)과 별개, 짧은 플래핑 방지만.
+        return _minutes_since(st.get("last_dest"), now) >= int(
+            cfg.get("dest_cooldown_min", 1))
     if kind == "banter":
         # 동반자끼리 수다 — 위치 켜져 있을 때만, 플래핑 방지 짧은 쿨다운(위치 쿨다운과 별개).
         if not cfg.get("location_enabled", True):
@@ -204,6 +210,10 @@ def mark_spoken(kind: str, now: Optional[datetime] = None) -> None:
     if kind == "car":
         db.settings().update_one({"_id": "companion_state"},
                                  {"$set": {"last_car": now}}, upsert=True)
+        return
+    if kind == "dest":
+        db.settings().update_one({"_id": "companion_state"},
+                                 {"$set": {"last_dest": now}}, upsert=True)
         return
     field = "last_checkin" if kind == "checkin" else "last_location"
     db.settings().update_one({"_id": "companion_state"},

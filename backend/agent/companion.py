@@ -240,10 +240,10 @@ def car_departure(lat: float, lng: float, ts: Any = None,
     else:   # 재확인에도 목적지 없음 → 어디 가?
         situation = ("아빠가 차를 몰고 어디론가 가는 중이야. 어디 가는지 궁금해서 가볍게 물어봐 "
                      "— '어디 가?' 정도로 아주 짧게.")
-    r = _speak("car", situation, speaker)
+    r = _speak("car", situation, "berr")      # 출차(차 탈 때)는 베르 담당
     upd: Dict[str, Any] = {"state": "driving"}
     if dest:
-        upd["destination"] = dest             # 주차 때 '여기 잘 도착했어?' 매칭용
+        upd["destination"] = dest             # 주차 때 '여기 잘 도착했어?' 매칭 + 목적지 변경 기준
     if (r.get("text") or "").strip():
         upd["question_ts"] = datetime.now()
         _log_companion(r.get("speaker"), r.get("text"),
@@ -329,12 +329,51 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     else:
         situation = ("아빠가 방금 차를 세웠어(도착·주차). 어디 도착했는지·어디 세웠는지 가볍게 "
                      "물어봐 — 짧게, 나중에 차 둔 데 기억하게.")
-    r = _speak("car", situation, speaker)
+    r = _speak("car", situation, "berr")      # 주차(차에서 내릴 때)는 베르 담당
     if (r.get("text") or "").strip():
         _log_companion(r.get("speaker"), r.get("text"),
                        trigger=(f"{here} 도착" if here else "차 세움"))
     print(f"[car] 주차 멘트: {(r.get('text') or '')!r}", flush=True)
     return r
+
+
+def _speak_dest_change(old_dest: str, new_dest: str) -> Dict[str, Any]:
+    """운전 중 내비 목적지 변경 — 쿠키가 가볍게 한마디(중간 변경은 쿠키 전담)."""
+    situation = (f"아빠가 운전 중에 내비 목적지를 '{old_dest}'에서 '{new_dest}'로 바꿨어. "
+                 f"'어 목적지 바뀌었네? 이제 {new_dest} 가?'처럼 가볍게 한마디 — 짧게.")
+    return _speak("dest", situation, "cookie")   # 중간 목적지 변경 = 쿠키
+
+
+def car_location_poll() -> Dict[str, Any]:
+    """운전 중 수집기가 10초마다 호출 — 차 GPS(메인 위치) + 네비 목적지 변경 감지.
+
+    좌표는 폰보다 정확한 차 GPS(자는 차면 None). 운전 중 목적지가 바뀌면 쿠키가 한마디(notify로
+    반환 → 수집기가 알림). 출차/주차(탈 때·내릴 때)는 베르, 도중 목적지 변경은 쿠키 담당.
+    """
+    import tesla
+    loc = tesla.location()
+    if not loc or loc.get("lat") is None or loc.get("lng") is None:
+        return {"lat": None, "lng": None}
+    out: Dict[str, Any] = {"lat": loc["lat"], "lng": loc["lng"],
+                           "driving": bool(loc.get("driving")), "dest": _dest_name(loc)}
+    try:
+        drive = db.settings().find_one({"_id": "drive"}) or {}
+        if drive.get("state") == "driving":
+            new_dest = _dest_name(loc)
+            old_dest = drive.get("destination")
+            # established 목적지가 바뀐 경우만 = 진짜 중간 변경(첫 목적지는 출차/재확인=베르 담당).
+            if old_dest and new_dest and new_dest != old_dest:
+                db.settings().update_one({"_id": "drive"},
+                                         {"$set": {"destination": new_dest}}, upsert=True)
+                r = _speak_dest_change(old_dest, new_dest)
+                text = (r.get("text") or "").strip()
+                print(f"[car] 목적지 변경 {old_dest!r}→{new_dest!r} 쿠키: {text!r}", flush=True)
+                if text:
+                    _log_companion(r.get("speaker"), text, trigger=f"목적지 변경 → {new_dest}")
+                    out["notify"] = {"speaker": r.get("speaker"), "text": text}
+    except Exception as e:
+        print(f"[car] 목적지 변경 감지 실패: {e}", flush=True)
+    return out
 
 
 # ── 동반자끼리 수다(banter) ─────────────────────────────────────────────
