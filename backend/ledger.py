@@ -238,6 +238,7 @@ def _parts_of(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
     rtype: 'card'(카드매출전표) | 'shop'(쇼핑몰·판매처, 기본). key: 영수증 식별(멱등 dedup용).
     """
     parts = doc.get("parts")
+    src = doc.get("source") or "receipt"
     if isinstance(parts, list) and parts:
         out = []
         for p in parts:
@@ -245,34 +246,37 @@ def _parts_of(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
             if a:
                 out.append({"amount": a, "rtype": p.get("rtype") or "shop",
                             "merchant": p.get("merchant") or "",
-                            "key": p.get("key") or f"{p.get('rtype') or 'shop'}-{a}"})
+                            "key": p.get("key") or f"{p.get('rtype') or 'shop'}-{a}",
+                            "source": p.get("source") or src})
         return out
     a = doc.get("amount")
     if not a:
         return []
     rt = doc.get("rtype") or "shop"
     return [{"amount": int(a), "rtype": rt, "merchant": doc.get("merchant") or "",
-             "key": doc.get("_id") or f"{rt}-{int(a)}"}]
+             "key": doc.get("_id") or f"{rt}-{int(a)}", "source": src}]
 
 
 def _recompute_amount(parts: List[Dict[str, Any]]):
-    """부분 영수증들 → (대표금액, diff여부, 중복제거 parts).
+    """부분들 → (대표금액, diff여부, 중복제거 parts).
 
-    - **판매처가 여럿**이면 멀티셀러 한 주문 → 전부 **합산**(rtype 오분류에 강함).
+    - **영수증(receipt)과 카드알림(notification)이 섞이면 같은 결제**(알림=그 결제의 요약) →
+      영수증을 진실로 보고 알림 금액은 중복이라 제외(같은 20,500을 두 번 계상하던 이중계상 방지).
+    - **판매처가 여럿**(영수증 여러 장, 다른 금액)이면 멀티셀러 한 주문 → 전부 **합산**.
     - 같은 판매처에 **카드전표**가 있으면 그게 진실 — 쇼핑몰 금액과 다르면 **diff**(직접 판독).
-    - 그 외(쇼핑몰만) → 합산. 같은 영수증(key) 재처리는 멱등.
+    - 같은 영수증(금액·타입 동일) 재처리는 멱등 — 가맹점 표기가 달라도(쿠팡/쿠팡이츠) 중복 제거.
     """
-    seen_k, seen_c, uniq = set(), set(), []
-    for p in parts:
-        k = p.get("key")
-        c = (p.get("merchant"), p.get("amount"), p.get("rtype"))   # 내용 동일 = 같은 영수증
-        if k in seen_k or c in seen_c:
+    receipts = [p for p in parts if (p.get("source") or "receipt") != "notification"]
+    base = receipts or parts                   # 영수증 있으면 영수증만(알림은 같은 결제), 없으면 알림
+    seen, uniq = set(), []
+    for p in base:
+        c = (p.get("amount"), p.get("rtype"))  # 금액+타입 동일 = 같은 결제(merchant 표기 차이 무시)
+        if c in seen:
             continue
-        seen_k.add(k)
-        seen_c.add(c)
+        seen.add(c)
         uniq.append(p)
     merchants = {p.get("merchant") for p in uniq if p.get("merchant")}
-    if len(merchants) > 1:                     # 여러 판매처 = 멀티셀러 한 주문 → 합산
+    if len(merchants) > 1:                     # 여러 판매처(다른 금액) = 멀티셀러 한 주문 → 합산
         return sum(p["amount"] for p in uniq), False, uniq
     shop = [p["amount"] for p in uniq if p.get("rtype") != "card"]
     card = [p["amount"] for p in uniq if p.get("rtype") == "card"]

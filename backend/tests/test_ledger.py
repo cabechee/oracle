@@ -232,6 +232,44 @@ def test_all_amounts_excludes_cumulative():
     assert ledger._all_amounts(body, "") == [178000]   # 누적 49,718,951 제외
 
 
+def test_receipt_redrop_no_double_count(monkeypatch):
+    """같은 영수증을 두 번 드롭해도 amount는 한 번만 계상(이중계상 회귀 방지)."""
+    fake = _FakeLedger([{
+        "_id": "pay-sig-x", "date": "2026-06-24", "kind": "expense",
+        "amount": 20500, "merchant": "", "approval_no": "00807574",
+        "source": "notification", "method": "현대카드", "needs": [], "complete": True,
+    }])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    monkeypatch.setattr(ledger.category, "classify",
+                        lambda m, items=None, s="": {"category": "식비", "merchant": m})
+    f = {"amount": 20500, "merchant": "쿠팡이츠", "approval": "00807574",
+         "date": "2026-06-24", "items": ["치킨"]}
+    r1 = ledger.from_receipt("drop-00807574-20500", datetime(2026, 6, 24, 12), dict(f, image="a.jpg"))
+    r2 = ledger.from_receipt("drop-00807574-20500", datetime(2026, 6, 24, 12), dict(f, image="b.jpg"))
+    paid = [d for d in fake.docs if d.get("kind") == "expense"]
+    total = sum(d.get("amount", 0) for d in paid)
+    print(f"\n[redrop] r1={r1} r2={r2} total={total} "
+          f"docs={[(d['_id'], d.get('amount'), d.get('amount_parts')) for d in paid]}")
+    assert total == 20500, f"이중계상! total={total}"
+
+
+def test_multiseller_same_approval_sums(monkeypatch):
+    """같은 승인번호(한 결제) + 여러 판매처(다른 금액) 영수증은 합산 유지(이중계상 수정이 멀티셀러를 안 깸)."""
+    fake = _FakeLedger([])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    monkeypatch.setattr(ledger.category, "classify",
+                        lambda m, items=None, s="": {"category": "쇼핑", "merchant": m})
+    ledger.from_receipt("drop-APP-10000", datetime(2026, 6, 24, 12),
+                        {"amount": 10000, "merchant": "판매처A", "approval": "APP",
+                         "date": "2026-06-24", "items": ["x"]})
+    ledger.from_receipt("drop-APP-15000", datetime(2026, 6, 24, 12),
+                        {"amount": 15000, "merchant": "판매처B", "approval": "APP",
+                         "date": "2026-06-24", "items": ["y"]})
+    paid = [d for d in fake.docs if d.get("kind") == "expense"]
+    total = sum(d.get("amount", 0) for d in paid)
+    assert total == 25000, f"멀티셀러 합산 깨짐: total={total}"
+
+
 def test_set_fields_auto_categorizes(monkeypatch):
     # 가맹점 채우면(타이핑) 분류도 자동 계산
     fake = _FakeLedger([{"_id": "p", "kind": "expense", "amount": 6000, "merchant": "",
