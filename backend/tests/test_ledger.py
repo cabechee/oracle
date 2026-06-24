@@ -204,6 +204,34 @@ def test_set_fields_completes(monkeypatch):
     assert d["merchant"] == "올리브영" and d["needs"] == [] and d["complete"] is True
 
 
+def test_set_fields_items(monkeypatch):
+    # 내역(items) 수정 — 빈 리스트(전부 지움)도 유효.
+    fake = _FakeLedger([{"_id": "pay-i", "kind": "expense", "amount": 9000,
+                         "merchant": "쿠팡이츠", "items": ["치킨"]}])
+    monkeypatch.setattr(ledger.db, "ledger", lambda: fake)
+    assert ledger.set_fields("pay-i", {"items": ["치킨", "콜라"]})
+    assert fake.docs[0]["items"] == ["치킨", "콜라"]
+    assert ledger.set_fields("pay-i", {"items": []})
+    assert fake.docs[0]["items"] == []
+
+
+# ── 멀티라인 카드알림(현대카드 등) — 둘째 줄 가맹점, 누적 줄 제외 ──
+def test_merchant_of_multiline():
+    body = ("이경석 님, the Pink 승인 178,000원 일시불, 6/23 16:42\n"
+            "신세계백화점본점\n누적49,718,951원")
+    assert ledger._merchant_of(body) == "신세계백화점본점"
+    eats = ("이경석 님, the Pink 승인 20,500원 일시불, 6/24 6:59\n"
+            "쿠팡이츠\n누적49,000,000원")
+    assert ledger._merchant_of(eats) == "쿠팡이츠"
+    # 가맹점 줄 없는 단일 줄(접힌 알림)은 기존대로 — 가맹점 못 뽑으면 ''
+    assert ledger._merchant_of("the Pink 승인 178,000원 일시불, 6/23 16:42") == ""
+
+
+def test_all_amounts_excludes_cumulative():
+    body = "the Pink 승인 178,000원 일시불, 6/23 16:42\n신세계백화점본점\n누적49,718,951원"
+    assert ledger._all_amounts(body, "") == [178000]   # 누적 49,718,951 제외
+
+
 def test_set_fields_auto_categorizes(monkeypatch):
     # 가맹점 채우면(타이핑) 분류도 자동 계산
     fake = _FakeLedger([{"_id": "p", "kind": "expense", "amount": 6000, "merchant": "",

@@ -25,8 +25,12 @@ class NotificationCollector : NotificationListenerService() {
             val ex = sbn.notification?.extras ?: return
             val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
             val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
-            if (title.isEmpty() && text.isEmpty()) return
-            Prefs.addNotif(applicationContext, pkg, title, text, sbn.postTime)
+            // 펼친 본문(BIG_TEXT)이 더 길면 그걸 쓴다 — 현대카드 등은 가맹점·누적이 접힌 한 줄
+            // (EXTRA_TEXT)엔 없고 펼친 여러 줄(BIG_TEXT)에만 온다(가맹점 통째 누락 방지).
+            val big = ex.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+            val body = if (big.length > text.length) big else text
+            if (title.isEmpty() && body.isEmpty()) return
+            Prefs.addNotif(applicationContext, pkg, title, body, sbn.postTime)
         } catch (_: Exception) {
         }
     }

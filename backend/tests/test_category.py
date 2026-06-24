@@ -69,6 +69,7 @@ def test_coupang_not_misclassified_as_food(monkeypatch):
 def test_keyword_fallback(monkeypatch):
     monkeypatch.setattr(category.db, "category_rules", lambda: _FakeColl([]))
     assert category.classify("스타벅스", ["아메리카노"])["category"] == "카페"
+    assert category.classify("신세계백화점본점")["category"] == "쇼핑"   # 백화점 → 쇼핑 폴백
     assert category.classify("듣보상점", ["뭔가"])["category"] == ""   # 못 잡으면 빈값(LLM이 채움)
 
 

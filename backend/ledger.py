@@ -87,7 +87,22 @@ _MERCHANT_STOP = {
 
 
 def _merchant_of(summary: str) -> str:
-    """요약에서 가맹점 best-effort — 깨끗한 상호만. 애매하면 ''(needs/영수증 merge로 채움).
+    """요약에서 가맹점 추출. 현대카드 등 멀티라인 알림은 가맹점이 별도 줄로 온다
+    (1줄=승인정보, 2줄=가맹점, 3줄=누적) → 누적·잔액·금액전용 줄을 빼고 상호 줄을 통째로.
+    단일 줄이면 기존 토큰 추출(_merchant_from_line)."""
+    lines = [ln.strip() for ln in (summary or "").splitlines() if ln.strip()]
+    if len(lines) >= 2:
+        for ln in lines[1:]:                       # 첫 줄은 승인정보 — 건너뜀
+            if re.search(r"누적|잔액|누계|한도|적립|포인트|입금|출금|이체", ln):
+                continue
+            if len(re.sub(r"[\d,원\s/:.\-]", "", ln)) < 2:   # 금액·날짜만 있는 줄
+                continue
+            return ln.strip()
+    return _merchant_from_line(summary or "")
+
+
+def _merchant_from_line(summary: str) -> str:
+    """한 줄 요약에서 가맹점 best-effort — 깨끗한 상호만. 애매하면 ''(needs/영수증 merge로 채움).
 
     카드알림 요약엔 가맹점이 안 들어있는 경우가 많다 → 할부개월·날짜·숫자·결제수단·잡토큰을
     걸러내고 '확실한 상호'만 반환. 그래야 데스크 '확인필요'·영수증 merge가 제 역할을 한다.
