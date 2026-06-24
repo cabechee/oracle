@@ -192,4 +192,21 @@ class ChatController {
       onToast('재처리 실패: $e');
     }
   }
+
+  /// 흐름의 동반자 발화 재처리 — 코멘트 반영해 그 자리에서 다시 쓴다.
+  Future<void> reprocessCompanion(ChatMessage msg, String comment) async {
+    AppLog.ui('발화 재처리 — ${msg.id}');
+    onToast('다시 쓰는 중 — 잠시만요');
+    try {
+      final text = await api.reprocessCompanion(msg.id, comment);
+      if (text.isEmpty) {
+        onToast('재처리 실패 — 빈 응답');
+        return;
+      }
+      store.updateMessageText(msg.id, text);
+      onToast('다시 썼어요');
+    } catch (e) {
+      onToast('재처리 실패: $e');
+    }
+  }
 }

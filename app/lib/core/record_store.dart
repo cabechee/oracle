@@ -106,6 +106,14 @@ class RecordStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 동반자 발화 한 줄의 본문 교체 (흐름 재처리 — 그 자리에서 다시 쓴 결과).
+  void updateMessageText(String id, String text) {
+    final i = messages.indexWhere((m) => m.id == id);
+    if (i < 0) return;
+    messages[i] = messages[i].copyWith(text: text);
+    notifyListeners();
+  }
+
   void setPendingChat(String? text) {
     pendingChatText = text;
     notifyListeners();

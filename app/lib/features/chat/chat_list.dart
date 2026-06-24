@@ -89,7 +89,15 @@ class ChatList extends StatelessWidget {
                       if (row is ChatMessage) {
                         return _SpineEntry(
                           time: DateFormat('HH:mm').format(row.ts.toLocal()),
-                          child: ChatMessageBubble(message: row, api: api),
+                          // 동반자 선제 발화는 길게 눌러 코멘트 반영 재처리(그 자리에서).
+                          child: row.isCompanion
+                              ? GestureDetector(
+                                  onLongPress: () =>
+                                      _companionReprocess(context, row),
+                                  child: ChatMessageBubble(
+                                      message: row, api: api),
+                                )
+                              : ChatMessageBubble(message: row, api: api),
                         );
                       }
                       // idx가 아니라 record 자체를 캡처 — 시트/탭 처리 중 목록이
@@ -356,6 +364,78 @@ class ChatList extends StatelessWidget {
       },
     );
     if (newText != null) await chat.updateComment(rec, newText);
+  }
+
+  // ── 동반자 발화 재처리 — 코멘트 입력 → 그 자리에서 다시 쓰기 ──────
+  Future<void> _companionReprocess(BuildContext context, ChatMessage msg) async {
+    final ctrl = TextEditingController();
+    final comment = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: OracleColors.paper,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            OracleSpace.screenH,
+            20,
+            OracleSpace.screenH,
+            MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('${msg.speaker ?? '동반자'}의 말 다시 쓰기',
+                  style: OracleType.journal.copyWith(fontSize: 15)),
+              const SizedBox(height: 6),
+              Text('"${msg.text}"',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style:
+                      OracleType.marginalia.copyWith(color: OracleColors.gray)),
+              const SizedBox(height: 14),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 5,
+                style: OracleType.userBody,
+                decoration: const InputDecoration(
+                  hintText: '어떻게 다시 할까요? (비우면 그냥 다시)',
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide:
+                        BorderSide(color: OracleColors.hairline, width: 0.5),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: OracleColors.ink, width: 0.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, null),
+                    child: Text('취소',
+                        style: OracleType.userBody
+                            .copyWith(color: OracleColors.gray)),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, ctrl.text),
+                    child: Text('다시 쓰기',
+                        style: OracleType.userBody
+                            .copyWith(color: OracleColors.vermilion)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (comment != null) await chat.reprocessCompanion(msg, comment);
   }
 }
 

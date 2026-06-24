@@ -252,6 +252,19 @@ class ChatMessage {
             ? (j['trigger'] as String).trim()
             : null,
       );
+
+  ChatMessage copyWith({String? text}) => ChatMessage(
+        id: id,
+        role: role,
+        text: text ?? this.text,
+        ts: ts,
+        referenced: referenced,
+        quickText: quickText,
+        speaker: speaker,
+        isCompanion: isCompanion,
+        action: action,
+        trigger: trigger,
+      );
 }
 
 /// 자연어 질의 응답 (POST /query)

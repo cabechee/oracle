@@ -322,6 +322,25 @@ class OracleApi {
         .toList();
   }
 
+  /// 흐름의 동반자 발화 한 줄을 코멘트 반영해 다시 쓴다 — 새 본문 반환.
+  Future<String> reprocessCompanion(String msgId, String comment) async {
+    final body = jsonEncode({'msg_id': msgId, 'comment': comment});
+    final resp = await _req(
+      'POST /companion/reprocess',
+      () => http.post(Uri.parse('$baseUrl/companion/reprocess'),
+          headers: {'Content-Type': 'application/json', ...authHeaders},
+          body: body),
+      timeout: _llmTimeout,
+      sent: body,
+    );
+    if (resp.statusCode != 200) {
+      throw Exception('재처리 실패: ${resp.statusCode} ${resp.body}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+    if (data['ok'] != true) throw Exception(data['reason'] ?? '재처리 실패');
+    return (data['text'] as String?) ?? '';
+  }
+
   /// 대화 메시지 목록 (최신순) — record 타임라인과 merge용.
   Future<List<ChatMessage>> listChatMessages({int limit = 200}) async {
     final resp = await _req(
