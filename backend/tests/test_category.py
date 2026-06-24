@@ -93,3 +93,34 @@ def test_upsert_and_delete_rule(monkeypatch):
     v = category.upsert_rule("올리브영", "올리브영", "미용")
     assert v["category"] == "미용" and rules.count_documents({}) == 1
     assert category.delete_rule(v["id"]) and rules.count_documents({}) == 0
+
+
+# ── 쿠팡이츠 = 식비(쿠팡=쇼핑과 별개) ────────────────────────────────
+_COUPANGEATS = {"_id": "rule-coupangeats", "name": "쿠팡이츠",
+                "pattern": r"쿠팡\s*이츠|coupang\s*eats|coupangeats",
+                "fields": ["merchant", "sender", "items", "memo"],
+                "category": "식비", "set_merchant": "쿠팡이츠", "priority": 101}
+
+
+def test_coupang_eats_is_food_not_shopping(monkeypatch):
+    # 쿠팡이츠는 쿠팡(쇼핑)과 별개 — priority 101로 먼저 잡혀 식비 + 가맹점 '쿠팡이츠'.
+    monkeypatch.setattr(category.db, "category_rules",
+                        lambda: _FakeColl([_COUPANG, _COUPANGEATS]))
+    r = category.classify("쿠팡이츠")
+    assert r["category"] == "식비" and r["merchant"] == "쿠팡이츠"
+
+
+def test_coupang_still_shopping_when_not_eats(monkeypatch):
+    # 쿠팡(이츠 아님)은 그대로 쇼핑.
+    monkeypatch.setattr(category.db, "category_rules",
+                        lambda: _FakeColl([_COUPANG, _COUPANGEATS]))
+    r = category.classify("쿠팡(주)", ["케이블"])
+    assert r["category"] == "쇼핑" and r["merchant"] == "쿠팡"
+
+
+def test_coupang_eats_retroactive_via_memo(monkeypatch):
+    # 과거 건: 가맹점이 이미 '쿠팡'으로 보정됐어도 memo의 '쿠팡이츠'로 소급 식비 정정.
+    monkeypatch.setattr(category.db, "category_rules",
+                        lambda: _FakeColl([_COUPANG, _COUPANGEATS]))
+    r = category.classify("쿠팡", memo="쿠팡이츠 15,000원 결제완료")
+    assert r["category"] == "식비" and r["merchant"] == "쿠팡이츠"

@@ -555,6 +555,9 @@ def set_fields(pay_id: str, fields: Dict[str, Any]) -> bool:
         return False
     upd = {k: v for k, v in (fields or {}).items()
            if k in ("merchant", "category", "method", "amount", "kind", "memo") and v not in (None, "")}
+    # 내역(items)은 리스트 — 빈 리스트(전부 지움)도 유효한 수정이라 별도로 받는다.
+    if isinstance((fields or {}).get("items"), list):
+        upd["items"] = [str(i).strip() for i in fields["items"] if str(i).strip()]
     if not upd:
         return False
     merged = {**r, **upd}

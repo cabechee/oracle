@@ -803,6 +803,7 @@ async function renderLedger(){
     cats=await(await fetch('/ledger/categories')).json();
   }catch(e){ m.innerHTML=`<div class="empty">실패: ${e.message}</div>`; return; }
   window.LCATS=cats.categories||[];
+  window.LLIST=list.items||[];
   const won=n=>(Number(n)||0).toLocaleString('ko')+'원';
   const R='text-align:right;font-variant-numeric:tabular-nums';
   const TB='border-collapse:collapse;width:100%;font-size:13px';
@@ -836,9 +837,10 @@ async function renderLedger(){
       const chev=hasDetail?`<span id="cv-${it.id}" style="color:var(--faint);display:inline-block;width:12px">▸</span> `:'<span style="display:inline-block;width:12px"></span> ';
       const cam=imgs.length?` <span style="color:var(--faint);font-size:11px">📷${imgs.length}</span>`:'';
       const rcptBtn=` <label style="cursor:pointer" title="이 건에 영수증 올리기" onclick="event.stopPropagation()">📎<input type="file" accept="image/*" style="display:none" onchange="entryReceipt('${it.id}',this)"></label>`;
+      const itemsBtn=` <span onclick="event.stopPropagation();editItems('${it.id}')" style="cursor:pointer;color:var(--faint);font-size:11.5px" title="내역(품목) 수정">📝</span>`;
       const main=`<tr style="cursor:${hasDetail?'pointer':'default'}" ${hasDetail?`onclick="toggleDetail('${it.id}')"`:''}>
         <td style="${TD};color:var(--faint);white-space:nowrap">${fmtWhen(it.ts)}</td>
-        <td style="${TD}">${chev}${desc}${diffTag}${sumTag}${tag}${cam}${rcptBtn}</td>
+        <td style="${TD}">${chev}${desc}${diffTag}${sumTag}${tag}${cam}${rcptBtn}${itemsBtn}</td>
         <td style="${TD};white-space:nowrap;font-size:12px"><span onclick="event.stopPropagation();editCat('${it.id}',this)" style="cursor:pointer;color:${it.category?'var(--gray)':'var(--faint)'};border-bottom:1px dotted var(--hair)" title="분류 수정">${it.category||'분류'}</span></td>
         <td style="${TD};color:var(--gray);white-space:nowrap">${it.method||''}</td>
         <td style="${TD};${R};color:${(inc2||it.diff)?'var(--vermilion)':'var(--ink)'};white-space:nowrap">${inc2?'+':'−'}${won(it.amount)}</td></tr>`;
@@ -949,6 +951,14 @@ async function fillLedger(id){
   if(!v) return; el.disabled=true;
   try{ await fetch('/ledger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({merchant:v})}); renderLedger(); }
   catch(e){ alert('저장 실패: '+e.message); el.disabled=false; }
+}
+async function editItems(id){
+  const it=(window.LLIST||[]).find(x=>x.id===id);
+  const cur=prompt('내역(품목) — 쉼표로 구분, 비우면 삭제:', ((it&&it.items)||[]).join(', '));
+  if(cur===null) return;
+  const items=cur.split(',').map(s=>s.trim()).filter(Boolean);
+  try{ await fetch('/ledger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}); renderLedger(); }
+  catch(e){ alert('내역 저장 실패: '+e.message); }
 }
 async function entryReceipt(id,input){
   const file=input.files&&input.files[0]; if(!file) return;

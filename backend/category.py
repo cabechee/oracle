@@ -32,12 +32,21 @@ _KW: List[Tuple[str, str]] = [
 
 
 def seed() -> None:
-    """기본 규칙 — 쿠팡(거래량 많음): merchant/sender에 쿠팡·coupang → 쇼핑, 가맹점 '쿠팡'."""
+    """기본 규칙 — 쿠팡(쇼핑)·쿠팡이츠(식비, 별개). 둘 다 거래량 많아 규칙으로 고정."""
     if not db.category_rules().find_one({"_id": "rule-coupang"}):
         db.category_rules().insert_one({
             "_id": "rule-coupang", "name": "쿠팡", "pattern": r"쿠팡|coupang",
             "fields": ["merchant", "sender"], "category": "쇼핑",
             "set_merchant": "쿠팡", "priority": 100, "source": "seed",
+        })
+    # 쿠팡이츠 = 배달(식비). '쿠팡'을 포함해 rule-coupang(100)에 먼저 걸리지 않도록 priority 101.
+    # memo(원본 결제 문구)도 봐서, 이미 가맹점이 '쿠팡'으로 보정돼 굳은 과거 건도 소급 정정된다.
+    if not db.category_rules().find_one({"_id": "rule-coupangeats"}):
+        db.category_rules().insert_one({
+            "_id": "rule-coupangeats", "name": "쿠팡이츠",
+            "pattern": r"쿠팡\s*이츠|coupang\s*eats|coupangeats",
+            "fields": ["merchant", "sender", "items", "memo"], "category": "식비",
+            "set_merchant": "쿠팡이츠", "priority": 101, "source": "seed",
         })
 
 
@@ -48,7 +57,7 @@ def _rules() -> List[Dict[str, Any]]:
         return []          # DB 불가(테스트 등) → 규칙 없이 키워드 폴백
 
 
-def _blob(r: Dict[str, Any], merchant: str, items, sender: str) -> str:
+def _blob(r: Dict[str, Any], merchant: str, items, sender: str, memo: str = "") -> str:
     fields = r.get("fields") or ["merchant", "sender", "items"]
     parts = []
     if "merchant" in fields:
@@ -57,14 +66,16 @@ def _blob(r: Dict[str, Any], merchant: str, items, sender: str) -> str:
         parts.append(sender or "")
     if "items" in fields:
         parts.append(" ".join(items or []))
+    if "memo" in fields:                       # 원본 결제 문구 — 가맹점이 보정돼 사라진
+        parts.append(memo or "")               # 단서(쿠팡이츠 등)를 소급 매칭할 때만 사용
     return " ".join(parts)
 
 
-def match(merchant: str, items=None, sender: str = "") -> Optional[Dict[str, Any]]:
+def match(merchant: str, items=None, sender: str = "", memo: str = "") -> Optional[Dict[str, Any]]:
     """규칙 매칭 → {category, merchant(보정값 or None)} or None."""
     for r in _rules():
         try:
-            if re.search(r["pattern"], _blob(r, merchant, items, sender), re.I):
+            if re.search(r["pattern"], _blob(r, merchant, items, sender, memo), re.I):
                 return {"category": r.get("category"), "merchant": r.get("set_merchant")}
         except re.error:
             continue
@@ -79,9 +90,9 @@ def _keyword(merchant: str, items) -> str:
     return ""
 
 
-def classify(merchant: str, items=None, sender: str = "") -> Dict[str, Any]:
+def classify(merchant: str, items=None, sender: str = "", memo: str = "") -> Dict[str, Any]:
     """→ {category, merchant}. 규칙 우선(가맹점 보정 포함), 없으면 키워드 폴백."""
-    hit = match(merchant, items, sender)
+    hit = match(merchant, items, sender, memo)
     if hit:
         return {"category": hit.get("category") or "", "merchant": hit.get("merchant") or merchant}
     return {"category": _keyword(merchant, items), "merchant": merchant}
@@ -136,7 +147,8 @@ def recategorize() -> int:
     """모든 지출에 규칙 재적용 — category + 가맹점 보정. 바뀐 건수 반환."""
     n = 0
     for e in db.ledger().find({"kind": "expense"}):
-        res = classify(e.get("merchant", ""), e.get("items"), e.get("sender", ""))
+        res = classify(e.get("merchant", ""), e.get("items"), e.get("sender", ""),
+                       e.get("memo", ""))
         upd: Dict[str, Any] = {}
         if res["category"] and res["category"] != e.get("category"):
             upd["category"] = res["category"]

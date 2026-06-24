@@ -223,6 +223,7 @@ class FieldsIn(BaseModel):
     method: Optional[str] = None
     kind: Optional[str] = None
     memo: Optional[str] = None
+    items: Optional[List[str]] = None    # 내역(품목) 수정 — 어드민 거래내역 📝
 
 
 @router.post("/ledger/{pay_id}")
