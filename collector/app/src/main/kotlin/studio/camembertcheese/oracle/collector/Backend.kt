@@ -108,12 +108,13 @@ object Backend {
         return post(Prefs.baseUrl(ctx) + "/visits", body)
     }
 
-    /// 공유받은 영수증 이미지/PDF → 가계부 드롭존(/ledger/receipt) multipart 업로드.
-    fun uploadReceipt(ctx: Context, bytes: ByteArray, filename: String): JSONObject? {
+    /// 공유받은 이미지/PDF → 분류기(/share/image) multipart 업로드.
+    /// 백엔드가 영수증/일정/기록으로 분류·라우팅하고 {kind, ok, ...}를 반환한다.
+    fun uploadShare(ctx: Context, bytes: ByteArray, filename: String): JSONObject? {
         val boundary = "----oracle" + System.currentTimeMillis()
         var conn: HttpURLConnection? = null
         return try {
-            conn = (URL(Prefs.baseUrl(ctx) + "/ledger/receipt").openConnection() as HttpURLConnection).apply {
+            conn = (URL(Prefs.baseUrl(ctx) + "/share/image").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15000
                 readTimeout = 280000          // PDF·여러 영수증 비전 처리 — 길게

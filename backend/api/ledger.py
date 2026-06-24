@@ -71,12 +71,17 @@ def _pdf_to_pngs(data: bytes, max_pages: int = 30, dpi: int = 150) -> list:
 
 @router.post("/ledger/receipt")
 async def ep_receipt(file: UploadFile = File(...)):
-    """영수증 드롭 → 비전 인식 → 가계부 매칭(merge). 어드민 드래그&드랍용.
+    """영수증 드롭 → 비전 인식 → 가계부 매칭(merge). 어드민 드래그&드랍 + 수집기 공유 분류기.
 
     **PDF(여러 장 묶음)·여러 영수증** 지원: 페이지별로 변환해 각 영수증을 따로 매칭/기록.
     같은 금액·날짜의 카드알림이 있으면 합쳐 보강, 없으면 새 항목.
     """
     data = await file.read()
+    return process_receipt_image(data, file.filename or "")
+
+
+def process_receipt_image(data: bytes, filename: str) -> dict:
+    """영수증 이미지/PDF → ledger 매칭. 어드민 드롭·공유 분류기(/share/image) 공용."""
     if not data:
         raise HTTPException(400, "빈 파일")
     import corpus
@@ -84,7 +89,7 @@ async def ep_receipt(file: UploadFile = File(...)):
     import nest_client
     from agent import vision
     now = datetime.datetime.now()
-    fname = (file.filename or "").lower()
+    fname = (filename or "").lower()
     is_pdf = fname.endswith(".pdf") or data[:5] == b"%PDF-"
     # 페이지(또는 단일 이미지)별로 vault에 저장
     pages = []   # [(vault_rel, abs_path)]

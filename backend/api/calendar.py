@@ -61,8 +61,13 @@ def ep_create(body: EventIn):
 
 @router.post("/calendar/screenshot")
 async def ep_screenshot(file: UploadFile = File(...)):
-    """스크린샷/이미지 드롭 → 비전 일정 인식 → 캘린더 등록. 어드민 드래그&드랍용(여러 일정 OK)."""
+    """스크린샷/이미지 드롭 → 비전 일정 인식 → 캘린더 등록. 어드민 드래그&드랍 + 수집기 공유."""
     data = await file.read()
+    return process_calendar_image(data, file.filename or "")
+
+
+def process_calendar_image(data: bytes, filename: str) -> dict:
+    """일정 스크린샷 → 비전 인식 → 캘린더 등록. 어드민 드롭·공유 분류기(/share/image) 공용."""
     if not data:
         raise HTTPException(400, "빈 파일")
     if not gcal.is_authed():
@@ -74,7 +79,7 @@ async def ep_screenshot(file: UploadFile = File(...)):
     import nest_client
     from agent import vision
     now = _dt.datetime.now()
-    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else "jpg"
+    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else "jpg"
     ap = corpus.save_image(now, 1, data, ext if ext in ("jpg", "jpeg", "png", "webp", "gif") else "jpg")
     alias = ingest._resolve_alias("vision", None, prefer_vision=True, fallback_key="insight")
     evs = vision.extract_calendar_events(

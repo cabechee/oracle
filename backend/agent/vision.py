@@ -219,3 +219,27 @@ def extract_calendar_events(alias: str, images: List[Dict[str, str]],
     except Exception as e:
         print(f"[vision] 일정 추출 실패: {e}", flush=True)
         return []
+
+
+CLASSIFY_SHARE_SYSTEM = """공유받은 이미지가 어떤 종류인지 분류해 JSON으로:
+{"type": "receipt|calendar|note"}
+- receipt: 가게 영수증·카드 매출전표·주문 영수증/거래명세서 등 **실제 전표**(품목·합계가 찍힌 것).
+  ※ 카드사 앱의 결제 푸시 알림 목록 스크린샷은 receipt 아님(이미 따로 수집됨) → note.
+- calendar: 일정·약속·예약(날짜/시간이 있는 스크린샷·포스터·초대장·예약확인 등)
+- note: 그 외 전부(일반 사진·메모·문서·알림 스크린샷 등)
+영수증과 일정 둘 다로 보이면 더 주된 것 하나. 애매하면 note."""
+
+
+def classify_share_image(alias: str, images: List[Dict[str, str]]) -> str:
+    """공유 이미지 분류 → 'receipt' | 'calendar' | 'note'. 실패/애매하면 note(흐름 기록)."""
+    if not alias or not images:
+        return "note"
+    try:
+        r = llm.call(alias, "이 이미지의 종류를 분류해줘.", images=images,
+                     system=CLASSIFY_SHARE_SYSTEM, expect_json=True)
+        out = r.get("json") or _parse_json(r.get("text") or "")
+        t = ((out.get("type") if isinstance(out, dict) else "") or "").strip().lower()
+        return t if t in ("receipt", "calendar", "note") else "note"
+    except Exception as e:
+        print(f"[vision] 공유 이미지 분류 실패: {e}", flush=True)
+        return "note"

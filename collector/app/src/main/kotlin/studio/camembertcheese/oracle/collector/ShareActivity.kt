@@ -7,8 +7,8 @@ import android.os.Bundle
 import android.widget.Toast
 import kotlin.concurrent.thread
 
-/// 갤러리 등에서 '공유하기'로 영수증 이미지/PDF를 수집기에 넣으면 → 가계부 드롭존(/ledger/receipt)과 동일 처리.
-/// (Oracle 본앱 공유는 '기록'으로, 수집기 공유는 '영수증 처리'로 — 역할 분리.)
+/// 갤러리 등에서 '공유하기'로 이미지/PDF를 수집기에 넣으면 → 분류기(/share/image)가
+/// 영수증/일정/기록으로 판별해 각각 가계부·캘린더·흐름으로 라우팅한다.
 class ShareActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -23,24 +23,30 @@ class ShareActivity : Activity() {
             Toast.makeText(this, "공유된 이미지가 없어요", Toast.LENGTH_SHORT).show()
             finish(); return
         }
-        Toast.makeText(this, "영수증 ${uris.size}건 처리 중…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "${uris.size}건 분류 처리 중…", Toast.LENGTH_SHORT).show()
         val app = applicationContext
         thread {
-            var ok = 0
+            val counts = HashMap<String, Int>()   // kind(receipt|calendar|note) → 건수
             for (u in uris) {
                 try {
                     val bytes = contentResolver.openInputStream(u)?.use { it.readBytes() } ?: continue
-                    val name = (u.lastPathSegment ?: "receipt").substringAfterLast('/')
-                    val r = Backend.uploadReceipt(app, bytes, if (name.contains('.')) name else "$name.jpg")
-                    if (r != null && r.optBoolean("ok")) ok++
+                    val name = (u.lastPathSegment ?: "img").substringAfterLast('/')
+                    val r = Backend.uploadShare(app, bytes, if (name.contains('.')) name else "$name.jpg")
+                    if (r != null && r.optBoolean("ok")) {
+                        val k = r.optString("kind", "note")
+                        counts[k] = (counts[k] ?: 0) + 1
+                    }
                 } catch (e: Exception) {
                     // 무시 — 다음 파일로
                 }
             }
+            val label = mapOf("receipt" to "영수증", "calendar" to "일정", "note" to "기록")
             runOnUiThread {
-                Toast.makeText(app,
-                    if (ok > 0) "영수증 ${ok}건 가계부에 처리됐어요" else "처리 실패 — 영수증을 못 읽었어요",
-                    Toast.LENGTH_LONG).show()
+                val msg = if (counts.isEmpty()) "처리 실패 — 다시 시도해주세요"
+                          else counts.entries.joinToString(" · ") {
+                              "${label[it.key] ?: it.key} ${it.value}건"
+                          } + " 처리됐어요"
+                Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
                 finish()
             }
         }
