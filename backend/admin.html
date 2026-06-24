@@ -110,12 +110,13 @@ const $ = s => document.querySelector(s);
 let CUR='__home__', SKIP=0, Q='', STATS=null;
 
 // ── 네비게이션 모델 (그룹) ──
-const KNOWN = {records:'📸 캡처', signals:'📨 신호', journals:'📓 저널', conversations:'💬 대화'};
+const KNOWN = {records:'📸 캡처', signals:'📨 신호', journals:'📓 저널', conversations:'💬 대화', briefings:'🗞 발행물'};
 const NAV = [
   {grp:null,   items:[{id:'__home__', label:'🏠 홈'}]},
   {grp:'기능', items:[{id:'__ledger__', label:'💰 가계부'}, {id:'__calendar__', label:'📅 캘린더'}]},
   {grp:'기록', items:[{id:'col:records', label:KNOWN.records}, {id:'__signals__', label:KNOWN.signals},
-                      {id:'col:journals', label:KNOWN.journals}, {id:'col:conversations', label:KNOWN.conversations},
+                      {id:'col:journals', label:KNOWN.journals}, {id:'col:briefings', label:KNOWN.briefings},
+                      {id:'col:conversations', label:KNOWN.conversations},
                       {id:'__collected__', label:'📍 활동 로그'}, {id:'__dismissed__', label:'🗂 확인함'},
                       {id:'__discovery__', label:'✨ 발견'}]},
   {grp:'설정', items:[{id:'__companion__', label:'🐾 동반자'}, {id:'__location__', label:'📡 위치·수집'},
@@ -274,12 +275,20 @@ async function renderDiscoveryLog(){
       <button onclick="runDisco(this)">지금 생성</button></div>`+
     (items.length?items.map(it=>`<div class="pf" style="padding:12px 15px">
       <div class="hint" style="margin-bottom:5px">${it.date} · ${esc(it.label)}${it.dismissed?' · <span class="faint">확인함</span>':''}</div>
-      <div style="font-size:13.5px;line-height:1.62">✨ ${esc(it.text)}</div></div>`).join('')
+      <div style="font-size:13.5px;line-height:1.62">✨ ${esc(it.text)}</div>
+      <div class="row" style="margin-top:8px"><button onclick="reprocDisco('${it.menu}',this)">♻ 재처리</button></div></div>`).join('')
     :'<div class="empty">아직 발견 없음 — 자정 배치 또는 \'지금 생성\'</div>');
 }
 async function runDisco(btn){ btn.disabled=true; btn.textContent='생성 중…';
   try{ const r=await(await fetch('/discovery/run',{method:'POST'})).json(); btn.textContent=`${r.generated}개 생성`; setTimeout(renderDiscoveryLog,1200); }
   catch(e){ alert('실패: '+e.message); btn.disabled=false; }
+}
+async function reprocDisco(menu, btn){
+  const c=prompt('이 발견을 어떻게 다시? (코멘트, 비우면 그냥 다시 — 오늘 데이터 기준 재생성):',''); if(c===null) return;
+  btn.disabled=true; const o=btn.textContent; btn.textContent='…';
+  try{ const r=await(await fetch(`/discovery/run?menu=${encodeURIComponent(menu)}&comment=${encodeURIComponent(c)}`,{method:'POST'})).json();
+    alert(r.ok?('새 발견:\n\n'+(r.text||'(생성 안 됨 — 볼 데이터 부족)')):('실패: '+(r.reason||'?'))); renderDiscoveryLog(); }
+  catch(e){ alert('실패: '+e.message); btn.disabled=false; btn.textContent=o; }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -350,6 +359,7 @@ async function renderCollection(name, target){
       <span class="summary">${esc(summarize(d))}${otp}${br}</span><span class="when">${when}</span></div>
       <div class="body" hidden><pre>${esc(JSON.stringify(d,null,2))}</pre>
         <div class="actions"><span class="id">${id}</span>
+          ${reprocBtn(name,d)}
           <button class="danger" onclick="delDoc('${name}','${id}',event)">삭제</button></div></div></div>`;
   }).join('');
   const shown=SKIP+data.docs.length, n=[];
@@ -363,6 +373,43 @@ async function delDoc(name,id,ev){ ev.stopPropagation();
   if(!confirm(`삭제할까요?\n${id}`)) return;
   try{ await api(`/collection/${name}/${encodeURIComponent(id)}`,{method:'DELETE'}); await loadStats(); render(); }
   catch(e){ alert('삭제 실패: '+e.message); }
+}
+
+// ── 코멘트 반영 재처리 (저널 일/주/월 · 발행물 조간/석간 · 동반자 발화) ──
+function reprocBtn(name, d){
+  const id = d._id || '';
+  if(name==='journals')   return `<button onclick="reprocJournal('${id}','${(d.period_start||'').slice(0,10)}',this)">♻ 재처리</button>`;
+  if(name==='briefings')  return `<button onclick="reprocBriefing('${id}',this)">♻ 재처리</button>`;
+  if(name==='conversations' && d.companion) return `<button onclick="reprocCompanion('${id}',this)">♻ 재처리</button>`;
+  return '';
+}
+function askComment(){ return prompt('재처리 코멘트 — 어떻게 다시 쓸지 적어주세요 (비우면 그냥 다시 생성):',''); }
+async function reprocJournal(id, pstart, btn){
+  const c=askComment(); if(c===null) return;
+  let url;
+  if(id.startsWith('day-'))        url=`/digest/run?target_date=${id.slice(4)}&comment=${encodeURIComponent(c)}`;
+  else if(id.startsWith('week-'))  url=`/journal/weekly?target_date=${pstart}&comment=${encodeURIComponent(c)}`;
+  else if(id.startsWith('month-')) url=`/journal/monthly?target_date=${pstart}&comment=${encodeURIComponent(c)}`;
+  else return alert('재처리 불가: '+id);
+  btn.disabled=true; const o=btn.textContent; btn.textContent='재처리 중…(최대 수 분)';
+  try{ const r=await(await fetch(url,{method:'POST'})).json();
+    alert('완료\n\n'+(r.preview||r.skipped||JSON.stringify(r).slice(0,300))); render(); }
+  catch(e){ alert('실패: '+e.message); btn.disabled=false; btn.textContent=o; }
+}
+async function reprocBriefing(id, btn){
+  const m=id.match(/^(morning|evening)-(\d{4}-\d{2}-\d{2})$/); if(!m) return alert('재처리 불가: '+id);
+  const c=askComment(); if(c===null) return;
+  btn.disabled=true; const o=btn.textContent; btn.textContent='재처리 중…';
+  try{ const r=await(await fetch(`/briefing/run?kind=${m[1]}&target_date=${m[2]}&comment=${encodeURIComponent(c)}`,{method:'POST'})).json();
+    alert(r.ok===false?('실패: '+(r.reason||'?')):('완료\n\n'+(r.preview||''))); render(); }
+  catch(e){ alert('실패: '+e.message); btn.disabled=false; btn.textContent=o; }
+}
+async function reprocCompanion(id, btn){
+  const c=askComment(); if(c===null) return;
+  btn.disabled=true; const o=btn.textContent; btn.textContent='재처리 중…';
+  try{ const r=await(await fetch('/companion/reprocess',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({msg_id:id,comment:c})})).json();
+    alert(r.ok?('새 발화:\n\n'+r.text):('실패: '+(r.reason||'?'))); render(); }
+  catch(e){ alert('실패: '+e.message); btn.disabled=false; btn.textContent=o; }
 }
 
 // ══════════════════════════════════════════════════════════════
