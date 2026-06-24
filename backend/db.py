@@ -107,6 +107,11 @@ def parking() -> Collection:
     return _conn().parking
 
 
+def car_snapshots() -> Collection:
+    """차 상태 스냅샷 — 출차/주차 시점의 배터리·충전·공조·주행거리계 등(시계열). 일기·활용 재료."""
+    return _conn().car_snapshots
+
+
 def category_rules() -> Collection:
     """가계부 분류 규칙 — 가맹점/발신자/품목 패턴 → 분류. 시드(쿠팡)+어드민 수정+LLM 업그레이드."""
     return _conn().category_rules

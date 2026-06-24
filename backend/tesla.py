@@ -114,13 +114,21 @@ def vehicles() -> List[Dict[str, Any]]:
     return (d or {}).get("response") or []
 
 
-def vehicle_data(vin: str) -> Optional[Dict[str, Any]]:
-    """차량 상세(위치·운행·충전). 차가 잠들어 있으면 408 → None(필요 시 wake 후 재시도).
+# 전체 스냅샷용 — 공조·주행거리계까지. 운전 폴링은 가벼운 기본(drive/charge)만.
+_FULL_ENDPOINTS = ("charge_state;climate_state;drive_state;"
+                   "vehicle_state;gui_settings;location_data")
 
-    ⚠️ 자주 부르면 차를 깨워 배터리 소모 — 상태머신에선 이벤트 시점에만 호출 권장.
+
+def vehicle_data(vin: str,
+                 endpoints: str = "drive_state;charge_state;location_data"
+                 ) -> Optional[Dict[str, Any]]:
+    """차량 상세. 차가 잠들어 있으면 408 → None(필요 시 wake 후 재시도).
+
+    endpoints 로 섹션 지정 — 기본은 가벼운 위치·충전(운전 폴링), snapshot() 은
+    _FULL_ENDPOINTS 로 공조·주행거리계까지.
+    ⚠️ 자주 부르면 차를 깨워 배터리 소모 — 이벤트 시점에만 호출 권장.
     """
-    d = _get(f"/api/1/vehicles/{vin}/vehicle_data"
-             "?endpoints=drive_state;charge_state;location_data")
+    d = _get(f"/api/1/vehicles/{vin}/vehicle_data?endpoints={endpoints}")
     return (d or {}).get("response")
 
 
@@ -177,6 +185,67 @@ def charge(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
         "level": cs.get("battery_level"),
         "added_kwh": cs.get("charge_energy_added"),
         "mins_left": cs.get("minutes_to_full_charge"),
+    }
+
+
+def snapshot(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """차 전체 스냅샷 — 배터리·충전·공조·주행거리계·위치를 한 번에 정규화(마일→km).
+
+    수집(car_snapshots)·활용용. 자는 차는 안 깨움(None). 이벤트(출차/주차/충전) 시점 호출.
+    location() 호환 필드(lat/lng/shift/dest*/eta)도 포함 — 상태머신이 그대로 쓴다.
+    """
+    vs = vehicles()
+    if not vs:
+        return None
+    v = next((x for x in vs if x.get("vin") == vin), vs[0]) if vin else vs[0]
+    if v.get("state") != "online":
+        return None   # asleep/offline — 안 깨움
+    data = vehicle_data(v.get("vin"), _FULL_ENDPOINTS)
+    if not data:
+        return None
+    cs = data.get("charge_state") or {}
+    cl = data.get("climate_state") or {}
+    ds = data.get("drive_state") or {}
+    st = data.get("vehicle_state") or {}
+
+    def _km(mi: Any) -> Optional[float]:
+        return round(mi * 1.60934, 1) if isinstance(mi, (int, float)) else None
+
+    shift = ds.get("shift_state")
+    return {
+        "vin": v.get("vin"),
+        "ts": ds.get("timestamp") or st.get("timestamp"),
+        # 배터리·충전
+        "battery": cs.get("battery_level"),
+        "battery_range_km": _km(cs.get("battery_range")),
+        "charging": cs.get("charging_state") == "Charging",
+        "charge_state": cs.get("charging_state"),
+        "charge_limit": cs.get("charge_limit_soc"),
+        "charge_added_kwh": cs.get("charge_energy_added"),
+        "minutes_to_full": cs.get("minutes_to_full_charge"),
+        "charger_power_kw": cs.get("charger_power"),
+        # 공조·온도
+        "inside_temp": cl.get("inside_temp"),
+        "outside_temp": cl.get("outside_temp"),
+        "climate_on": cl.get("is_climate_on"),
+        "temp_setting": cl.get("driver_temp_setting"),
+        "preconditioning": cl.get("is_preconditioning"),
+        # 위치·운행 (location() 호환 — 상태머신이 쓰는 필드)
+        "lat": ds.get("latitude"),
+        "lng": ds.get("longitude"),
+        "shift": shift,
+        "speed": ds.get("speed"),
+        "driving": shift in ("D", "R", "N"),
+        "dest": ds.get("active_route_destination"),
+        "dest_lat": ds.get("active_route_latitude"),
+        "dest_lng": ds.get("active_route_longitude"),
+        "eta_min": ds.get("active_route_minutes_to_arrival"),
+        # 차 상태
+        "odometer_km": _km(st.get("odometer")),
+        "locked": st.get("locked"),
+        "sentry": st.get("sentry_mode"),
+        "user_present": st.get("is_user_present"),
+        "software": st.get("car_version"),
     }
 
 

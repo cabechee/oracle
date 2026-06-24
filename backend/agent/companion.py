@@ -162,15 +162,33 @@ def _tesla_budget_ok() -> bool:
 
 
 def _tesla_at_event() -> Optional[Dict[str, Any]]:
-    """이벤트 시점 차 상태(위치·운행·목적지). 미인증·상한초과·자는차·실패면 None(graceful)."""
+    """이벤트 시점 차 전체 스냅샷(위치·운행·배터리·공조·주행거리계). 미인증·상한초과·자는차·실패면 None.
+
+    location() 호환 필드를 포함하므로 상태머신이 그대로 쓰고, 출차/주차 때 car_snapshots에도 저장된다.
+    """
     try:
         import tesla
         if not tesla.is_authed() or not _tesla_budget_ok():
             return None
-        return tesla.location()   # 자는 차는 안 깨움(tesla.location 내부 가드)
+        return tesla.snapshot()   # 자는 차는 안 깨움(snapshot 내부 가드)
     except Exception as e:
         print(f"[companion] tesla 조회 실패: {e}", flush=True)
         return None
+
+
+def _save_car_snapshot(snap: Optional[Dict[str, Any]], trigger: str) -> None:
+    """차 스냅샷을 car_snapshots에 저장(출차/주차 등 이벤트 시점). 자는 차(None)면 스킵."""
+    if not snap:
+        return
+    now = datetime.now()
+    doc = dict(snap)
+    doc["_id"] = f"car-{now.strftime('%Y%m%d-%H%M%S')}-{trigger}"
+    doc["trigger"] = trigger
+    doc["recorded_at"] = now
+    try:
+        db.car_snapshots().insert_one(doc)
+    except Exception as e:
+        print(f"[companion] 차 스냅샷 저장 실패: {e}", flush=True)
 
 
 def _dest_name(tloc: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -226,6 +244,8 @@ def car_departure(lat: float, lng: float, ts: Any = None,
     """
     tloc = _tesla_at_event()
     dest = _dest_name(tloc)
+    if not recheck:
+        _save_car_snapshot(tloc, "출차")   # 출차 스냅샷(3분 뒤 재확인 호출 땐 중복 저장 X)
     print(f"[car] 출차{'(재확인)' if recheck else ''} — tesla: shift={(tloc or {}).get('shift')} "
           f"dest={dest!r} loc=({(tloc or {}).get('lat')},{(tloc or {}).get('lng')}) "
           f"phone=({lat},{lng})", flush=True)
@@ -303,6 +323,7 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     """
     import parking as parking_mod
     tloc = None if silent else _tesla_at_event()
+    _save_car_snapshot(tloc, "주차")   # 주차 스냅샷(silent·자는차면 tloc None → 스킵)
     # 주차 위치 — 테슬라 차 GPS가 있으면 더 정확(폰보다, 특히 실내). 없으면 폰 좌표.
     plat = tloc["lat"] if (tloc and tloc.get("lat") is not None) else lat
     plng = tloc["lng"] if (tloc and tloc.get("lng") is not None) else lng
