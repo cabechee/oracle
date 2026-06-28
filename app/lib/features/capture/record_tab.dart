@@ -28,22 +28,8 @@ class RecordTab extends StatelessWidget {
             // 1) 전체화면 프리뷰
             _cameraOrPhoto(context),
 
-            // 2) 상단 — 첨부 제거(좌)·갤러리(우)
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    if (c.photos.isNotEmpty || c.video != null)
-                      _overlayButton(
-                          icon: PhosphorThin.x,
-                          tooltip: '첨부 모두 제거',
-                          onTap: c.clearAttachments),
-                    const Spacer(),
-                  ],
-                ),
-              ),
-            ),
+            // 2) (제거됨) 상단 '첨부 모두 제거' X — 사진은 썸네일별 X, 영상은 풀스크린 '탭해서
+            //    제거'로 각각 처리한다. 전역 X와 개별 삭제가 둘 다 떠서 헷갈리던 문제 해소.
 
             // 3) companion 질문 오버레이 (알림에 답하는 중) — 캐릭터 얼굴+이름과 함께
             if (c.askPrompt != null)
@@ -186,21 +172,28 @@ class RecordTab extends StatelessWidget {
   }
 
   // 큰 셔터 + 사이드 갤러리. 셔터 동작은 현재 모드에 따라(촬영/녹화토글/녹음토글).
+  // Row로 나란히 — 양쪽 Expanded로 셔터를 중앙에 두고 갤러리는 왼쪽. 좁은 화면(폴드
+  // dual-pane·커버화면)에서도 셔터가 갤러리를 덮지 않게(예전 Stack+Positioned는 겹쳐 탭 가림).
   Widget _shutterRow(BuildContext context) {
     return SizedBox(
       height: 78,
-      child: Stack(
-        alignment: Alignment.center,
+      child: Row(
         children: [
-          Positioned(
-            left: 22,
-            child: _overlayButton(
-              icon: PhosphorThin.images,
-              tooltip: '갤러리',
-              onTap: () => _pickFromGalleryMenu(context),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 22),
+                child: _overlayButton(
+                  icon: PhosphorThin.images,
+                  tooltip: '갤러리',
+                  onTap: () => _pickFromGalleryMenu(context),
+                ),
+              ),
             ),
           ),
           _shutter(),
+          const Expanded(child: SizedBox()),
         ],
       ),
     );
