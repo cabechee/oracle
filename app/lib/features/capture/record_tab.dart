@@ -172,18 +172,20 @@ class RecordTab extends StatelessWidget {
   }
 
   // 큰 셔터 + 사이드 갤러리. 셔터 동작은 현재 모드에 따라(촬영/녹화토글/녹음토글).
-  // Row로 나란히 — 양쪽 Expanded로 셔터를 중앙에 두고 갤러리는 왼쪽. 좁은 화면(폴드
+  // Row로 나란히 — 양쪽 Expanded로 셔터를 중앙에 두고 갤러리는 오른쪽. 좁은 화면(폴드
   // dual-pane·커버화면)에서도 셔터가 갤러리를 덮지 않게(예전 Stack+Positioned는 겹쳐 탭 가림).
   Widget _shutterRow(BuildContext context) {
     return SizedBox(
       height: 78,
       child: Row(
         children: [
+          const Expanded(child: SizedBox()),
+          _shutter(),
           Expanded(
             child: Align(
-              alignment: Alignment.centerLeft,
+              alignment: Alignment.centerRight,
               child: Padding(
-                padding: const EdgeInsets.only(left: 22),
+                padding: const EdgeInsets.only(right: 22),
                 child: _overlayButton(
                   icon: PhosphorThin.images,
                   tooltip: '갤러리',
@@ -192,8 +194,6 @@ class RecordTab extends StatelessWidget {
               ),
             ),
           ),
-          _shutter(),
-          const Expanded(child: SizedBox()),
         ],
       ),
     );
