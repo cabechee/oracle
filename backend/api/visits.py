@@ -65,6 +65,37 @@ def ep_visits(date: Optional[str] = None):
     return {"items": visits_mod.visits_for_day(target)}
 
 
+class TrackIn(BaseModel):
+    lat: float
+    lng: float
+    ts: Any = None                 # epoch ms 또는 ISO
+    acc: Optional[float] = None    # 정확도(m)
+    source: Optional[str] = None   # 기기/클라이언트 id
+    moving: Optional[bool] = None  # 도보 아님(차·대중교통) 여부
+
+
+@router.post("/tracks")
+def ep_track(body: TrackIn):
+    """원시 동선 점 1개 — 수집기가 매 틱 보냄(방문과 별개로 길 전체 보존). 멱등."""
+    import tracks as tracks_mod
+    tid = tracks_mod.record(body.lat, body.lng, body.ts,
+                            acc=body.acc, source=body.source, moving=body.moving)
+    return {"ok": True, "id": tid}
+
+
+@router.get("/tracks")
+def ep_tracks(date: Optional[str] = None, limit: int = 500):
+    """동선 점 — date(YYYY-MM-DD) 주면 그날 시간순, 없으면 최근 limit개 최신순."""
+    import tracks as tracks_mod
+    if date:
+        try:
+            target = _date.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(400, "date must be YYYY-MM-DD")
+        return {"items": tracks_mod.for_day(target)}
+    return {"items": tracks_mod.recent(limit)}
+
+
 class ParkIn(BaseModel):
     lat: float
     lng: float

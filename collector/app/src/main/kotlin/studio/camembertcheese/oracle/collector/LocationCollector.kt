@@ -21,7 +21,10 @@ import org.json.JSONObject
 object LocationCollector {
 
     private const val ARRIVE_RADIUS = 120.0
-    private const val STAY_RADIUS = 150.0
+    private const val STAY_RADIUS = 150.0    // 평균 거점에 흡수하는 반경(클러스터)
+    private const val LEAVE_RADIUS = 250.0   // 이탈 반경(히스테리시스: 들어올 때<나갈 때 — 드리프트 토글 방지)
+    private const val LEAVE_TICKS = 2        // 확신 이탈이 연속 이 틱 이상이어야 거점 이탈 확정(한 틱 튐 흡수)
+    private const val MOVE_MPS = 2.5         // 이 속도(≈9km/h) 초과면 도보 아님(차·대중교통)
     private const val STAY_MINUTES = 15
 
     // 재시작 직후 첫 틱은 현재 BT로 상태만 맞추고 이벤트 X(가짜 출차/주차 방지). 프로세스 생존 동안만.
@@ -46,7 +49,10 @@ object LocationCollector {
             // 고정 BT 장소(좌표 있는 스피커 등) — 거기 있는 것, 체류머신 스킵(기존 동작).
             if (isFixedBt) {
                 val loc = Geo.currentLocation(ctx)
-                if (loc != null) Prefs.setAnchor(ctx, loc.latitude, loc.longitude, now)
+                if (loc != null) {
+                    Prefs.setAnchor(ctx, loc.latitude, loc.longitude, now)
+                    track(ctx, loc.latitude, loc.longitude, loc.accuracy, moving = false)
+                }
                 return
             }
 
@@ -115,6 +121,7 @@ object LocationCollector {
 
         if (Prefs.carState(ctx) == "driving") {
             val loc = bestLoc(ctx, driving = true)   // 운전중 — Tesla GPS 메인(폰보다 정확), 폰 보조
+            if (loc != null) track(ctx, loc.latitude, loc.longitude, loc.accuracy, moving = true)
             // 1) 주차 — 차 BT 해제(연속 debounce 틱). 시동 잠깐 껐다 켜기는 흡수.
             if (!onCar) {
                 val pend = Prefs.parkPendingTicks(ctx) + 1
@@ -182,6 +189,7 @@ object LocationCollector {
         if (onCar) {
             // 3) 출차 — 차 BT 연결 채로 세운 데서 departR 이상 벗어남.
             val loc = Geo.currentLocation(ctx)
+            if (loc != null) track(ctx, loc.latitude, loc.longitude, loc.accuracy, moving = false)
             val da = Prefs.departAnchor(ctx)
             if (da == null) {
                 if (loc != null) Prefs.setDepartAnchor(ctx, loc.latitude, loc.longitude) // 연결 순간 신선한 기준
@@ -255,6 +263,8 @@ object LocationCollector {
     }
 
     // ── 평범한 체류/이동(WiFi·GPS) 머신 ───────────────────────────────
+    /// 거점 = 머무는 동안 받은 fix들의 누적 평균(centroid). 평균 근처면 흡수(드리프트가 평균에 녹음),
+    /// 평균에서 **확신 있게(정확도 감안) + 연속 N틱** 벗어나야 거점 이탈로 친다(가짜 leave→arrive 방지).
     private fun stayTick(ctx: Context, skipOnWifi: Boolean, now: Long, places: org.json.JSONArray) {
         // 1) WiFi — 등록 장소 WiFi면 GPS 없이 즉시 그 장소.
         if (skipOnWifi) {
@@ -271,17 +281,24 @@ object LocationCollector {
         val loc = Geo.currentLocation(ctx) ?: return
         val lat = loc.latitude
         val lng = loc.longitude
+        val acc = if (loc.hasAccuracy()) loc.accuracy.toDouble() else 0.0
+        val moving = isMoving(ctx, loc, now)   // 도보 vs 차/대중교통
+        track(ctx, lat, lng, loc.accuracy, moving)   // 원시 동선 항상 저장
         val gpsPlace = PlacesCache.byGps(places, lat, lng, ARRIVE_RADIUS)
 
-        val aLat = Prefs.anchorLat(ctx)
-        val aLng = Prefs.anchorLng(ctx)
-        if (aLat == null || aLng == null) {
-            setAnchor(ctx, lat, lng, now); return
+        val cLat = Prefs.anchorLat(ctx)
+        val cLng = Prefs.anchorLng(ctx)
+        if (cLat == null || cLng == null) {
+            startCluster(ctx, lat, lng, now); return
         }
-        val fromAnchor = Geo.distance(lat, lng, aLat, aLng).toDouble()
+        val fromC = Geo.distance(lat, lng, cLat, cLng).toDouble()
 
-        if (fromAnchor <= STAY_RADIUS) {
+        // 거점 안 — 평균에 흡수(드리프트가 평균에 녹아 안 흔들림).
+        if (fromC <= STAY_RADIUS) {
+            Prefs.setLeavePending(ctx, 0)
+            updateCentroid(ctx, lat, lng)
             if (visitOn) return
+            if (moving) return                // 이동 중(정체로 잠깐 멈춤 등) — 거점 라벨 보류
             val start = Prefs.anchorStart(ctx).let { if (it == 0L) now else it }
             val stayedMin = ((now - start) / 60000).toInt()
             if (gpsPlace != null || stayedMin >= STAY_MINUTES) {
@@ -289,22 +306,71 @@ object LocationCollector {
                 Prefs.setVisitPlace(ctx, gpsPlace ?: "")
                 if (gpsPlace != null) {
                     L.i("GPS 도착(등록): '$gpsPlace' — banter arrive")
-                    banterFlow(ctx, "arrive", gpsPlace)   // 저장된 곳 — 거주자 인사
+                    banterFlow(ctx, "arrive", gpsPlace, moving)   // 저장된 곳 — 거주자 인사
                 } else {
                     // 저장 안 된 새 곳 15분+ — '아빠 왔다 반겨야지'(엉뚱) 대신 어딘지 물어봄.
                     L.i("GPS 체류 ${stayedMin}분(미등록) — 여기 어디? 물어봄")
                     askPlace(ctx, lat, lng)
                 }
             }
-        } else {
-            if (visitOn) {                    // 떠남 — 머물던 곳을 여정에 기록(silent) + 수다(궁금)
-                val left = Prefs.visitPlace(ctx)
-                endStay(ctx, now)
-                L.i("GPS 나섬: '$left' — banter leave")
-                banterFlow(ctx, "leave", left.ifBlank { null })
-            }
-            setAnchor(ctx, lat, lng, now)
+            return
         }
+
+        // 거점 밖 — 정확도 감안해 '확신 있게' 벗어났을 때만 디바운스 카운트(부정확한 fix는 무시).
+        val confidentOut = (fromC - acc) > LEAVE_RADIUS
+        if (!confidentOut) return             // 경계 흔들림(정확도 큰 fix) — 이탈 아님, 평균도 안 흔듦
+        val pend = Prefs.leavePending(ctx) + 1
+        Prefs.setLeavePending(ctx, pend)
+        if (pend < LEAVE_TICKS) {
+            L.i("거점 이탈 후보 ${pend}/${LEAVE_TICKS}틱(${fromC.toInt()}m) — 대기")
+            return                            // 디바운스 — 한 틱 튐 흡수
+        }
+
+        // 이탈 확정.
+        if (visitOn) {                        // 떠남 — 머물던 곳을 여정에 기록(silent) + 수다(궁금)
+            val left = Prefs.visitPlace(ctx)
+            endStay(ctx, now)
+            L.i("거점 이탈 확정: '$left' (${fromC.toInt()}m, moving=$moving) — banter leave")
+            banterFlow(ctx, "leave", left.ifBlank { null }, moving)
+        }
+        startCluster(ctx, lat, lng, now)      // 새 거점 후보로 다시 평균 시작
+    }
+
+    /// 도보 vs 이동중(차·대중교통) — fix 속도가 있으면 그걸로, 없으면 직전 fix 대비 변위/시간.
+    private fun isMoving(ctx: Context, loc: Location, now: Long): Boolean {
+        val pLat = Prefs.lastFixLat(ctx); val pLng = Prefs.lastFixLng(ctx)
+        val pT = Prefs.lastFixTime(ctx)
+        Prefs.setLastFix(ctx, loc.latitude, loc.longitude, now)
+        if (loc.hasSpeed() && loc.speed > 0f) return loc.speed > MOVE_MPS
+        if (pLat != null && pLng != null && pT > 0L && now > pT) {
+            val d = Geo.distance(loc.latitude, loc.longitude, pLat, pLng).toDouble()
+            val dt = (now - pT) / 1000.0
+            if (dt >= 5.0) return (d / dt) > MOVE_MPS   // 충분한 간격일 때만 변위 속도로 판정
+        }
+        return false
+    }
+
+    /// 새 거점 후보 — 평균을 이 fix 하나로 리셋, 체류 off.
+    private fun startCluster(ctx: Context, lat: Double, lng: Double, now: Long) {
+        Prefs.setAnchor(ctx, lat, lng, now)    // 평균=fix, start=now
+        Prefs.setSampleCount(ctx, 1)
+        Prefs.setLeavePending(ctx, 0)
+        Prefs.setVisitOn(ctx, false)
+        Prefs.setVisitPlace(ctx, "")
+    }
+
+    /// 거점 평균에 새 fix를 흡수(증분 평균) — 체류 시작 시각은 보존.
+    private fun updateCentroid(ctx: Context, lat: Double, lng: Double) {
+        val n = Prefs.sampleCount(ctx).coerceAtLeast(1)
+        val cLat = Prefs.anchorLat(ctx) ?: lat
+        val cLng = Prefs.anchorLng(ctx) ?: lng
+        Prefs.setAnchorCoords(ctx, (cLat * n + lat) / (n + 1), (cLng * n + lng) / (n + 1))
+        Prefs.setSampleCount(ctx, n + 1)
+    }
+
+    /// 원시 동선 점 1개 백엔드로(방문과 별개, 길 전체 보존). 실패는 조용히 무시.
+    private fun track(ctx: Context, lat: Double, lng: Double, acc: Float, moving: Boolean) {
+        try { Backend.recordTrack(ctx, lat, lng, acc, moving) } catch (_: Exception) {}
     }
 
     /// WiFi로 확정된 장소 — 다른 곳서 왔으면 이전 체류를 여정에 기록 후 도착 말 걸기.
@@ -317,6 +383,8 @@ object LocationCollector {
         val pc = PlacesCache.coordsOf(places, place)
             ?: Geo.currentLocation(ctx)?.let { Pair(it.latitude, it.longitude) }
         Prefs.setAnchor(ctx, pc?.first ?: 0.0, pc?.second ?: 0.0, now)
+        Prefs.setSampleCount(ctx, 1)         // 새 거점 평균 시작(등록 좌표 기준)
+        Prefs.setLeavePending(ctx, 0)
         Prefs.setVisitOn(ctx, true)
         Prefs.setVisitPlace(ctx, place)
         L.i("WiFi 도착: '$place' (${pc?.let { "%.5f,%.5f".format(it.first, it.second) } ?: "좌표없음"}) — banter arrive")
@@ -330,16 +398,10 @@ object LocationCollector {
             Prefs.anchorLat(ctx) ?: 0.0, Prefs.anchorLng(ctx) ?: 0.0, start, now)
     }
 
-    private fun setAnchor(ctx: Context, lat: Double, lng: Double, now: Long) {
-        Prefs.setAnchor(ctx, lat, lng, now)
-        Prefs.setVisitOn(ctx, false)
-        Prefs.setVisitPlace(ctx, "")
-    }
-
-    /// 베르·쿠키 수다 — 서버가 흐름에 각 턴 기록. notify(도착 인사)가 있으면 알림 표시.
-    /// 이동·추측(leave)은 notify 비어 흐름에만 조용히(자기들끼리). 게이팅·실패면 조용.
-    private fun banterFlow(ctx: Context, event: String, place: String?) {
-        val r = Backend.banter(ctx, event, place) ?: return
+    /// 베르·쿠키 수다 — 서버가 흐름에 각 턴 기록. notify(도착 인사·일정 추측)가 있으면 알림 표시.
+    /// 평범한 이동·추측(leave)은 notify 비어 흐름에만 조용히. moving=도보아님(차/대중교통).
+    private fun banterFlow(ctx: Context, event: String, place: String?, moving: Boolean? = null) {
+        val r = Backend.banter(ctx, event, place, moving) ?: return
         val notify = r.optJSONObject("notify")
         val text = notify?.optString("text")?.trim() ?: ""
         if (text.isNotEmpty()) Notify.companion(ctx, notify!!.optString("speaker"), text)

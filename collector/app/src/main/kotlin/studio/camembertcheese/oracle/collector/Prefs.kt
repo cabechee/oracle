@@ -97,12 +97,37 @@ object Prefs {
     private fun getD(ctx: Context, k: String): Double? =
         sp(ctx).getString(k, null)?.toDoubleOrNull()
 
+    /// 체류 거점 = 머무는 동안 받은 fix들의 **누적 평균 좌표**(anchor=centroid). 드리프트가
+    /// 평균에 녹아 한 점이 안 흔들린다. start=체류 시작 시각, anchor_n=평균 표본 수.
     fun anchorLat(ctx: Context) = getD(ctx, K_ALAT)
     fun anchorLng(ctx: Context) = getD(ctx, K_ALNG)
     fun anchorStart(ctx: Context): Long = sp(ctx).getLong(K_ASTART, 0L)
     fun setAnchor(ctx: Context, lat: Double, lng: Double, start: Long) =
         sp(ctx).edit().putString(K_ALAT, lat.toString()).putString(K_ALNG, lng.toString())
             .putLong(K_ASTART, start).apply()
+    /// 평균 좌표만 갱신(체류 시작 시각은 보존) — 거점 안에서 평균을 굴릴 때.
+    fun setAnchorCoords(ctx: Context, lat: Double, lng: Double) =
+        sp(ctx).edit().putString(K_ALAT, lat.toString())
+            .putString(K_ALNG, lng.toString()).apply()
+    fun sampleCount(ctx: Context): Int = sp(ctx).getInt("anchor_n", 0)
+    fun setSampleCount(ctx: Context, v: Int) = sp(ctx).edit().putInt("anchor_n", v).apply()
+
+    /// 거점 이탈 디바운스 — 평균에서 확신 있게 벗어난 연속 틱 수(한 틱 튐 흡수).
+    fun leavePending(ctx: Context): Int = sp(ctx).getInt("leave_pending", 0)
+    fun setLeavePending(ctx: Context, v: Int) = sp(ctx).edit().putInt("leave_pending", v).apply()
+
+    /// 도보/이동(차·대중교통) 판정용 직전 fix(속도 없을 때 변위로 추정).
+    fun lastFixLat(ctx: Context) = getD(ctx, "lastfix_lat")
+    fun lastFixLng(ctx: Context) = getD(ctx, "lastfix_lng")
+    fun lastFixTime(ctx: Context): Long = sp(ctx).getLong("lastfix_t", 0L)
+    fun setLastFix(ctx: Context, lat: Double, lng: Double, t: Long) =
+        sp(ctx).edit().putString("lastfix_lat", lat.toString())
+            .putString("lastfix_lng", lng.toString()).putLong("lastfix_t", t).apply()
+
+    /// checkin 헛호출 방지 — 마지막으로 checkin 보낸 시(時) 버킷(epoch hour). 같은 시면 스킵.
+    fun lastCheckinHour(ctx: Context): Long = sp(ctx).getLong("last_checkin_hour", -1L)
+    fun setLastCheckinHour(ctx: Context, v: Long) =
+        sp(ctx).edit().putLong("last_checkin_hour", v).apply()
 
     fun visitOn(ctx: Context): Boolean = sp(ctx).getBoolean(K_VISITON, false)
     fun setVisitOn(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean(K_VISITON, v).apply()

@@ -206,6 +206,39 @@ def _dest_name(tloc: Optional[Dict[str, Any]]) -> Optional[str]:
     return d or None
 
 
+def _imminent_event(now: Optional[datetime] = None,
+                    ahead_min: int = 120) -> Optional[str]:
+    """곧(약 -20분 ~ +ahead_min분) 시작하는 캘린더 일정 → '거기 가?' 추측용 목적지 한 줄.
+
+    출발할 때 네비 목적지가 없으면 일정으로 행선지를 짐작한다. 장소가 있으면 '장소(제목)',
+    없으면 제목만. 시각 일정만(종일 제외). 미인증/없음이면 None.
+    """
+    now = now or datetime.now()
+    try:
+        import gcal
+        evs = gcal.upcoming(days=1, max_results=15)
+    except Exception:
+        return None
+    for e in evs:
+        if e.get("all_day"):
+            continue
+        s = e.get("start") or ""
+        try:
+            t = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if t.tzinfo is not None:
+            t = t.astimezone().replace(tzinfo=None)
+        delta_min = (t - now).total_seconds() / 60.0
+        if -20 <= delta_min <= ahead_min:
+            title = (e.get("title") or "").strip()
+            loc = (e.get("location") or "").strip()
+            if loc and title:
+                return f"{loc}({title})"
+            return loc or title or None
+    return None
+
+
 def _log_companion(speaker: Optional[str], text: str,
                    trigger: Optional[str] = None,
                    when: Optional[datetime] = None,
@@ -263,9 +296,15 @@ def car_departure(lat: float, lng: float, ts: Any = None,
     if dest:
         situation = (f"아빠가 차 몰고 '{dest}' 쪽으로 가는 중이야(내비 목적지로 확인됨). 어디 "
                      f"가냐고 묻지 말고 '{dest} 가는구나' 하고 잘 다녀오라 가볍게 인사해 — 짧게.")
-    else:   # 재확인에도 목적지 없음 → 어디 가?
-        situation = ("아빠가 차를 몰고 어디론가 가는 중이야. 어디 가는지 궁금해서 가볍게 물어봐 "
-                     "— '어디 가?' 정도로 아주 짧게.")
+    else:   # 재확인에도 목적지 없음 → 일정으로 짐작, 없으면 '어디 가?'
+        ev = _imminent_event()
+        if ev:
+            situation = (f"아빠가 차를 몰고 어디론가 가는 중이야. 내비 목적지는 안 잡혔는데, 캘린더 "
+                         f"보니 곧 '{ev}' 일정이 있어. 혹시 거기 가는 거냐고 가볍게 물어봐 — "
+                         f"'{ev} 가?' 정도로 아주 짧게(단정 말고 추측으로).")
+        else:
+            situation = ("아빠가 차를 몰고 어디론가 가는 중이야. 어디 가는지 궁금해서 가볍게 물어봐 "
+                         "— '어디 가?' 정도로 아주 짧게.")
     r = _speak("car", situation, "berr")      # 출차(차 탈 때)는 베르 담당
     upd: Dict[str, Any] = {"state": "driving"}
     if dest:
@@ -416,8 +455,13 @@ _RESIDENT_BY_KIND = {"office": "berr", "home": "cookie"}
 _NAME = {"berr": "베르", "cookie": "쿠키"}
 
 
-def _banter_scene(event: str, info: Optional[Dict[str, Any]]) -> Tuple[str, Optional[str]]:
-    """이동/도착 이벤트 → 둘이 나눌 수다의 '장면' 한 줄 + (도착 시) 맞이할 주인 캐릭터."""
+def _banter_scene(event: str, info: Optional[Dict[str, Any]],
+                  moving: Optional[bool] = None,
+                  hint: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """이동/도착 이벤트 → 둘이 나눌 수다의 '장면' 한 줄 + (도착 시) 맞이할 주인 캐릭터.
+
+    moving=도보아님(차/대중교통) 여부, hint=곧 있는 일정(행선지 추측). leave에만 반영.
+    """
     name = info.get("name") if info else None
     if event == "arrive":
         resident = _RESIDENT_BY_KIND.get((info or {}).get("kind") or "")
@@ -436,7 +480,12 @@ def _banter_scene(event: str, info: Optional[Dict[str, Any]]) -> Tuple[str, Opti
         return ("아빠가 방금 차에 탔어. 어디 가려나·혹시 우리 보러 오나, "
                 "둘이 도란도란 궁금해하며 주고받아."), None
     where = f"'{name}'에서" if name else "어딘가에서"   # leave
-    return (f"아빠가 방금 {where} 나서 어디론가 움직이기 시작했어. "
+    move_txt = " 차나 대중교통을 타고" if moving else ""
+    if hint:
+        return (f"아빠가 방금 {where} 나서{move_txt} 어디론가 움직이기 시작했어. "
+                f"마침 곧 '{hint}' 일정이 있어 — 혹시 거기 가나 싶어. 둘이 '{hint} 가시나봐?' "
+                f"하고 궁금해하며 주고받아."), None
+    return (f"아빠가 방금 {where} 나서{move_txt} 어디론가 움직이기 시작했어. "
             f"'아빠 어디 가지?' '몰라~' 하고 둘이 궁금해하며 주고받아."), None
 
 
@@ -501,11 +550,14 @@ def _recent_arrival(place: Optional[str], now: datetime, within_min: int = 10) -
 
 
 def banter(event: str, place: Optional[str] = None,
-           minutes: Optional[int] = None) -> Dict[str, Any]:
+           minutes: Optional[int] = None,
+           moving: Optional[bool] = None) -> Dict[str, Any]:
     """베르·쿠키가 아빠 움직임에 흐름(conversations)에 자기들끼리 주고받는 짧은 수다.
 
     event: arrive(도착·인사) | leave(나섬·궁금) | board(차 탐·추측).
+    moving=도보아님(차/대중교통) 여부(leave 장면에 반영).
     각 턴을 흐름에 남기고(companion=True, banter=True), 도착이면 인사 한 줄을 알림용으로 반환.
+    나섬(leave) 때 곧 있는 일정이 있으면 '거기 가시나봐?'를 알림으로도 살짝 띄운다.
     반환: {turns:[{speaker,text}], notify:{speaker,text}}. 억제/실패면 turns=[].
     """
     now = datetime.now()
@@ -522,7 +574,8 @@ def banter(event: str, place: Optional[str] = None,
             info = places_mod.lookup(place)
         except Exception:
             info = None
-    scene, resident = _banter_scene(event, info)
+    leave_hint = _imminent_event() if event == "leave" else None
+    scene, resident = _banter_scene(event, info, moving, leave_hint)
     if minutes:
         scene += f" (아빠는 거기 약 {minutes}분 있었어)"
     scene_for_regen = scene   # 재처리(_speak)는 호칭을 스스로 치환 → '아빠' 유지본 보관
@@ -574,7 +627,10 @@ def banter(event: str, place: Optional[str] = None,
 
     # 도착 알림은 '집·작업실'(거주자 있는 곳)에 왔을 때만 — 아무 정류장마다 '아빠 오셨다'를
     # 띄우지 않게(거주자 없는 새 곳·잠깐 정차는 흐름에만 조용히). 이동/추측(leave·board)도 흐름만.
-    notify = (saved[0] if (event == "arrive" and resident and saved)
+    # 도착(거주자 있는 곳)이거나, 나섬인데 곧 있는 일정으로 행선지가 짐작될 때만 알림으로 띄움.
+    # 그 외 평범한 나섬/추측은 흐름에만 조용히(매 이동마다 '어디 가?'로 보채지 않게).
+    notify = (saved[0] if ((event == "arrive" and resident) or
+                           (event == "leave" and leave_hint)) and saved
               else {"speaker": "", "text": ""})
     return {"turns": saved, "notify": notify, "alias": alias}
 

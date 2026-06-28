@@ -209,3 +209,53 @@ def test_reprocess_companion_no_regen_uses_trigger(monkeypatch):
     out = companion.reprocess_companion("cmsg-z", comment="짧게")
     assert out["ok"] is True
     assert "집 도착" in cap["prompt"] and "원래 말" in cap["prompt"]
+
+
+# ── 일정(캘린더) 행선지 추측 + banter 도보구분/일정 ────────────────────────
+
+import gcal  # noqa: E402
+from datetime import datetime  # noqa: E402
+
+
+def test_imminent_event_picks_soon(monkeypatch):
+    now = datetime(2026, 6, 28, 13, 0)
+    evs = [
+        {"all_day": True, "title": "종일워크숍", "start": "2026-06-28", "location": ""},
+        {"all_day": False, "title": "치과", "start": "2026-06-28T14:00:00", "location": "강남"},
+    ]
+    monkeypatch.setattr(gcal, "upcoming", lambda *a, **k: evs)
+    assert companion._imminent_event(now) == "강남(치과)"   # 1시간 뒤 — 창 안, 장소(제목)
+
+
+def test_imminent_event_title_only(monkeypatch):
+    now = datetime(2026, 6, 28, 13, 0)
+    evs = [{"all_day": False, "title": "미팅", "start": "2026-06-28T13:30:00", "location": ""}]
+    monkeypatch.setattr(gcal, "upcoming", lambda *a, **k: evs)
+    assert companion._imminent_event(now) == "미팅"        # 장소 없으면 제목만
+
+
+def test_imminent_event_skips_far(monkeypatch):
+    now = datetime(2026, 6, 28, 13, 0)
+    evs = [{"all_day": False, "title": "저녁", "start": "2026-06-28T20:00:00", "location": "홍대"}]
+    monkeypatch.setattr(gcal, "upcoming", lambda *a, **k: evs)
+    assert companion._imminent_event(now) is None          # 7시간 뒤 — 창(2h) 밖
+
+
+def test_imminent_event_no_auth(monkeypatch):
+    monkeypatch.setattr(gcal, "upcoming", lambda *a, **k: [])
+    assert companion._imminent_event(datetime(2026, 6, 28, 13, 0)) is None
+
+
+def test_banter_scene_leave_moving():
+    scene, resident = companion._banter_scene("leave", None, moving=True)
+    assert "차나 대중교통" in scene and resident is None
+
+
+def test_banter_scene_leave_hint():
+    scene, _ = companion._banter_scene("leave", None, moving=False, hint="강남(치과)")
+    assert "강남(치과)" in scene
+
+
+def test_banter_scene_leave_plain():
+    scene, _ = companion._banter_scene("leave", None)
+    assert "차나 대중교통" not in scene and "어디 가" in scene

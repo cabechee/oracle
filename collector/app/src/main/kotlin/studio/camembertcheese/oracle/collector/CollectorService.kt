@@ -367,9 +367,13 @@ class CollectorService : Service() {
             return true
         }
 
-        /// 정시 체크인 시도 — 매 루프 호출, 서버가 '이 시(정시)에 안 보냈으면'만 발화(게이팅).
-        /// 위치와 완전 별개 — GPS 안 봄.
+        /// 정시 체크인 시도 — 같은 시(時)엔 1회만(클라 가드). 서버가 어차피 시간당 한 번꼴로만
+        /// 발화 게이팅하는데, 루프(60초·운전 10초)마다 부르면 헛호출이 수만 건 쌓였다(6만→약 24/일).
+        /// 동작은 동일. 위치와 완전 별개 — GPS 안 봄.
         fun tryCheckin(ctx: Context) {
+            val hour = System.currentTimeMillis() / 3_600_000L
+            if (Prefs.lastCheckinHour(ctx) == hour) return   // 이 시(時)엔 이미 호출함
+            Prefs.setLastCheckinHour(ctx, hour)
             val r = Backend.companionSay(ctx, "checkin", null) ?: return
             val text = r.optString("text").trim()
             if (text.isNotEmpty()) Notify.companion(ctx, r.optString("speaker"), text)

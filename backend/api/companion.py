@@ -42,6 +42,7 @@ class BanterIn(BaseModel):
     event: str                      # arrive | leave | board
     place: Optional[str] = None     # 장소명(선택) — 도착이면 그곳 주인이 맞이
     minutes: Optional[int] = None   # 그곳에 머문 시간(선택, 맥락)
+    moving: Optional[bool] = None   # 도보 아님(차·대중교통) 여부 — leave 장면에 반영
 
 
 @router.post("/companion/banter")
@@ -51,7 +52,7 @@ def ep_companion_banter(body: BanterIn):
     반환 notify: 도착(인사)이면 {speaker,text}(폰이 알림 표시), 이동/추측이면 빈 값(흐름에만).
     """
     from agent import companion
-    return companion.banter(body.event, body.place, body.minutes)
+    return companion.banter(body.event, body.place, body.minutes, body.moving)
 
 
 class CarDepartIn(BaseModel):

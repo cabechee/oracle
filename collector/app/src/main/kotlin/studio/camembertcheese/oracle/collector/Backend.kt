@@ -80,9 +80,11 @@ object Backend {
 
     /// 동반자끼리 수다 — 아빠 이동/도착에 베르·쿠키가 흐름에 주고받음(서버가 흐름에 기록).
     /// event: arrive | leave | board. 반환 notify={speaker,text}는 도착(인사) 때만 채워짐.
-    fun banter(ctx: Context, event: String, place: String?): JSONObject? {
+    fun banter(ctx: Context, event: String, place: String?,
+               moving: Boolean? = null): JSONObject? {
         val body = JSONObject().put("event", event)
         if (place != null) body.put("place", place)
+        if (moving != null) body.put("moving", moving)
         return post(Prefs.baseUrl(ctx) + "/companion/banter", body)
     }
 
@@ -94,6 +96,18 @@ object Backend {
     fun askPlace(ctx: Context, lat: Double, lng: Double): JSONObject? {
         val body = JSONObject().put("lat", lat).put("lng", lng)
         return post(Prefs.baseUrl(ctx) + "/companion/askplace", body)
+    }
+
+    /// 원시 동선 점 1개 — 매 틱(도보 1분·운전 10초) GPS를 그대로 보존(방문과 별개). 멱등.
+    fun recordTrack(ctx: Context, lat: Double, lng: Double,
+                    acc: Float, moving: Boolean): JSONObject? {
+        val body = JSONObject()
+            .put("lat", lat).put("lng", lng)
+            .put("ts", System.currentTimeMillis())
+            .put("acc", acc.toDouble())
+            .put("source", Prefs.deviceId(ctx))
+            .put("moving", moving)
+        return post(Prefs.baseUrl(ctx) + "/tracks", body)
     }
 
     /// 방문 기록(체류·이동 구간). silent=true면 여정 기록만(말 걸기 생략).

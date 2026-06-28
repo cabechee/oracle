@@ -97,6 +97,12 @@ def visits() -> Collection:
     return _conn().visits
 
 
+def tracks() -> Collection:
+    """원시 동선 — 수집기가 매 틱(1분·운전 10초) 보내는 GPS 점(ts·lat·lng·acc·source).
+    방문(정제 체크포인트)과 별개로 '실제 다닌 길' 전체를 항상 보존(역지오코딩·지도 후속)."""
+    return _conn().tracks
+
+
 def places() -> Collection:
     """장소 레지스트리 — 집·작업실·자주 가는 곳(이름·좌표·WiFi·설명). 동반자 맥락 SoT."""
     return _conn().places
@@ -134,6 +140,7 @@ def ensure_indexes() -> None:
         signals().create_index("ts")
         signals().create_index("kind")
         signal_briefs().create_index("ts")
+        tracks().create_index("ts")
     except Exception:
         # MongoDB가 안 떠 있어도 import는 통과 (api/ingest 호출 시 fail)
         pass
