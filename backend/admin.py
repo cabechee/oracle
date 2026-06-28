@@ -14,6 +14,7 @@ import signals as signals_mod
 COLLECTIONS: Dict[str, Dict[str, Any]] = {
     "records":       {"label": "기록", "sort": "ts", "preview": "image_paths"},
     "journals":      {"label": "저널", "sort": "period_start", "preview": None},
+    "briefings":     {"label": "발행물", "sort": "ts", "preview": None},
     "signals":       {"label": "신호 원본", "sort": "ts", "preview": None},
     "signal_briefs": {"label": "신호 요약", "sort": "ts", "preview": None},
     "threads":       {"label": "스레드", "sort": "last_ts", "preview": None},
