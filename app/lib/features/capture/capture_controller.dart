@@ -15,6 +15,9 @@ import '../../applog.dart';
 import '../../core/record_store.dart';
 import '../../models.dart';
 
+/// 캡처 입력 모드 — 기록 탭에서 사진/영상/음성 중 하나로 전환(기본 사진).
+enum CaptureMode { photo, video, audio }
+
 /// 캡처 입력 도메인 — 카메라·영상·오디오·갤러리·공유인텐트 + 전송(ingest).
 ///
 /// BuildContext 미접근. UI 알림은 [onToast], 선택 모델은 [modelProvider]로 주입받고,
@@ -48,6 +51,15 @@ class CaptureController extends ChangeNotifier {
   int _camEpoch = 0;
 
   // ── 입력 ───────────────────────────────────────────────────
+  /// 현재 캡처 모드(사진/영상/음성, 기본 사진). 기록 탭이 모드 탭으로 전환,
+  /// 셔터 동작(촬영/녹화/녹음)과 사진모드 자동촬영이 여기에 갈린다.
+  CaptureMode mode = CaptureMode.photo;
+  void setMode(CaptureMode m) {
+    if (mode == m) return;
+    mode = m;
+    _notify();
+  }
+
   final List<File> photos = [];   // 여러 장 연속 촬영 — 한 번에 전송
   File? video;
   bool recordingVideo = false;
@@ -438,11 +450,13 @@ class CaptureController extends ChangeNotifier {
     final compPrompt = askPrompt;
     final compSpeaker = askSpeaker;
     final compTappedAt = askTappedAt;
-    // 아무것도 없는 상태에서 전송 = 지금 프리뷰를 즉석 촬영해 보냄
-    // (앱 켜고 바로 전송 누르는 흐름 — 셔터를 따로 누를 필요 없게).
-    if (photos.isEmpty && answer.isEmpty && _audioPath == null && video == null) {
+    // 사진모드는 '무조건 사진 첨부' — 안 찍었으면 전송 시 즉석 촬영(텍스트만 입력했어도).
+    // 영상/음성모드는 셔터로 녹화/녹음한 미디어를 전송(자동 촬영 안 함).
+    if (mode == CaptureMode.photo && photos.isEmpty) {
       await capture();
       if (photos.isEmpty) return; // 촬영 실패(준비 중·권한 등) — capture가 토스트
+    } else if (photos.isEmpty && video == null && _audioPath == null && answer.isEmpty) {
+      return; // 영상/음성모드인데 미디어·코멘트 다 없음 — 빈 전송 방지
     }
     // 폰 도구화 — 코멘트에 명시 시간 명령이 있으면 LLM 전에 0초로 실행.
     final action = parseCaptureAction(comment);

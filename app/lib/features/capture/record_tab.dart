@@ -40,10 +40,6 @@ class RecordTab extends StatelessWidget {
                           tooltip: '첨부 모두 제거',
                           onTap: c.clearAttachments),
                     const Spacer(),
-                    _overlayButton(
-                        icon: PhosphorThin.images,
-                        tooltip: '갤러리',
-                        onTap: () => _pickFromGalleryMenu(context)),
                   ],
                 ),
               ),
@@ -96,7 +92,7 @@ class RecordTab extends StatelessWidget {
               child: AnimatedPadding(
                 duration: const Duration(milliseconds: 150),
                 padding: EdgeInsets.only(bottom: keyboard),
-                child: _bottomControls(),
+                child: _bottomControls(context),
               ),
             ),
           ],
@@ -106,7 +102,7 @@ class RecordTab extends StatelessWidget {
   }
 
   // ── 하단 컨트롤 ────────────────────────────────────────────
-  Widget _bottomControls() {
+  Widget _bottomControls(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -120,53 +116,153 @@ class RecordTab extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (c.photos.isNotEmpty)
+            if (c.mode == CaptureMode.photo && c.photos.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 2),
                 child: _photoTray(),
               ),
+            const SizedBox(height: 8),
+            _modeTabs(),
             Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _RingButton(
-                    icon: PhosphorThin.camera,
-                    label: c.photos.isEmpty ? '사진' : '사진 ${c.photos.length}',
-                    onTap: () => c.capture(),
-                  ),
-                  _RingButton(
-                    icon: c.recordingVideo
-                        ? PhosphorThin.stop
-                        : PhosphorThin.videoCamera,
-                    label: '영상',
-                    active: c.recordingVideo,
-                    onTap: c.cameraReady ? c.toggleVideoRecord : null,
-                  ),
-                  _RingButton(
-                    icon: c.listening
-                        ? PhosphorThin.stop
-                        : PhosphorThin.microphone,
-                    label: '음성',
-                    active: c.listening,
-                    onTap: c.recordAvailable ? c.toggleAudioRecord : null,
-                  ),
-                ],
-              ),
+              padding: const EdgeInsets.only(top: 6, bottom: 2),
+              child: _shutterRow(context),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
-                  OracleSpace.screenH, 8, OracleSpace.screenH, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                  OracleSpace.screenH, 4, OracleSpace.screenH, 12),
+              child: Column(
                 children: [
-                  Expanded(child: _commentField()),
-                  const SizedBox(width: 10),
-                  _sendButton(),
+                  _commentField(),
+                  const SizedBox(height: 10),
+                  _bigSendButton(),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // 모드 탭 — 사진 / 영상 / 음성. 현재 모드는 주홍 밑줄 + 밝게.
+  Widget _modeTabs() {
+    Widget tab(CaptureMode m, String label) {
+      final on = c.mode == m;
+      return InkWell(
+        onTap: () => c.setMode(m),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          child: Container(
+            padding: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: on ? OracleColors.vermilion : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+            ),
+            child: Text(label,
+                style: OracleType.label.copyWith(
+                  color: on ? OracleColors.paper : Colors.white54,
+                  fontWeight: on ? FontWeight.w500 : FontWeight.w400,
+                )),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        tab(CaptureMode.photo, '사진'),
+        const SizedBox(width: 8),
+        tab(CaptureMode.video, '영상'),
+        const SizedBox(width: 8),
+        tab(CaptureMode.audio, '음성'),
+      ],
+    );
+  }
+
+  // 큰 셔터 + 사이드 갤러리. 셔터 동작은 현재 모드에 따라(촬영/녹화토글/녹음토글).
+  Widget _shutterRow(BuildContext context) {
+    return SizedBox(
+      height: 78,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(
+            left: 22,
+            child: _overlayButton(
+              icon: PhosphorThin.images,
+              tooltip: '갤러리',
+              onTap: () => _pickFromGalleryMenu(context),
+            ),
+          ),
+          _shutter(),
+        ],
+      ),
+    );
+  }
+
+  Widget _shutter() {
+    IconData icon;
+    VoidCallback? onTap;
+    var active = false;
+    switch (c.mode) {
+      case CaptureMode.photo:
+        icon = PhosphorThin.camera;
+        onTap = () => c.capture();
+      case CaptureMode.video:
+        active = c.recordingVideo;
+        icon = c.recordingVideo ? PhosphorThin.stop : PhosphorThin.videoCamera;
+        onTap = c.cameraReady ? c.toggleVideoRecord : null;
+      case CaptureMode.audio:
+        active = c.listening;
+        icon = c.listening ? PhosphorThin.stop : PhosphorThin.microphone;
+        onTap = c.recordAvailable ? c.toggleAudioRecord : null;
+    }
+    final enabled = onTap != null;
+    final tint = active
+        ? OracleColors.vermilion
+        : enabled
+            ? OracleColors.paper
+            : Colors.white38;
+    return InkWell(
+      customBorder: const CircleBorder(),
+      onTap: onTap,
+      child: Container(
+        width: 70,
+        height: 70,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: active
+              ? OracleColors.vermilion.withValues(alpha: 0.22)
+              : Colors.white.withValues(alpha: 0.10),
+          border: Border.all(color: tint, width: 3),
+        ),
+        child: Icon(icon, size: 28, color: tint),
+      ),
+    );
+  }
+
+  // 큰 전송 버튼 — 코멘트 아래 가로 전체. 항상 노출(모드 무관).
+  Widget _bigSendButton() {
+    return InkWell(
+      onTap: c.submit,
+      borderRadius: BorderRadius.circular(11),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          color: OracleColors.vermilion,
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Center(
+          child: Text('전송  →',
+              style: OracleType.dateHeader
+                  .copyWith(fontSize: 16, color: OracleColors.paper)),
         ),
       ),
     );
@@ -193,26 +289,6 @@ class RecordTab extends StatelessWidget {
         minLines: 1,
         maxLines: 3,
         textInputAction: TextInputAction.newline,
-      ),
-    );
-  }
-
-  Widget _sendButton() {
-    return InkWell(
-      onTap: c.submit,
-      borderRadius: BorderRadius.circular(23),
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: const BoxDecoration(
-          color: OracleColors.vermilion,
-          shape: BoxShape.circle,
-        ),
-        child: Center(
-          child: Text('→',
-              style: OracleType.dateHeader
-                  .copyWith(fontSize: 19, color: OracleColors.paper)),
-        ),
       ),
     );
   }
@@ -425,60 +501,6 @@ class RecordTab extends StatelessWidget {
         height: 18,
         child: CircularProgressIndicator(
             strokeWidth: 1, color: OracleColors.faint),
-      ),
-    );
-  }
-}
-
-/// 가는 링 버튼 — 헤어라인 원 + Phosphor Thin 아이콘. 어두운 프리뷰 위라 흰색(onDark).
-class _RingButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool active;
-  final VoidCallback? onTap;
-  const _RingButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    final color = active
-        ? OracleColors.vermilion
-        : enabled
-            ? OracleColors.paper
-            : Colors.white38;
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.black.withValues(alpha: 0.18),
-                border: Border.all(
-                  color: active ? OracleColors.vermilion : Colors.white60,
-                  width: active ? 1.2 : 0.8,
-                ),
-              ),
-              child: Icon(icon, size: 24, color: color),
-            ),
-            const SizedBox(height: 6),
-            Text(label,
-                style: OracleType.label.copyWith(
-                    color:
-                        active ? OracleColors.vermilion : Colors.white70)),
-          ],
-        ),
       ),
     );
   }
