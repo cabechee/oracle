@@ -108,6 +108,11 @@ def places() -> Collection:
     return _conn().places
 
 
+def geocache() -> Collection:
+    """역지오코딩 캐시 — _id=반올림 좌표(~11m 격자), name=지역명. 같은 자리 반복 호출 절약."""
+    return _conn().geocache
+
+
 def parking() -> Collection:
     """주차 위치 — 차에서 내릴 때 GPS로 지정(좌표·시각). '내 차 어디?' 회상용."""
     return _conn().parking

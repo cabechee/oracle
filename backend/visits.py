@@ -62,7 +62,7 @@ def _place_name(v: Dict[str, Any]) -> str:
         return "작업실"
     if p:                       # 수집기가 장소 '이름'으로 보냄(차·집·단골카페 등)
         return str(p)
-    return v.get("label") or "어떤 곳"
+    return v.get("label") or v.get("area") or "어떤 곳"   # 라벨>역지오코딩 지역명>미지정
 
 
 def _live_name(v: Dict[str, Any]) -> Optional[str]:
@@ -82,9 +82,11 @@ def _live_name(v: Dict[str, Any]) -> Optional[str]:
     try:
         import places
         np = places.nearest(v.get("lat"), v.get("lng"), 150)
-        return np.get("name") if np else None
+        if np:
+            return np.get("name")
     except Exception:
-        return None
+        pass
+    return v.get("area")        # 등록 장소 못 찾으면 역지오코딩 지역명(없으면 None=미지정)
 
 
 def visits_for_day(target: date) -> List[Dict[str, Any]]:
@@ -127,6 +129,11 @@ def recent(limit: int = 100) -> List[Dict[str, Any]]:
 
 def day_lines(target: date) -> List[str]:
     """일기 프롬프트용 '오늘 다닌 곳' 문장 리스트."""
+    try:
+        import geocode
+        geocode.ensure_day(target)          # 미등록 방문에 지역명 채움(캐시·graceful)
+    except Exception:
+        pass
     out = []
     for v in visits_for_day(target):
         dur = v["minutes"]

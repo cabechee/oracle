@@ -116,6 +116,12 @@ MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
 MONGO_DB = os.getenv("MONGO_DB", "oracle")
 
 
+# ── 역지오코딩 (Kakao Local) ────────────────────────────────────
+# 좌표 → 한국 지명("서귀포시 성산읍" 등). 방문/동선에 '어떤 곳' 대신 지역명을 붙인다.
+# 카카오 디벨로퍼스 앱의 REST API 키. 비우면 geocode.reverse()가 None(기존 동작 유지).
+KAKAO_REST_KEY = os.getenv("KAKAO_REST_KEY", "")
+
+
 # ── 정본 Vault 경로 ─────────────────────────────────────────────
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _default_vault = os.path.join(_PROJECT_ROOT, "corpus")

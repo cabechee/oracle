@@ -96,6 +96,22 @@ def ep_tracks(date: Optional[str] = None, limit: int = 500):
     return {"items": tracks_mod.recent(limit)}
 
 
+@router.post("/geocode/backfill")
+def ep_geocode_backfill(date: Optional[str] = None, limit: int = 1000):
+    """미등록 방문 좌표 → 지역명 소급(역지오코딩). date 주면 그날만, 없으면 area 없는 것 전체.
+
+    여행 등 과거 '어떤 곳' 방문을 한 번에 지명으로 채울 때. 키 없으면 area=None로만 표시.
+    """
+    import geocode
+    if date:
+        try:
+            target = _date.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(400, "date must be YYYY-MM-DD")
+        return {"ok": True, **geocode.ensure_day(target)}
+    return {"ok": True, **geocode.backfill_visits(limit=limit)}
+
+
 class ParkIn(BaseModel):
     lat: float
     lng: float
