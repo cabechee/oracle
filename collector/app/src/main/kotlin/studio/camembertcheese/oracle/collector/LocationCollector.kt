@@ -26,6 +26,9 @@ object LocationCollector {
     private const val LEAVE_TICKS = 2        // 확신 이탈이 연속 이 틱 이상이어야 거점 이탈 확정(한 틱 튐 흡수)
     private const val MOVE_MPS = 2.5         // 이 속도(≈9km/h) 초과면 도보 아님(차·대중교통)
     private const val STAY_MINUTES = 15
+    // 정착(등록 WiFi 집)·Doze로 새 GPS fix가 안 잡힐 때, 알던 좌표로 이 간격마다 동선 1점 유지
+    // (동선이 통째로 비는 구멍 방지 — GPS 안 켜고 등록/거점 좌표 재사용이라 배터리 영향 거의 없음).
+    private const val TRACK_HEARTBEAT_MS = 5 * 60_000L
 
     // 재시작 직후 첫 틱은 현재 BT로 상태만 맞추고 이벤트 X(가짜 출차/주차 방지). 프로세스 생존 동안만.
     @Volatile private var carBaselined = false
@@ -52,6 +55,9 @@ object LocationCollector {
                 if (loc != null) {
                     Prefs.setAnchor(ctx, loc.latitude, loc.longitude, now)
                     track(ctx, loc.latitude, loc.longitude, loc.accuracy, moving = false)
+                } else {
+                    val pc = PlacesCache.coordsOf(places, btPlace!!)   // fix 실패 — 등록 좌표로 동선 유지
+                    if (pc != null) heartbeatTrack(ctx, pc.first, pc.second, now)
                 }
                 return
             }
@@ -272,13 +278,20 @@ object LocationCollector {
             val wifiPlace = if (ssid != null) PlacesCache.byWifi(places, ssid) else null
             if (wifiPlace != null) {
                 onPlaceImmediate(ctx, places, wifiPlace, now)
+                val pc = PlacesCache.coordsOf(places, wifiPlace)   // 등록 좌표로 동선 유지(GPS 미사용)
+                if (pc != null) heartbeatTrack(ctx, pc.first, pc.second, now)
                 return
             }
         }
 
         // 2) GPS — WiFi·BT로 확정 안 된 경우 **1분마다 항상** 확인(배터리는 WiFi/BT 매칭이 절약).
         val visitOn = Prefs.visitOn(ctx)
-        val loc = Geo.currentLocation(ctx) ?: return
+        val loc = Geo.currentLocation(ctx) ?: run {
+            // Doze 등으로 새 fix 실패 — 알던 거점(체류 평균)으로 동선 유지(구멍 방지).
+            val aLat = Prefs.anchorLat(ctx); val aLng = Prefs.anchorLng(ctx)
+            if (aLat != null && aLng != null) heartbeatTrack(ctx, aLat, aLng, now)
+            return
+        }
         val lat = loc.latitude
         val lng = loc.longitude
         val acc = if (loc.hasAccuracy()) loc.accuracy.toDouble() else 0.0
@@ -370,7 +383,16 @@ object LocationCollector {
 
     /// 원시 동선 점 1개 백엔드로(방문과 별개, 길 전체 보존). 실패는 조용히 무시.
     private fun track(ctx: Context, lat: Double, lng: Double, acc: Float, moving: Boolean) {
+        Prefs.setLastTrackAt(ctx, System.currentTimeMillis())   // 하트비트 간격 기준(실 fix·합성 공통)
         try { Backend.recordTrack(ctx, lat, lng, acc, moving) } catch (_: Exception) {}
+    }
+
+    /// 새 GPS fix 없이 '여기 있음' 유지 — 마지막 track 후 HEARTBEAT 지났을 때만, 알던 좌표(등록
+    /// 장소·거점 평균)로 정지점 1개. 정착(집 WiFi)·Doze 구간에 동선이 통째로 비는 걸 막는다.
+    private fun heartbeatTrack(ctx: Context, lat: Double, lng: Double, now: Long) {
+        if (lat == 0.0 && lng == 0.0) return
+        if (now - Prefs.lastTrackAt(ctx) < TRACK_HEARTBEAT_MS) return
+        track(ctx, lat, lng, 0f, moving = false)
     }
 
     /// WiFi로 확정된 장소 — 다른 곳서 왔으면 이전 체류를 여정에 기록 후 도착 말 걸기.

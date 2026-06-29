@@ -129,6 +129,11 @@ object Prefs {
     fun setLastCheckinHour(ctx: Context, v: Long) =
         sp(ctx).edit().putLong("last_checkin_hour", v).apply()
 
+    /// 마지막으로 동선 점(track)을 보낸 시각 — 정착·Doze로 새 fix 없을 때 하트비트 간격 판정용.
+    fun lastTrackAt(ctx: Context): Long = sp(ctx).getLong("last_track_at", 0L)
+    fun setLastTrackAt(ctx: Context, v: Long) =
+        sp(ctx).edit().putLong("last_track_at", v).apply()
+
     fun visitOn(ctx: Context): Boolean = sp(ctx).getBoolean(K_VISITON, false)
     fun setVisitOn(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean(K_VISITON, v).apply()
     fun visitPlace(ctx: Context): String = sp(ctx).getString(K_VPLACE, "") ?: ""
