@@ -566,10 +566,14 @@ def _speak_dest_change(old_dest: str, new_dest: str) -> Dict[str, Any]:
 
 
 def car_location_poll() -> Dict[str, Any]:
-    """운전 중 수집기가 10초마다 호출 — 차 GPS(메인 위치) + 네비 목적지 변경 감지.
+    """운전 중 수집기가 매 틱(위치 poll 간격, 기본 60초) 호출 — 차 GPS(메인 위치) + 내비 목적지.
 
-    좌표는 폰보다 정확한 차 GPS(자는 차면 None). 운전 중 목적지가 바뀌면 쿠키가 한마디(notify로
-    반환 → 수집기가 알림). 출차/주차(탈 때·내릴 때)는 베르, 도중 목적지 변경은 쿠키 담당.
+    좌표는 폰보다 정확한 차 GPS(자는 차면 None). 목적지는 두 갈래:
+    - **변경**(확립된 old ≠ new) → 쿠키가 한마디(notify → 수집기가 알림).
+    - **늦은 확립**(old 없음 + new 등장 — 출차/재확인 뒤에 내비를 찍은 경우) → 저장.
+      '어디 가?'가 미답으로 열려 있으면 베르가 '아, ○○ 가는구나'로 자문자답하며 질문 해소
+      (미답 스트릭에 안 태움), 그 외(배웅 모드·이미 답 받음)엔 조용히 저장만.
+    출차/주차(탈 때·내릴 때)는 베르, 도중 목적지 변경은 쿠키 담당.
     """
     import tesla
     # 수집기가 '운전 중'이라 판단했을 때만 불림 = 차 깨어 있음 — 목록 state(캐시 지연) 무시.
@@ -583,8 +587,8 @@ def car_location_poll() -> Dict[str, Any]:
         if drive.get("state") == "driving":
             new_dest = _dest_name(loc)
             old_dest = drive.get("destination")
-            # established 목적지가 바뀐 경우만 = 진짜 중간 변경(첫 목적지는 출차/재확인=베르 담당).
             if old_dest and new_dest and new_dest != old_dest:
+                # 확립된 목적지가 바뀜 = 진짜 중간 변경 — 쿠키가 한마디.
                 db.settings().update_one({"_id": "drive"},
                                          {"$set": {"destination": new_dest}}, upsert=True)
                 r = _speak_dest_change(old_dest, new_dest)
@@ -595,6 +599,34 @@ def car_location_poll() -> Dict[str, Any]:
                                    regen={"kind": "dest", "speaker": "cookie",
                                           "situation": f"아빠가 운전 중에 내비 목적지를 '{old_dest}'에서 '{new_dest}'로 바꿨어."})
                     out["notify"] = {"speaker": r.get("speaker"), "text": text}
+            elif new_dest and not old_dest:
+                # 늦은 확립 — 출차(0분)·재확인(3분) 모두 빈손이었다가 운전 중에 내비를 찍음.
+                # 여기서 저장 안 하면 영영 미확립(주차 때 '어디 도착했어?'로 떨어짐).
+                upd: Dict[str, Any] = {"destination": new_dest}
+                qts = drive.get("question_ts")
+                asked_open = (bool(drive.get("asked")) and isinstance(qts, datetime)
+                              and not _first_user_reply_after(qts))
+                if asked_open:
+                    upd["asked"] = False          # 내비로 답을 얻음 — 미답 스트릭에 안 태움
+                    upd["question_ts"] = None
+                db.settings().update_one({"_id": "drive"}, {"$set": upd}, upsert=True)
+                print(f"[car] 목적지 늦은 확립 → {new_dest!r} (열린 질문 해소={asked_open})",
+                      flush=True)
+                if asked_open:
+                    # 미답 질문이 떠 있던 참 — 스스로 알아낸 걸로 대화를 닫는다(추가 질문 X).
+                    situation = (f"아빠가 아까 차로 나설 때 어디 가냐고 물었는데 답이 없었어. "
+                                 f"방금 내비에 '{new_dest}'가 잡혔어 — '아, {new_dest} "
+                                 f"가는구나! 잘 다녀와요'처럼 스스로 알아낸 듯 가볍게 한마디 — "
+                                 f"짧게, 질문은 하지 마.")
+                    r = _speak("car", situation, "berr")
+                    text = (r.get("text") or "").strip()
+                    print(f"[car] 늦은 확립 멘트: {text!r}", flush=True)
+                    if text:
+                        _log_companion(r.get("speaker"), text,
+                                       trigger=f"{new_dest}로 가는 중",
+                                       regen={"kind": "car", "situation": situation,
+                                              "speaker": "berr"})
+                        out["notify"] = {"speaker": r.get("speaker"), "text": text}
     except Exception as e:
         print(f"[car] 목적지 변경 감지 실패: {e}", flush=True)
     return out

@@ -229,6 +229,76 @@ def test_parking_area_question_when_not_asked(monkeypatch):
     assert "성수동" in sit and "물어봐" in sit and "딱 한 가지만" in sit
 
 
+# ── 운전 중 poll: 목적지 변경(쿠키) + 늦은 확립(2026-07-02) ──
+def _patch_poll_tesla(monkeypatch, dest):
+    import tesla
+    monkeypatch.setattr(tesla, "location", lambda **k: {
+        "lat": 37.5, "lng": 127.0, "driving": True, "dest": dest,
+        "dest_lat": None, "dest_lng": None})
+
+
+def test_poll_late_establish_saves_quietly(monkeypatch):
+    # 출차·재확인 뒤 내비를 찍음 + 열린 질문 없음(배웅 모드 등) — 저장만, 발화 없음.
+    s = _FakeSettings([{"_id": "drive", "state": "driving"}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    _patch_poll_tesla(monkeypatch, "성수 카페")
+    calls = _capture_speak(monkeypatch)
+    r = companion.car_location_poll()
+    assert s.docs["drive"]["destination"] == "성수 카페"   # 주차 때 '잘 도착했어?' 연결
+    assert calls == [] and "notify" not in r               # 말수 아낌
+    assert r["dest"] == "성수 카페"
+
+
+def test_poll_late_establish_closes_open_question(monkeypatch):
+    # '어디 가?' 미답으로 열려 있던 중 내비 잡힘 — 저장 + 질문 해소(스트릭 안 태움) + 자문자답.
+    qts = datetime(2026, 7, 3, 9, 0)
+    s = _FakeSettings([{"_id": "drive", "state": "driving",
+                        "asked": True, "question_ts": qts}])
+    cv = _FakeConvos()                                     # 답 없음
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    _patch_poll_tesla(monkeypatch, "본가")
+    calls = _capture_speak(monkeypatch)
+    r = companion.car_location_poll()
+    d = s.docs["drive"]
+    assert d["destination"] == "본가"
+    assert d["asked"] is False and d["question_ts"] is None   # 미답 스트릭에 안 태움
+    assert calls[0]["speaker"] == "berr"
+    assert "가는구나" in calls[0]["situation"] and "질문은 하지 마" in calls[0]["situation"]
+    assert r["notify"]["text"] == "응 거기 어때?"
+    assert len(cv.docs) == 1                               # 흐름 저장
+
+
+def test_poll_late_establish_answered_stays_quiet(monkeypatch):
+    # 질문에 이미 답을 받은 운행 — 저장만 하고 침묵, asked는 유지(주차 때 스트릭 리셋용).
+    qts = datetime(2026, 7, 3, 9, 0)
+    s = _FakeSettings([{"_id": "drive", "state": "driving",
+                        "asked": True, "question_ts": qts}])
+    convos = _FakeConvos([{"role": "user", "text": "본가 가", "ts": qts + timedelta(minutes=1)}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: convos)
+    _patch_poll_tesla(monkeypatch, "본가")
+    calls = _capture_speak(monkeypatch)
+    companion.car_location_poll()
+    d = s.docs["drive"]
+    assert d["destination"] == "본가" and d["asked"] is True
+    assert calls == []                                     # 이미 답한 아빠한테 또 안 알림
+
+
+def test_poll_dest_change_speaks_cookie(monkeypatch):
+    # 확립된 목적지가 바뀜 — 기존 동작 회귀: 쿠키 한마디 + destination 갱신 + notify.
+    s = _FakeSettings([{"_id": "drive", "state": "driving", "destination": "회사"}])
+    cv = _FakeConvos()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    _patch_poll_tesla(monkeypatch, "본가")
+    calls = _capture_speak(monkeypatch)
+    r = companion.car_location_poll()
+    assert s.docs["drive"]["destination"] == "본가"
+    assert calls[0]["kind"] == "dest" and calls[0]["speaker"] == "cookie"
+    assert r["notify"]["text"] == "응 거기 어때?"
+
+
 # ── 테슬라 보강(Phase 1): 목적지·정밀위치·장소매칭 ──
 def test_departure_tesla_destination(monkeypatch):
     s = _FakeSettings()
