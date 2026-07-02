@@ -23,6 +23,77 @@ _ARRIVE = {"arrive_place", "arrive_home", "arrive_office"}   # 레거시 포함
 _LEAVE = {"leave_place", "leave_visit", "leave_home", "leave_office"}
 
 
+def _area_of(lat: Any, lng: Any) -> Optional[str]:
+    """좌표 → 지역명(Kakao 역지오코딩, geocache). '어디야?' 대신 '○○동 쪽이네' 할 재료.
+
+    키 없으면 DB도 안 건드리고 None — 미설정 환경에서 기존 발화 그대로.
+    """
+    try:
+        from config import KAKAO_REST_KEY
+        if not KAKAO_REST_KEY:
+            return None
+        import geocode
+        return geocode.reverse(lat, lng)
+    except Exception:
+        return None
+
+
+def _pending_area(now: Optional[datetime] = None) -> Optional[str]:
+    """askplace 직전 저장된 pending_place 좌표 → 지역명. 10분 넘게 묵으면 남의 방문 것 — 무시."""
+    now = now or datetime.now()
+    try:
+        from config import KAKAO_REST_KEY
+        if not KAKAO_REST_KEY:
+            return None
+        pp = db.settings().find_one({"_id": "pending_place"}) or {}
+        ts = pp.get("ts")
+        if not isinstance(ts, datetime) or (now - ts) > timedelta(minutes=10):
+            return None
+        return _area_of(pp.get("lat"), pp.get("lng"))
+    except Exception:
+        return None
+
+
+def _recent_visit_area(now: Optional[datetime] = None) -> Optional[str]:
+    """방금 끝난 미등록 방문의 좌표 → 지역명 — banter leave가 '어딘가' 대신 지명을 알게.
+
+    수집기는 이탈 확정 때 방문 구간을 먼저 기록하고 banter를 부른다(순서 보장) — 그 방금 것.
+    """
+    now = now or datetime.now()
+    try:
+        from config import KAKAO_REST_KEY
+        if not KAKAO_REST_KEY:
+            return None
+        v = db.visits().find_one(
+            {"$or": [{"place": None}, {"place": ""}],
+             "end": {"$gte": now - timedelta(minutes=20)}},
+            sort=[("end", -1)])
+        if not v:
+            return None
+        return _area_of(v.get("lat"), v.get("lng"))
+    except Exception:
+        return None
+
+
+def _recent_speech(hours: int = 36, limit: int = 5) -> str:
+    """최근 동반자 발화(선제·수다) 몇 줄 — '또 어디 가요?' 같은 재탕 방지용 프롬프트 재료."""
+    since = datetime.now() - timedelta(hours=hours)
+    try:
+        cur = (db.conversations()
+               .find({"companion": True, "ts": {"$gte": since}})
+               .sort("ts", -1).limit(limit))
+        lines = []
+        for d in cur:
+            ts = d.get("ts")
+            hm = ts.strftime("%m-%d %H:%M") if hasattr(ts, "strftime") else ""
+            txt = (d.get("text") or "").replace("\n", " ").strip()[:70]
+            if txt:
+                lines.append(f"- ({hm} {d.get('speaker', '')}) {txt}")
+        return "\n".join(reversed(lines))   # 시간순
+    except Exception:
+        return ""
+
+
 def _situation(event: str, place: Optional[str], minutes: Optional[int]) -> str:
     """이벤트 + 장소(이름/kind) → LLM에 줄 상황 한 줄. 저장된 곳이면 이름·설명을 녹인다."""
     info = None
@@ -49,9 +120,13 @@ def _situation(event: str, place: Optional[str], minutes: Optional[int]) -> str:
         s = ("아빠가 방금 차에서 내려 주차했어. 어디에 세웠는지·몇 층 몇 구역인지 사진이나 "
              "메모로 기록해두면 나중에 차 찾기 쉬우니, 기록해두겠냐고 가볍게 물어봐.")
     elif event == "askplace":
-        s = ("아빠가 저장 안 된 새로운 곳에 와서 15분 넘게 머무는 중이야. 여기가 어디인지·뭐 "
-             "하는 곳인지 가볍게 물어봐 — '아빠 왔다'처럼 반기지 말고(여긴 우리 집이 아니야), "
-             "자주 오는 곳이면 기억해둘 수 있게 호기심으로. 답해주면 그 장소를 저장해둘게.")
+        s = "아빠가 저장 안 된 새로운 곳에 와서 15분 넘게 머무는 중이야. "
+        area = _pending_area()
+        if area:
+            s += f"위치로 보면 '{area}' 근처라는 것까진 아는데, 뭐 하는 곳인지는 몰라. "
+        s += ("여기가 어디인지·뭐 하는 곳인지 가볍게 물어봐 — '아빠 왔다'처럼 반기지 말고"
+              "(여긴 우리 집이 아니야), 자주 오는 곳이면 기억해둘 수 있게 호기심으로. "
+              "답해주면 그 장소를 저장해둘게.")
     elif event == "checkin":
         s = "지금 아빠가 뭐 하고 있을까, 문득 궁금해졌어."
     else:
@@ -88,25 +163,32 @@ def _speak(kind: str, situation: str, speaker: Optional[str] = None,
         return {"speaker": name, "text": "", "alias": ""}
     # 실제 맥락(쌓인 신호·오늘 기록/방문·시간대) — 자연스러우면 하나만 슬쩍 녹이게.
     real_ctx = cc.gather_context(now)
+    recent = _recent_speech()   # 최근에 이미 건 말들 — 같은 표현 재탕 방지
     term = "오빠" if who == "cookie" else "아빠"   # 쿠키는 '오빠', 베르는 '아빠'로 부른다
     # 계기·맥락 텍스트는 '아빠'로 서술돼 있음 — 쿠키면 호칭 일관 치환(안 하면 '오빠, 아빠…' 섞임).
     if term != "아빠":
         situation = situation.replace("아빠", term)
         real_ctx = real_ctx.replace("아빠", term)
+        recent = recent.replace("아빠", term)
     ctx_block = (
         f"[요즘 상황 — 이 중 자연스러운 게 있으면 하나만 슬쩍 녹여도 좋아. 다 나열하지 말고, "
         f"억지로 엮지 말고, 없으면 그냥 가볍게. **단, 오늘 기록에 이미 한 일(예: 점심을 이미 "
         f"먹었으면)은 또 하라고 권하지 마 — 이미 한 걸 아니까.**]\n{real_ctx}\n\n" if real_ctx else "")
+    recent_block = (
+        f"[최근에 이미 건 말들 — 표현·패턴이 되풀이되지 않게, 이번엔 다른 결로]\n"
+        f"{recent}\n\n" if recent else "")
     prompt = (
         f"지금은 네가 **먼저** {term}에게 톡 말을 거는 상황이야. {term}가 너한테 무슨 말을 한 게 "
         f"아니라({term}는 아직 아무 말도 안 했어), {term} 생각이 나서 네가 문득 말 거는 거야.\n\n"
         f"[계기] {situation}\n\n"
         f"{ctx_block}"
+        f"{recent_block}"
         f"이 상황에 맞춰 {term}에게 짧게 말 걸어 — 한 문장, 길어도 두 문장. 자연스럽고 가볍게, "
-        f"부담 주지 말고. {tone} 인사·이름표 없이 그 한마디만. (사용자 호칭은 꼭 '{term}'.)")
+        f"부담 주지 말고. {tone} 인사·이름표 없이 그 한마디만. (사용자 호칭은 꼭 '{term}'.) "
+        f"네가 아는 건 계기·상황에 적힌 것뿐이야 — 본 것처럼 소리·옷차림·행동을 지어내지 마.")
     prompt += personas.feedback_block(comment)   # 재처리면 사용자 지적 반영
     try:
-        r = llm.call(alias, prompt, system=system)
+        r = llm.call_retry(alias, prompt, tries=2, system=system)   # 529류 일시 오류에 발화 유실 방지
         text = (r.get("text") or "").strip()
         if text and not force:
             cc.mark_spoken(kind, now)   # 텀/쿨다운 기준 시각 갱신 (재처리·빈 응답엔 안 함)
@@ -114,6 +196,19 @@ def _speak(kind: str, situation: str, speaker: Optional[str] = None,
     except Exception as e:
         print(f"[companion] _speak 실패: {e}", flush=True)
         return {"speaker": name, "text": "", "alias": alias}
+
+
+def _say_trigger(event: str, place: Optional[str]) -> str:
+    """say 발화의 흐름 캡션 — 무엇이 말을 걸게 했나(앱이 발화 위에 표시)."""
+    if event == "askplace":
+        return "새로운 곳"
+    if event == "park":
+        return "주차"
+    if event in _ARRIVE:
+        return f"{place} 도착" if place else "도착"
+    if event in _LEAVE:
+        return f"{place}에서 나섬" if place else "이동"
+    return ""
 
 
 def say(event: str, place: Optional[str] = None,
@@ -127,7 +222,16 @@ def say(event: str, place: Optional[str] = None,
     if not cc.event_enabled(event):
         return {"speaker": "", "text": "", "alias": "", "gated": True}
     ctx = _situation(event, place, minutes)
-    return _speak(cc.kind_of(event), ctx, speaker)
+    kind = cc.kind_of(event)
+    r = _speak(kind, ctx, speaker)
+    # 위치 발화(askplace·도착/나섬·주차)는 차 멘트처럼 흐름에도 자동 저장 — 알림을 놓쳐도
+    # 남고, 재처리(regen)도 가능. checkin은 잦아서 알림만(흐름 도배 방지).
+    if kind in ("location", "park") and (r.get("text") or "").strip():
+        _log_companion(r.get("speaker"), r.get("text"),
+                       trigger=_say_trigger(event, place),
+                       regen={"kind": kind, "situation": ctx,
+                              "speaker": _speaker_code(r.get("speaker"))})
+    return r
 
 
 # ── 차량 출차/주차 — 상태전이는 수집기가, 질문·운행 스레드는 여기서 ──────────
@@ -170,7 +274,9 @@ def _tesla_at_event() -> Optional[Dict[str, Any]]:
         import tesla
         if not tesla.is_authed() or not _tesla_budget_ok():
             return None
-        return tesla.snapshot()   # 자는 차는 안 깨움(snapshot 내부 가드)
+        # 출차/주차 순간은 차가 깨어 있는 게 확실(BT 연결 판정 직후)인데 차량 목록 state는
+        # 캐시가 늦어 asleep으로 나옴 → 사전 체크 생략(진짜 자면 408 → None, 안 깨움).
+        return tesla.snapshot(assume_awake=True)
     except Exception as e:
         print(f"[companion] tesla 조회 실패: {e}", flush=True)
         return None
@@ -274,7 +380,10 @@ def car_departure(lat: float, lng: float, ts: Any = None,
     내비 목적지 있으면 집/회사로 매칭해 '회사 가는구나'(질문 X). 목적지 없으면 **즉답 보류** →
     수집기가 car_dest_recheck_min(기본 3분) 뒤 recheck=True로 다시 부른다 → 그때도 없으면 '어디 가?'.
     (운전 시작 후 내비 찍는 경우를 잡으려고.) 테슬라 미연결/자는차면 graceful.
+    단, '어디 가?'에 연속 미답(unanswered_q≥2)이면 캐묻지 않고 가벼운 배웅만 — 질문 피로 방지.
     """
+    prev = db.settings().find_one({"_id": "drive"}) or {}
+    streak = int(prev.get("unanswered_q") or 0)   # 출발 질문 연속 미답 횟수(주차 때 갱신)
     tloc = _tesla_at_event()
     dest = _dest_name(tloc)
     if not recheck:
@@ -293,24 +402,34 @@ def car_departure(lat: float, lng: float, ts: Any = None,
             print("[car] 출차 — 목적지 미설정 → 즉답 보류, 수집기 재확인 대기", flush=True)
             return {"speaker": "", "text": "", "alias": "", "recheck": True}
 
+    asked = False   # 이번 멘트가 '답을 기다리는 질문'인가 — 주차 때 미답 스트릭 판정 기준
     if dest:
         situation = (f"아빠가 차 몰고 '{dest}' 쪽으로 가는 중이야(내비 목적지로 확인됨). 어디 "
                      f"가냐고 묻지 말고 '{dest} 가는구나' 하고 잘 다녀오라 가볍게 인사해 — 짧게.")
-    else:   # 재확인에도 목적지 없음 → 일정으로 짐작, 없으면 '어디 가?'
+    else:   # 재확인에도 목적지 없음 → 일정으로 짐작 → 미답 스트릭 보고 질문/배웅 → '어디 가?'
         ev = _imminent_event()
         if ev:
             situation = (f"아빠가 차를 몰고 어디론가 가는 중이야. 내비 목적지는 안 잡혔는데, 캘린더 "
                          f"보니 곧 '{ev}' 일정이 있어. 혹시 거기 가는 거냐고 가볍게 물어봐 — "
                          f"'{ev} 가?' 정도로 아주 짧게(단정 말고 추측으로).")
+            asked = True
+        elif streak >= 2:
+            # 질문 피로 가드 — 요 며칠 '어디 가?'에 답이 없었으면 또 캐묻지 않는다(답 오면 리셋).
+            situation = ("아빠가 차를 몰고 어디론가 나섰어. 요즘 출발할 때 어디 가냐고 물어도 답이 "
+                         "잘 없었으니 이번엔 묻지 말고, '조심히 다녀와요' 같은 가벼운 배웅 "
+                         "한마디만 — 짧게.")
         else:
             situation = ("아빠가 차를 몰고 어디론가 가는 중이야. 어디 가는지 궁금해서 가볍게 물어봐 "
                          "— '어디 가?' 정도로 아주 짧게.")
+            asked = True
     r = _speak("car", situation, "berr")      # 출차(차 탈 때)는 베르 담당
-    upd: Dict[str, Any] = {"state": "driving"}
+    upd: Dict[str, Any] = {"state": "driving", "asked": False}
     if dest:
         upd["destination"] = dest             # 주차 때 '여기 잘 도착했어?' 매칭 + 목적지 변경 기준
     if (r.get("text") or "").strip():
-        upd["question_ts"] = datetime.now()
+        if asked:                             # 질문일 때만 — 주차 때 답 매칭·미답 스트릭 기준
+            upd["question_ts"] = datetime.now()
+            upd["asked"] = True
         _log_companion(r.get("speaker"), r.get("text"),
                        trigger=(f"{dest}로 출발" if dest else "차로 출발"),
                        regen={"kind": "car", "situation": situation, "speaker": "berr"})
@@ -376,28 +495,60 @@ def car_parking(lat: float, lng: float, ts: Any = None,
     print(f"[car] 주차{'(안전망 silent)' if silent else ''} — tesla shift={(tloc or {}).get('shift')} "
           f"장소={here!r} 기록좌표=({plat},{plng}) phone=({lat},{lng})", flush=True)
     drive = db.settings().find_one({"_id": "drive"}) or {}
+    # 출발 질문 미답 스트릭 — 물었는데(asked) 답 없으면 +1, 답 오면 리셋(다음 출발의 배웅 판단).
+    qts = drive.get("question_ts")
+    asked = bool(drive.get("asked", isinstance(qts, datetime)))   # 구버전 doc은 qts로 판정
+    reply = (_first_user_reply_after(qts)
+             if (asked and isinstance(qts, datetime)) else None)
+    streak = int(drive.get("unanswered_q") or 0)
+    if asked and isinstance(qts, datetime):
+        streak = 0 if reply else streak + 1
     db.settings().update_one(
         {"_id": "drive"},
-        {"$set": {"state": "parked", "question_ts": None, "destination": None}},
+        {"$set": {"state": "parked", "question_ts": None, "destination": None,
+                  "asked": False, "unanswered_q": streak}},
         upsert=True)
     if silent:
         print("[car] 주차 — 안전망 조용히 리셋(말 X)", flush=True)
         return {"speaker": "", "text": "", "alias": ""}
     dest = drive.get("destination")               # 출발 때 테슬라가 준 목적지
     if not dest:
-        qts = drive.get("question_ts")
-        if isinstance(qts, datetime):
-            dest = _first_user_reply_after(qts)   # 아빠가 답한 목적지
-    print(f"[car] 주차 — 도착지매칭 here={here!r} 출발목적지 dest={dest!r}", flush=True)
+        dest = reply                              # 아빠가 '어디 가?'에 답한 목적지
+    # 운행 시간 힌트 — '잠깐 다녀왔네' vs '오래 걸렸네' 뉘앙스 재료.
+    dur_txt = ""
+    dep = drive.get("departed_at")
+    if isinstance(dep, datetime):
+        m = int((datetime.now() - dep).total_seconds() // 60)
+        if 1 <= m <= 720:
+            dur_txt = f" (약 {m}분 몰았어.)"
+    area = None if here else _area_of(plat, plng)   # 미등록 곳 — 지역명으로 아는 척(키 없으면 None)
+    unanswered = asked and isinstance(qts, datetime) and not reply
+    print(f"[car] 주차 — 도착지매칭 here={here!r} 출발목적지 dest={dest!r} area={area!r} "
+          f"미답={unanswered} streak={streak}", flush=True)
     if here:
-        situation = (f"아빠가 방금 '{here}'에 도착해서 차를 세웠어. '{here} 왔구나'처럼 가볍게 "
-                     f"맞이해 — 짧게.")
+        situation = (f"아빠가 방금 '{here}'에 도착해서 차를 세웠어.{dur_txt} '{here} 왔구나'처럼 "
+                     f"가볍게 맞이해 — 짧게.")
     elif dest:
-        situation = (f"아빠가 출발할 때 '{dest}' 간다고 했었어. 이제 도착해서 차를 세웠어. "
+        situation = (f"아빠가 출발할 때 '{dest}' 간다고 했었어. 이제 도착해서 차를 세웠어.{dur_txt} "
                      f"'{dest} 잘 도착했어?' 하고 가볍게 안부 물어봐 — 짧게.")
+    elif unanswered:
+        # 출발 때 물었는데 답이 없었다 — 또 캐물으면 보채는 느낌. 아는 척/배려만, 질문 금지.
+        if area:
+            situation = (f"아빠가 방금 '{area}' 근처에 차를 세웠어.{dur_txt} 출발할 때 어디 가냐고 "
+                         f"물었는데 답이 없었으니 또 캐묻진 말고 — '{area} 쪽에 왔구나' 하고 "
+                         f"가볍게 아는 척만 해. 차 세운 위치는 네가 기억해뒀다고 살짝 안심시켜도 "
+                         f"좋아. 짧게.")
+        else:
+            situation = (f"아빠가 방금 차를 세웠어(도착·주차).{dur_txt} 출발할 때 어디 가냐고 "
+                         f"물었는데 답이 없었으니 또 묻진 말고, 잘 도착했길 바라는 가벼운 "
+                         f"한마디만 — 차 세운 위치는 네가 기억해뒀다고 살짝. 짧게.")
+    elif area:
+        situation = (f"아빠가 방금 '{area}' 근처에 차를 세웠어(저장 안 된 곳).{dur_txt} "
+                     f"'{area} 왔구나' 하고 가볍게 아는 척하면서, 뭐 하러 왔는지 딱 한 가지만 "
+                     f"살짝 물어봐 — 짧게.")
     else:
-        situation = ("아빠가 방금 차를 세웠어(도착·주차). 어디 도착했는지·어디 세웠는지 가볍게 "
-                     "물어봐 — 짧게, 나중에 차 둔 데 기억하게.")
+        situation = (f"아빠가 방금 차를 세웠어(도착·주차).{dur_txt} 어디 도착했는지 딱 한 가지만 "
+                     f"가볍게 물어봐 — 짧게, 나중에 차 둔 데 기억하게.")
     r = _speak("car", situation, "berr")      # 주차(차에서 내릴 때)는 베르 담당
     if (r.get("text") or "").strip():
         _log_companion(r.get("speaker"), r.get("text"),
@@ -421,7 +572,8 @@ def car_location_poll() -> Dict[str, Any]:
     반환 → 수집기가 알림). 출차/주차(탈 때·내릴 때)는 베르, 도중 목적지 변경은 쿠키 담당.
     """
     import tesla
-    loc = tesla.location()
+    # 수집기가 '운전 중'이라 판단했을 때만 불림 = 차 깨어 있음 — 목록 state(캐시 지연) 무시.
+    loc = tesla.location(assume_awake=True)
     if not loc or loc.get("lat") is None or loc.get("lng") is None:
         return {"lat": None, "lng": None}
     out: Dict[str, Any] = {"lat": loc["lat"], "lng": loc["lng"],
@@ -457,10 +609,12 @@ _NAME = {"berr": "베르", "cookie": "쿠키"}
 
 def _banter_scene(event: str, info: Optional[Dict[str, Any]],
                   moving: Optional[bool] = None,
-                  hint: Optional[str] = None) -> Tuple[str, Optional[str]]:
+                  hint: Optional[str] = None,
+                  area: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """이동/도착 이벤트 → 둘이 나눌 수다의 '장면' 한 줄 + (도착 시) 맞이할 주인 캐릭터.
 
-    moving=도보아님(차/대중교통) 여부, hint=곧 있는 일정(행선지 추측). leave에만 반영.
+    moving=도보아님(차/대중교통) 여부, hint=곧 있는 일정(행선지 추측),
+    area=미등록 곳의 역지오코딩 지역명('어딘가' 대신). leave에만 반영.
     """
     name = info.get("name") if info else None
     if event == "arrive":
@@ -479,7 +633,8 @@ def _banter_scene(event: str, info: Optional[Dict[str, Any]],
     if event == "board":
         return ("아빠가 방금 차에 탔어. 어디 가려나·혹시 우리 보러 오나, "
                 "둘이 도란도란 궁금해하며 주고받아."), None
-    where = f"'{name}'에서" if name else "어딘가에서"   # leave
+    # leave — 등록 장소면 이름, 아니면 지역명(역지오코딩), 그도 없으면 '어딘가'.
+    where = f"'{name}'에서" if name else (f"'{area}' 근처에서" if area else "어딘가에서")
     move_txt = " 차나 대중교통을 타고" if moving else ""
     if hint:
         return (f"아빠가 방금 {where} 나서{move_txt} 어디론가 움직이기 시작했어. "
@@ -575,7 +730,9 @@ def banter(event: str, place: Optional[str] = None,
         except Exception:
             info = None
     leave_hint = _imminent_event() if event == "leave" else None
-    scene, resident = _banter_scene(event, info, moving, leave_hint)
+    # 미등록 곳에서 나섬 — 방금 기록된 방문 좌표를 지역명으로('어딘가' 대신 '○○동 근처').
+    area = _recent_visit_area(now) if (event == "leave" and not info) else None
+    scene, resident = _banter_scene(event, info, moving, leave_hint, area)
     if minutes:
         scene += f" (아빠는 거기 약 {minutes}분 있었어)"
     scene_for_regen = scene   # 재처리(_speak)는 호칭을 스스로 치환 → '아빠' 유지본 보관
@@ -589,18 +746,25 @@ def banter(event: str, place: Optional[str] = None,
         "쿠키(cookie)는 오목눈이 새 — 발랄하고 장난스러운 편. 지금은 그분한테 직접 "
         "거는 게 아니라, 너희 둘이 서로 도란도란 짧게 주고받는 대화야.\n"
         "★호칭: 그분을 **베르는 '아빠', 쿠키는 '오빠'**라고 부른다 — 절대 섞지 마"
-        "(쿠키 대사에 '아빠'가 나오면 틀린 거야).\n\n"
+        "(쿠키 대사에 '아빠'가 나오면 틀린 거야).\n"
+        "★너희가 아는 건 [지금 상황]에 적힌 것뿐 — 직접 본 것처럼 옷·신발·소리·행동 같은 "
+        "디테일을 지어내지 마.\n\n"
         f"[베르]\n{personas.current('berr_identity')}\n\n"
         f"[쿠키]\n{personas.current('cookie_identity')}")
+    recent = _recent_speech()
+    recent_block = (
+        f"[최근에 너희가 이미 나눈 말들 — 같은 레퍼토리('어디 가시지?', '몰라~')를 "
+        f"되풀이하지 말고 이번엔 다른 결로]\n{recent}\n\n" if recent else "")
     prompt = (
         f"[지금 상황] {scene}\n\n"
+        f"{recent_block}"
         "이 상황에 맞춰 베르와 쿠키가 **서로** 주고받는 짧은 대화를 써. "
         "2~3턴(한 사람당 한두 마디), 각 줄은 아주 짧게 구어체로. 그분한테 거는 게 "
         "아니라 둘이 얘기하는 거야. **상황 속 '그분'을 베르는 '아빠', 쿠키는 '오빠'로 부른다 — "
         "섞지 마.** 인사·이름표 없이 말만. "
         '결과는 JSON 배열만: [{"who":"berr","text":"..."},{"who":"cookie","text":"..."}]')
     try:
-        r = llm.call(alias, prompt, system=system)
+        r = llm.call_retry(alias, prompt, tries=2, system=system)
         turns = _parse_banter(r.get("text") or "")
     except Exception as e:
         print(f"[companion] banter 실패: {e}", flush=True)

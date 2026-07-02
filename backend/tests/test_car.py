@@ -11,10 +11,11 @@ from agent import companion
 
 @pytest.fixture(autouse=True)
 def _default_no_tesla(monkeypatch):
-    """기본: 테슬라 비활성 + 장소매칭 None — 테스트가 실 API/Mongo를 안 때리게.
+    """기본: 테슬라 비활성 + 장소매칭·지역명 None — 테스트가 실 API/Mongo를 안 때리게.
     (보강 테스트는 각자 override)."""
     monkeypatch.setattr(companion, "_tesla_at_event", lambda: None)
     monkeypatch.setattr(companion.places_mod, "nearest", lambda *a, **k: None)
+    monkeypatch.setattr(companion, "_area_of", lambda *a, **k: None)   # 역지오코딩 격리
     monkeypatch.setattr(companion.db, "conversations", lambda: _FakeConvos())  # 흐름 저장 흡수
 
 
@@ -146,6 +147,86 @@ def test_parking_silent_no_question(monkeypatch):
     assert r["text"] == ""
     assert recorded == [(37.49, 127.03)]              # 위치는 남김(내 차 어디)
     assert s.docs["drive"]["state"] == "parked"
+
+
+# ── 질문 피로 가드(2026-07-02): 미답 스트릭 → 배웅 / 주차 재질문 금지 ──
+def test_parking_unanswered_increments_streak_and_acks_area(monkeypatch):
+    # 출발 때 물었는데 답 없음 → 스트릭 +1, 주차 멘트는 재질문 대신 지역명 아는 척.
+    qts = datetime(2026, 7, 2, 12, 42)
+    s = _FakeSettings([{"_id": "drive", "state": "driving", "question_ts": qts,
+                        "asked": True, "unanswered_q": 0,
+                        "departed_at": qts - timedelta(minutes=4)}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: _FakeConvos())  # 답 없음
+    monkeypatch.setattr(companion, "_area_of", lambda *a, **k: "중곡동")
+    import parking
+    monkeypatch.setattr(parking, "record", lambda *a, **k: None)
+    calls = _capture_speak(monkeypatch)
+    companion.car_parking(37.56, 127.07)
+    sit = calls[0]["situation"]
+    assert "중곡동" in sit and "묻진 말고" in sit          # 재질문 금지 + 아는 척
+    assert "물어봐" not in sit
+    assert s.docs["drive"]["unanswered_q"] == 1            # 스트릭 누적
+    assert s.docs["drive"]["asked"] is False
+
+
+def test_parking_reply_resets_streak(monkeypatch):
+    # 답이 왔으면 스트릭 리셋(0) + '잘 도착했어?' 연결은 기존대로.
+    qts = datetime(2026, 7, 2, 12, 42)
+    s = _FakeSettings([{"_id": "drive", "state": "driving", "question_ts": qts,
+                        "asked": True, "unanswered_q": 2}])
+    convos = _FakeConvos([{"role": "user", "text": "성수 가", "ts": qts + timedelta(minutes=2)}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: convos)
+    import parking
+    monkeypatch.setattr(parking, "record", lambda *a, **k: None)
+    calls = _capture_speak(monkeypatch)
+    companion.car_parking(37.54, 127.05)
+    assert "성수 가" in calls[0]["situation"] and "잘 도착" in calls[0]["situation"]
+    assert s.docs["drive"]["unanswered_q"] == 0
+
+
+def test_departure_sendoff_after_streak(monkeypatch):
+    # 연속 미답 2회↑ — '어디 가?' 대신 배웅만, question_ts도 안 세움(질문이 아니니까).
+    s = _FakeSettings([{"_id": "drive", "state": "driving", "unanswered_q": 2,
+                        "departed_at": datetime(2026, 7, 2, 10, 0)}])
+    cv = _FakeConvos()
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: cv)
+    monkeypatch.setattr(companion, "_imminent_event", lambda *a, **k: None)
+    calls = _capture_speak(monkeypatch)
+    r = companion.car_departure(37.5, 127.0, recheck=True)
+    assert "배웅" in calls[0]["situation"] and "묻지 말고" in calls[0]["situation"]
+    assert r["text"] == "응 거기 어때?"
+    assert "question_ts" not in s.docs["drive"]
+    assert s.docs["drive"]["asked"] is False
+    assert len(cv.docs) == 1                               # 흐름엔 남김
+
+
+def test_departure_hint_beats_streak(monkeypatch):
+    # 미답 스트릭이 쌓여도 캘린더 힌트가 있으면 '거기 가?' 추측 질문은 한다(가치 있는 질문).
+    s = _FakeSettings([{"_id": "drive", "state": "driving", "unanswered_q": 3}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: _FakeConvos())
+    monkeypatch.setattr(companion, "_imminent_event", lambda *a, **k: "강남(치과)")
+    calls = _capture_speak(monkeypatch)
+    companion.car_departure(37.5, 127.0, recheck=True)
+    assert "강남(치과)" in calls[0]["situation"]
+    assert isinstance(s.docs["drive"]["question_ts"], datetime)   # 질문이니 매칭 기준 세움
+
+
+def test_parking_area_question_when_not_asked(monkeypatch):
+    # 출발 때 안 물었으면(배웅 모드 등) 주차 때 지역명 아는 척 + 한 가지만 질문.
+    s = _FakeSettings([{"_id": "drive", "state": "driving", "asked": False}])
+    monkeypatch.setattr(companion.db, "settings", lambda: s)
+    monkeypatch.setattr(companion.db, "conversations", lambda: _FakeConvos())
+    monkeypatch.setattr(companion, "_area_of", lambda *a, **k: "성수동")
+    import parking
+    monkeypatch.setattr(parking, "record", lambda *a, **k: None)
+    calls = _capture_speak(monkeypatch)
+    companion.car_parking(37.54, 127.05)
+    sit = calls[0]["situation"]
+    assert "성수동" in sit and "물어봐" in sit and "딱 한 가지만" in sit
 
 
 # ── 테슬라 보강(Phase 1): 목적지·정밀위치·장소매칭 ──
