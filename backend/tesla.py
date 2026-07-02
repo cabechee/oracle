@@ -132,18 +132,22 @@ def vehicle_data(vin: str,
     return (d or {}).get("response")
 
 
-def location(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def location(vin: Optional[str] = None,
+             assume_awake: bool = False) -> Optional[Dict[str, Any]]:
     """현재 위치·운행·목적지 요약 — 차 상태머신 보강용(이벤트 시점 호출).
 
-    ⚠️ **자는 차는 안 깨운다**(state!=online이면 None) — wake가 제일 비싸서. 운전 중 차는
-    online이라 출차/주차 순간엔 그대로 읽힌다. 내비 켜져 있으면 목적지(dest_*)도 채워짐.
+    ⚠️ **자는 차는 안 깨운다**(state!=online이면 None) — wake가 제일 비싸서. 내비 켜져
+    있으면 목적지(dest_*)도 채워짐.
+    ⚠️ 차량 목록의 state는 **캐시가 늦어** 운전 중에도 asleep으로 나올 수 있다 — 출차/주차/
+    운전폴링처럼 차가 깨어 있는 게 확실한 시점엔 assume_awake=True로 사전 체크를 생략
+    (진짜 자면 vehicle_data가 408 → None일 뿐, wake 명령이 아니라 차를 깨우진 않는다).
     반환: {vin,lat,lng,shift,speed,driving,dest,dest_lat,dest_lng,eta_min,ts} 또는 None.
     """
     vs = vehicles()
     if not vs:
         return None
     v = next((x for x in vs if x.get("vin") == vin), vs[0]) if vin else vs[0]
-    if v.get("state") != "online":
+    if v.get("state") != "online" and not assume_awake:
         return None   # asleep/offline — 깨우지 않음(비용·배터리)
     data = vehicle_data(v.get("vin"))
     if not data:
@@ -188,17 +192,19 @@ def charge(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
     }
 
 
-def snapshot(vin: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def snapshot(vin: Optional[str] = None,
+             assume_awake: bool = False) -> Optional[Dict[str, Any]]:
     """차 전체 스냅샷 — 배터리·충전·공조·주행거리계·위치를 한 번에 정규화(마일→km).
 
     수집(car_snapshots)·활용용. 자는 차는 안 깨움(None). 이벤트(출차/주차/충전) 시점 호출.
     location() 호환 필드(lat/lng/shift/dest*/eta)도 포함 — 상태머신이 그대로 쓴다.
+    assume_awake=True면 목록 state(캐시 지연) 사전 체크 생략 — location() 참조.
     """
     vs = vehicles()
     if not vs:
         return None
     v = next((x for x in vs if x.get("vin") == vin), vs[0]) if vin else vs[0]
-    if v.get("state") != "online":
+    if v.get("state") != "online" and not assume_awake:
         return None   # asleep/offline — 안 깨움
     data = vehicle_data(v.get("vin"), _FULL_ENDPOINTS)
     if not data:

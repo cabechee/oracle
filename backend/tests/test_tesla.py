@@ -122,3 +122,23 @@ def test_location_asleep_no_wake(monkeypatch):
 def test_location_no_vehicle(monkeypatch):
     monkeypatch.setattr(tesla, "vehicles", lambda: [])
     assert tesla.location() is None
+
+
+def test_location_assume_awake_skips_stale_state(monkeypatch):
+    # 차량 목록 state는 캐시가 늦어 운전 중에도 asleep — 출차/주차/폴링 시점엔
+    # assume_awake=True로 사전 체크를 생략하고 vehicle_data 직행(진짜 자면 408→None).
+    monkeypatch.setattr(tesla, "vehicles", lambda: [{"vin": "V", "state": "asleep"}])
+    monkeypatch.setattr(tesla, "vehicle_data", lambda vin: {
+        "drive_state": {"latitude": 37.5, "longitude": 127.0, "shift_state": "D"}})
+    loc = tesla.location(assume_awake=True)
+    assert loc["shift"] == "D" and loc["driving"] is True
+
+
+def test_snapshot_assume_awake_skips_stale_state(monkeypatch):
+    monkeypatch.setattr(tesla, "vehicles", lambda: [{"vin": "V", "state": "asleep"}])
+    monkeypatch.setattr(tesla, "vehicle_data", lambda vin, endpoints=None: {
+        "drive_state": {"latitude": 37.5, "longitude": 127.0, "shift_state": "P"},
+        "charge_state": {"battery_level": 71}})
+    assert tesla.snapshot() is None                      # 기본은 기존대로 안 깨움
+    snap = tesla.snapshot(assume_awake=True)
+    assert snap["battery"] == 71 and snap["lat"] == 37.5
